@@ -2,6 +2,7 @@ package com.funny.submaker.feature.asr
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
@@ -12,6 +13,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.funny.submaker.core.subtitle.SrtWriter
+import com.funny.submaker.core.subtitle.VttWriter
+import com.funny.submaker.core.ui.rememberExportTextFileAction
+import com.funny.submaker.core.ui.rememberPickSingleFileAction
+import com.funny.submaker.core.utils.FileSize
 
 @Composable
 fun AsrScreen(
@@ -38,6 +44,46 @@ fun AsrScreen(
                 modifier = Modifier.padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
+                val pickMedia = rememberPickSingleFileAction(
+                    mimeTypes = arrayOf("video/*", "audio/*"),
+                    onPicked = vm::onMediaPicked,
+                )
+                val exportSrt = rememberExportTextFileAction(
+                    mimeType = "text/plain",
+                    fileName = { vm.suggestedExportFileName("srt") },
+                    onExported = { vm.lastResult = "SRT 导出成功：${vm.suggestedExportFileName("srt")}" },
+                    onFailed = { vm.errorMessage = it.message ?: "SRT 导出失败" },
+                )
+                val exportVtt = rememberExportTextFileAction(
+                    mimeType = "text/vtt",
+                    fileName = { vm.suggestedExportFileName("vtt") },
+                    onExported = { vm.lastResult = "VTT 导出成功：${vm.suggestedExportFileName("vtt")}" },
+                    onFailed = { vm.errorMessage = it.message ?: "VTT 导出失败" },
+                )
+
+                Button(
+                    onClick = pickMedia,
+                    enabled = !vm.running,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(if (vm.mediaUri == null) "导入媒体文件" else "重新选择媒体")
+                }
+
+                val fileName = vm.mediaName
+                val fileSize = vm.mediaSizeBytes
+                val fileMime = vm.mediaMimeType
+                if (fileName != null || fileSize != null || fileMime != null) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        InfoRow(label = "文件", value = fileName ?: "（未知）")
+                        if (fileSize != null) {
+                            InfoRow(label = "大小", value = FileSize.fromBytes(fileSize).toString())
+                        }
+                        if (fileMime != null) {
+                            InfoRow(label = "MIME", value = fileMime)
+                        }
+                    }
+                }
+
                 OutlinedTextField(
                     value = vm.apiBaseUrl,
                     onValueChange = {
@@ -66,6 +112,26 @@ fun AsrScreen(
                     Text(if (vm.running) "处理中…" else "开始识别（占位）")
                 }
 
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Button(
+                        onClick = { exportSrt(SrtWriter.write(vm.segments)) },
+                        enabled = vm.segments.isNotEmpty() && !vm.running,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text("导出 SRT")
+                    }
+                    Button(
+                        onClick = { exportVtt(VttWriter.write(vm.segments)) },
+                        enabled = vm.segments.isNotEmpty() && !vm.running,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text("导出 VTT")
+                    }
+                }
+
                 val result = vm.lastResult
                 if (result != null) {
                     Text(result, style = MaterialTheme.typography.bodyMedium)
@@ -84,3 +150,20 @@ fun AsrScreen(
     }
 }
 
+@Composable
+private fun InfoRow(
+    label: String,
+    value: String,
+) {
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(
+            text = "$label：",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium,
+        )
+    }
+}

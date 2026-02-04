@@ -9,7 +9,7 @@ kotlin {
             implementation(libs.compose.runtime)
             implementation(libs.compose.ui)
             implementation(libs.kotlinx.coroutines.core)
-            implementation(libs.eygraber.uri.kmp)
+            api(libs.eygraber.uri.kmp)
             implementation(libs.vinceglb.filekit.dialogs)
         }
         androidMain.dependencies {

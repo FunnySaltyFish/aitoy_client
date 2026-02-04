@@ -57,7 +57,7 @@ fun App() {
                     RootScreen.Asr -> AsrScreen(
                         vm = asrVm,
                         onStart = {
-                            asrVm.lastResult = "这里会接入云端 ASR：导入媒体 → 上传/直连 → 获取时间轴 → 导出 SRT/VTT/ASS"
+                            asrVm.mockRunAsr()
                         },
                     )
 
