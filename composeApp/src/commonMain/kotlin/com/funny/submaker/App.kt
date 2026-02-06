@@ -20,12 +20,14 @@ import com.funny.submaker.feature.asr.AsrScreen
 import com.funny.submaker.feature.asr.AsrViewModel
 import com.funny.submaker.feature.auth.AuthScreen
 import com.funny.submaker.feature.auth.AuthViewModel
+import com.funny.submaker.core.prefs.SubMakerPrefsInit
 import com.funny.submaker.ui.theme.SubMakerTheme
 
 @Composable
 @Preview
 fun App() {
     SubMakerTheme {
+        remember { SubMakerPrefsInit.init() }
         val asrVm = remember { AsrViewModel() }
         val authVm = remember { AuthViewModel() }
 
@@ -57,22 +59,12 @@ fun App() {
                     RootScreen.Asr -> AsrScreen(
                         vm = asrVm,
                         onStart = {
-                            asrVm.mockRunAsr()
+                            asrVm.startMockAsr()
                         },
                     )
 
                     RootScreen.Auth -> AuthScreen(
                         vm = authVm,
-                        onSendCode = {
-                            authVm.sending = true
-                            authVm.errorMessage = "MVP：稍后接入服务端发送验证码接口"
-                            authVm.sending = false
-                        },
-                        onLogin = {
-                            authVm.loggingIn = true
-                            authVm.errorMessage = "MVP：稍后接入服务端登录接口"
-                            authVm.loggingIn = false
-                        },
                     )
                 }
             }

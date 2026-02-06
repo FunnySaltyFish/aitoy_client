@@ -1,5 +1,9 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.io.BufferedReader
+import java.io.FileInputStream
+import java.io.InputStreamReader
+import java.util.Properties
 
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
@@ -59,16 +63,62 @@ android {
         versionCode = 1
         versionName = "1.0"
     }
+
+    signingConfigs {
+        val propFile = File("signing.properties")
+        if (propFile.exists()) {
+            create("release") {
+                // 如果需要打 release 包，请在项目根目录下自行添加此文件
+                /**
+                 *  STORE_FILE=yourAppStroe.keystore
+                 *  STORE_PASSWORD=yourStorePwd
+                 *  KEY_ALIAS=yourKeyAlias
+                 *  KEY_PASSWORD=yourAliasPwd
+                 */
+                val props = Properties()
+                val reader =
+                    BufferedReader(InputStreamReader(FileInputStream(propFile), "utf-8"))
+                props.load(reader)
+
+                storeFile = file(props["STORE_FILE"] as String)
+                storePassword = props["STORE_PASSWORD"] as String
+                keyAlias = props["KEY_ALIAS"] as String
+                keyPassword = props["KEY_PASSWORD"] as String
+
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
+            }
+        }
+
+    }
+
+    buildTypes {
+        val usedSigningConfig = kotlin.runCatching { signingConfigs.getByName("release") }
+            .getOrDefault(signingConfigs.getByName("debug"))
+        getByName("release") {
+            // 临时可调试
+            isDebuggable = false
+            // 开启代码混淆
+            isMinifyEnabled = true
+            // 移除无用的 resource 文件
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            signingConfig = usedSigningConfig
+        }
+        getByName("debug") {
+            applicationIdSuffix = ".debug"
+            isMinifyEnabled = false
+            signingConfig = usedSigningConfig
+        }
+    }
+
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
-    buildTypes {
-        getByName("release") {
-            isMinifyEnabled = false
-        }
-    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11

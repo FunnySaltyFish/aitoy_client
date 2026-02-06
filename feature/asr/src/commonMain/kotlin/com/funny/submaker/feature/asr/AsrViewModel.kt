@@ -8,10 +8,20 @@ import com.eygraber.uri.Uri
 import com.funny.submaker.core.kmp.displayName
 import com.funny.submaker.core.kmp.mimeType
 import com.funny.submaker.core.kmp.sizeBytes
+import com.funny.submaker.core.prefs.SubMakerPrefs
 import com.funny.submaker.core.subtitle.SubtitleSegment
 import com.funny.submaker.core.utils.nowMs
+import com.funny.submaker.network.api.ApiException
+import com.funny.submaker.network.api.SubMakerApi
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 
 class AsrViewModel : ViewModel() {
+    private val vmScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
     var apiBaseUrl by mutableStateOf("")
     var apiKey by mutableStateOf("")
 
@@ -51,8 +61,39 @@ class AsrViewModel : ViewModel() {
         running = false
     }
 
+    fun startMockAsr() {
+        if (running) return
+        running = true
+        clearError()
+        vmScope.launch {
+            val costSeconds = 10
+            runCatching {
+                SubMakerApi.consumeTrial(seconds = costSeconds, deviceId = SubMakerPrefs.deviceId)
+            }.onSuccess { payload ->
+                payload.user?.let { SubMakerPrefs.user = it }
+                // device 信息目前不做全局存储；账号页会拉取 device_status 展示
+                mockRunAsr()
+                lastResult = "已扣减试用：${costSeconds}s（MVP 模拟）。${lastResult.orEmpty()}"
+            }.onFailure {
+                errorMessage = it.userMessage()
+                running = false
+            }
+        }
+    }
+
     fun suggestedExportFileName(ext: String): String {
         val base = (mediaName ?: "submaker_${nowMs()}").substringBeforeLast('.')
         return "$base.$ext"
     }
+
+    override fun onCleared() {
+        vmScope.cancel()
+        super.onCleared()
+    }
 }
+
+private fun Throwable.userMessage(): String =
+    when (this) {
+        is ApiException -> message
+        else -> message ?: "请求失败"
+    }

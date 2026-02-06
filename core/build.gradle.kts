@@ -1,6 +1,7 @@
 plugins {
     id("submaker.kmp.library")
     alias(libs.plugins.composeCompiler)
+    alias(libs.plugins.kotlinSerialization)
 }
 
 kotlin {
@@ -9,6 +10,7 @@ kotlin {
             implementation(libs.compose.runtime)
             implementation(libs.compose.ui)
             implementation(libs.kotlinx.coroutines.core)
+            implementation(libs.kotlinx.serialization.json)
             api(libs.eygraber.uri.kmp)
             implementation(libs.vinceglb.filekit.dialogs)
         }

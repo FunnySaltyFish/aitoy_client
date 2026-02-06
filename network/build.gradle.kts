@@ -6,8 +6,10 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
+            implementation(projects.core)
             implementation(libs.squareup.okhttp)
             implementation(libs.squareup.okhttp.logging.interceptor)
+            implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.serialization.json)
         }
     }
@@ -16,4 +18,3 @@ kotlin {
 android {
     namespace = "com.funny.submaker.network"
 }
-
