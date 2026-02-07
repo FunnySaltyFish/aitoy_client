@@ -12,8 +12,13 @@ import com.funny.submaker.core.kmp.sizeBytes
 import com.funny.submaker.core.subtitle.SubtitleSegment
 import com.funny.submaker.core.utils.nowMs
 import com.funny.submaker.network.api.ApiException
-import com.funny.submaker.network.api.AsrOptionsReq
-import com.funny.submaker.network.api.SubMakerApi
+import com.funny.submaker.network.api.SubMakerServices
+import com.funny.submaker.network.api.apiRequest
+import com.funny.submaker.network.api.service.AsrCreateJobReq
+import com.funny.submaker.network.api.service.AsrOptionsReq
+import com.funny.submaker.network.api.service.AsrSessionReq
+import com.funny.submaker.network.api.service.AsrUploadTicketReq
+import com.funny.submaker.network.api.service.uploadFileToTicket
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -69,9 +74,17 @@ class AsrViewModel : ViewModel() {
             runCatching {
                 val targetBaseUrl = apiBaseUrl.trim().ifBlank { null }
                 val localApiKey = apiKey.trim().ifBlank { null }
+                val asrService = SubMakerServices.asrService(targetBaseUrl)
                 val sessionId = if (localApiKey != null) {
                     stageText = "创建 ASR 会话"
-                    SubMakerApi.createAsrSession(apiKey = localApiKey, baseUrl = targetBaseUrl).sessionId
+                    apiRequest {
+                        asrService.createSession(
+                            AsrSessionReq(
+                                apiKey = localApiKey,
+                                keyHint = localApiKey.toKeyHint(),
+                            )
+                        )
+                    }.sessionId
                 } else {
                     null
                 }
@@ -85,16 +98,19 @@ class AsrViewModel : ViewModel() {
                 val fileType = mediaMimeType ?: "application/octet-stream"
 
                 stageText = "获取上传票据"
-                val ticket = SubMakerApi.createAsrUploadTicket(
-                    fileName = fileName,
-                    contentType = fileType,
-                    sessionId = sessionId,
-                    model = modelName,
-                    baseUrl = targetBaseUrl,
-                )
+                val ticket = apiRequest {
+                    asrService.createUploadTicket(
+                        AsrUploadTicketReq(
+                            model = modelName,
+                            fileName = fileName,
+                            contentType = fileType,
+                            sessionId = sessionId,
+                        )
+                    )
+                }
 
                 stageText = "直传音频到 OSS"
-                SubMakerApi.uploadFileToTicket(
+                SubMakerServices.uploadService.uploadFileToTicket(
                     uploadHost = ticket.uploadHost,
                     formFields = ticket.formFields,
                     fileName = fileName,
@@ -103,18 +119,21 @@ class AsrViewModel : ViewModel() {
                 )
 
                 stageText = "提交识别任务"
-                val created = SubMakerApi.createAsrJob(
-                    fileUrl = ticket.resolvedFileUrl,
-                    sessionId = sessionId,
-                    options = AsrOptionsReq(
-                        language = null,
-                        enableItn = false,
-                        enableWords = false,
-                        channelId = listOf(0),
-                    ),
-                    model = modelName,
-                    baseUrl = targetBaseUrl,
-                )
+                val created = apiRequest {
+                    asrService.createJob(
+                        AsrCreateJobReq(
+                            model = modelName,
+                            fileUrl = ticket.resolvedFileUrl,
+                            sessionId = sessionId,
+                            options = AsrOptionsReq(
+                                language = null,
+                                enableItn = false,
+                                enableWords = false,
+                                channelId = listOf(0),
+                            ),
+                        ),
+                    )
+                }
 
                 var pollCount = 0
                 var status = created.status
@@ -122,14 +141,14 @@ class AsrViewModel : ViewModel() {
                     pollCount += 1
                     stageText = "识别中（$pollCount）"
                     delay(1500)
-                    status = SubMakerApi.pollAsrJob(created.jobId, baseUrl = targetBaseUrl).status
+                    status = apiRequest { asrService.pollJob(created.jobId) }.status
                 }
                 if (status != "SUCCEEDED") {
                     throw ApiException(1502, "识别未完成，当前状态：$status")
                 }
 
                 stageText = "下载并解析结果"
-                val result = SubMakerApi.getAsrResult(created.jobId, baseUrl = targetBaseUrl)
+                val result = apiRequest { asrService.getResult(created.jobId) }
                 if (result.status != "SUCCEEDED") {
                     val err = result.error?.message ?: "任务状态异常：${result.status}"
                     throw ApiException(1503, err)
@@ -169,3 +188,8 @@ private fun Throwable.userMessage(): String =
         is ApiException -> message
         else -> message ?: "请求失败"
     }
+
+private fun String.toKeyHint(): String {
+    if (isBlank()) return ""
+    return "sk-****${takeLast(4)}"
+}

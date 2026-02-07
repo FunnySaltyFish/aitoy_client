@@ -9,8 +9,10 @@ import com.funny.submaker.core.kmp.appCtx
 import com.funny.submaker.core.kmp.openUrl
 import com.funny.submaker.core.prefs.SubMakerPrefs
 import com.funny.submaker.network.api.ApiException
-import com.funny.submaker.network.api.Product
-import com.funny.submaker.network.api.SubMakerApi
+import com.funny.submaker.network.api.apiRequest
+import com.funny.submaker.network.api.apiRequestUnit
+import com.funny.submaker.network.api.SubMakerServices
+import com.funny.submaker.network.api.service.Product
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -64,7 +66,7 @@ class AuthViewModel : ViewModel() {
     fun loadDeviceStatus() {
         vmScope.launch {
             runCatching {
-                SubMakerApi.deviceStatus(SubMakerPrefs.deviceId).device
+                apiRequest { SubMakerServices.entitlementService.deviceStatus(SubMakerPrefs.deviceId) }.device
             }.onSuccess {
                 device = it
             }.onFailure {
@@ -76,7 +78,7 @@ class AuthViewModel : ViewModel() {
     fun refreshMe() {
         vmScope.launch {
             runCatching {
-                SubMakerApi.me().user
+                apiRequest { SubMakerServices.userService.me() }.user
             }.onSuccess {
                 SubMakerPrefs.user = it
             }.onFailure {
@@ -87,7 +89,7 @@ class AuthViewModel : ViewModel() {
 
     fun loadProducts() {
         vmScope.launch {
-            runCatching { SubMakerApi.products().products }
+            runCatching { apiRequest { SubMakerServices.payService.products() }.products }
                 .onSuccess { products = it }
                 .onFailure { errorMessage = it.userMessage() }
         }
@@ -106,7 +108,12 @@ class AuthViewModel : ViewModel() {
         clearMessages()
         vmScope.launch {
             runCatching {
-                SubMakerApi.sendAuthCode(email = email, purpose = purpose)
+                apiRequestUnit {
+                    SubMakerServices.authService.sendAuthCode(
+                        email = email,
+                        purpose = purpose,
+                    )
+                }
             }.onSuccess {
                 infoMessage = "验证码已发送（MVP：未配置 SMTP 时仅输出到服务端日志）"
             }.onFailure {
@@ -125,7 +132,13 @@ class AuthViewModel : ViewModel() {
         clearMessages()
         vmScope.launch {
             runCatching {
-                SubMakerApi.loginPassword(email = email, password = password, deviceId = SubMakerPrefs.deviceId)
+                apiRequest {
+                    SubMakerServices.authService.loginPassword(
+                        email = email,
+                        password = password,
+                        deviceId = SubMakerPrefs.deviceId,
+                    )
+                }
             }.onSuccess {
                 SubMakerPrefs.authToken = it.token
                 SubMakerPrefs.user = it.user
@@ -148,13 +161,15 @@ class AuthViewModel : ViewModel() {
         clearMessages()
         vmScope.launch {
             runCatching {
-                SubMakerApi.register(
-                    email = email,
-                    password = password,
-                    code = verifyCode,
-                    username = username.takeIf { it.isNotBlank() },
-                    deviceId = SubMakerPrefs.deviceId,
-                )
+                apiRequest {
+                    SubMakerServices.authService.register(
+                        email = email,
+                        password = password,
+                        code = verifyCode,
+                        username = username.takeIf { it.isNotBlank() },
+                        deviceId = SubMakerPrefs.deviceId,
+                    )
+                }
             }.onSuccess {
                 SubMakerPrefs.authToken = it.token
                 SubMakerPrefs.user = it.user
@@ -176,7 +191,14 @@ class AuthViewModel : ViewModel() {
         busy = true
         clearMessages()
         vmScope.launch {
-            runCatching { SubMakerApi.findUsername(email = email, code = verifyCode) }
+            runCatching {
+                apiRequest {
+                    SubMakerServices.authService.findUsername(
+                        email = email,
+                        code = verifyCode,
+                    )
+                }.username
+            }
                 .onSuccess { infoMessage = "账号：$it" }
                 .onFailure { errorMessage = it.userMessage() }
             busy = false
@@ -195,7 +217,15 @@ class AuthViewModel : ViewModel() {
         busy = true
         clearMessages()
         vmScope.launch {
-            runCatching { SubMakerApi.resetPassword(email = email, code = verifyCode, newPassword = newPassword) }
+            runCatching {
+                apiRequestUnit {
+                    SubMakerServices.authService.resetPassword(
+                        email = email,
+                        code = verifyCode,
+                        newPassword = newPassword,
+                    )
+                }
+            }
                 .onSuccess { infoMessage = "密码已重置，请使用新密码登录"; page = AuthPage.Login }
                 .onFailure { errorMessage = it.userMessage() }
             busy = false
@@ -220,7 +250,7 @@ class AuthViewModel : ViewModel() {
         clearMessages()
         vmScope.launch {
             runCatching {
-                SubMakerApi.createOrder(product.id)
+                apiRequest { SubMakerServices.payService.createOrder(product.id) }
             }.onSuccess { order ->
                 payingOrderNo = order.orderNo
                 infoMessage = "已创建订单：${order.orderNo}，请在浏览器完成支付后返回（MVP：mock_checkout）"
@@ -237,7 +267,7 @@ class AuthViewModel : ViewModel() {
         val deadline = System.currentTimeMillis() + 3 * 60_000
         while (paying && payingOrderNo == orderNo && System.currentTimeMillis() < deadline) {
             delay(1_000)
-            runCatching { SubMakerApi.queryOrder(orderNo) }
+            runCatching { apiRequest { SubMakerServices.payService.queryOrder(orderNo) } }
                 .onSuccess { q ->
                     if (q.status == "paid") {
                         paying = false

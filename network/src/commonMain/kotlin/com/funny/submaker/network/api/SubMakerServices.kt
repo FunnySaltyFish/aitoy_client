@@ -1,0 +1,35 @@
+package com.funny.submaker.network.api
+
+import com.funny.submaker.network.ServiceCreator
+import com.funny.submaker.network.api.service.AsrService
+import com.funny.submaker.network.api.service.AuthService
+import com.funny.submaker.network.api.service.EntitlementService
+import com.funny.submaker.network.api.service.PayService
+import com.funny.submaker.network.api.service.UploadService
+import com.funny.submaker.network.api.service.UserService
+
+object SubMakerServices {
+    val authService: AuthService by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        ServiceCreator.create(AuthService::class.java)
+    }
+
+    val userService: UserService by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        ServiceCreator.create(UserService::class.java)
+    }
+
+    val entitlementService: EntitlementService by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        ServiceCreator.create(EntitlementService::class.java)
+    }
+
+    val payService: PayService by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        ServiceCreator.create(PayService::class.java)
+    }
+
+    val uploadService: UploadService by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        ServiceCreator.create(UploadService::class.java)
+    }
+
+    fun asrService(baseUrlOverride: String? = null): AsrService {
+        return ServiceCreator.create(AsrService::class.java, baseUrlOverride)
+    }
+}

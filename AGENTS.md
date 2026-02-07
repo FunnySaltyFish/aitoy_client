@@ -39,3 +39,14 @@ var showHelpDialog by rememberDataSaverState(
     initialValue = true
 )
 ```
+
+## 网络层约定
+- 网络请求统一使用 Retrofit + Service 接口，不再手写 `Request.Builder` 模板代码
+- 按业务拆分 Service（如 auth / user / entitlement / pay / asr），避免一个超大 API 文件
+- 接口调用优先使用统一请求封装（如 `apiRequest { service.func(...) }`），常见请求应保持一行完成
+- 简单参数优先 `@FormUrlEncoded + @Field`，避免为少量字段创建大量请求体类
+- GET 与 POST 按语义区分：读取类接口优先 GET（可缓存），状态变更类接口使用 POST
+- JSON 序列化统一走全局 `JsonX`，避免重复创建多个 Json 实例
+- Token 注入、缓存策略放在全局 OkHttp 拦截器，业务层不重复拼接鉴权头
+- GET 缓存策略通过接口注解声明（如 `@GetCache(...)`），避免在拦截器中维护路径分支
+- 超时策略通过接口注解声明（如 `@DynamicTimeout(...)`），按接口粒度控制读写超时
