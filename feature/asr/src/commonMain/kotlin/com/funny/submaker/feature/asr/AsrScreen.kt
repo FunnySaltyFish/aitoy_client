@@ -34,7 +34,7 @@ fun AsrScreen(
             style = MaterialTheme.typography.headlineSmall,
         )
         Text(
-            text = "MVP：直连云端 ASR（BYO KEY），优先稳定与质量。",
+            text = "Qwen3-ASR FileTrans：本地文件直传 OSS，后端负责任务提交与轮询。",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -92,6 +92,7 @@ fun AsrScreen(
                     },
                     modifier = Modifier.fillMaxWidth(),
                     label = { Text("API Base URL（可选）") },
+                    placeholder = { Text("默认使用 SubMakerPrefs 的服务地址") },
                     singleLine = true,
                 )
                 OutlinedTextField(
@@ -101,15 +102,21 @@ fun AsrScreen(
                         vm.clearError()
                     },
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text("API Key") },
+                    label = { Text("DashScope API Key（可选）") },
+                    placeholder = { Text("为空时使用后端已配置 Key") },
                     singleLine = true,
+                )
+                Text(
+                    text = "当前阶段：${vm.stageText}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Button(
                     onClick = onStart,
-                    enabled = !vm.running,
+                    enabled = !vm.running && vm.mediaUri != null,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text(if (vm.running) "处理中…" else "开始识别（占位）")
+                    Text(if (vm.running) "处理中…" else "开始识别")
                 }
 
                 Row(

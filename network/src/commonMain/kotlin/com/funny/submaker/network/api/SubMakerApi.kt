@@ -9,6 +9,7 @@ import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 
@@ -24,7 +25,10 @@ object SubMakerApi {
     private fun baseUrl(): String = SubMakerPrefs.serverBaseUrl.trimEnd('/')
     private fun apiPrefix(): String = "/" + SubMakerPrefs.apiPrefix.trim('/').trim()
 
-    private fun url(path: String): String = baseUrl() + apiPrefix() + "/" + path.trimStart('/')
+    private fun url(path: String, baseUrlOverride: String? = null): String {
+        val base = (baseUrlOverride?.trim()?.trimEnd('/').takeUnless { it.isNullOrBlank() }) ?: baseUrl()
+        return base + apiPrefix() + "/" + path.trimStart('/')
+    }
 
     private fun authTokenOrNull(): String? = SubMakerPrefs.authToken.takeIf { it.isNotBlank() }
     private fun requireAuthToken(): String = authTokenOrNull() ?: throw ApiException(2001, "请先登录")
@@ -34,9 +38,10 @@ object SubMakerApi {
         body: String,
         respSerializer: KSerializer<ApiResp<T>>,
         authToken: String?,
+        baseUrlOverride: String? = null,
     ): T? = withContext(Dispatchers.IO) {
         val req = Request.Builder()
-            .url(url(path))
+            .url(url(path, baseUrlOverride))
             .post(body.toRequestBody(mediaJson))
             .apply {
                 authToken?.let { header("Authorization", "Bearer $it") }
@@ -56,9 +61,10 @@ object SubMakerApi {
         path: String,
         respSerializer: KSerializer<ApiResp<T>>,
         authToken: String?,
+        baseUrlOverride: String? = null,
     ): T? = withContext(Dispatchers.IO) {
         val req = Request.Builder()
-            .url(url(path))
+            .url(url(path, baseUrlOverride))
             .get()
             .apply {
                 authToken?.let { header("Authorization", "Bearer $it") }
@@ -188,4 +194,125 @@ object SubMakerApi {
             authToken = requireAuthToken(),
         ) ?: throw ApiException(9002, "空响应")
     }
+
+    suspend fun createAsrSession(
+        apiKey: String,
+        region: String = "cn",
+        provider: String = "dashscope",
+        baseUrl: String? = null,
+    ): AsrSessionPayload {
+        val req = AsrSessionReq(provider = provider, region = region, apiKey = apiKey, keyHint = apiKey.toKeyHint())
+        return postJsonOrNull(
+            "asr/sessions",
+            body = json.encodeToString(AsrSessionReq.serializer(), req),
+            respSerializer = ApiResp.serializer(AsrSessionPayload.serializer()),
+            authToken = authTokenOrNull(),
+            baseUrlOverride = baseUrl,
+        ) ?: throw ApiException(9002, "空响应")
+    }
+
+    suspend fun createAsrUploadTicket(
+        fileName: String,
+        contentType: String?,
+        sessionId: String?,
+        model: String = "qwen3-asr-flash-filetrans",
+        baseUrl: String? = null,
+    ): AsrUploadTicketPayload {
+        val req = AsrUploadTicketReq(
+            model = model,
+            fileName = fileName,
+            contentType = contentType,
+            sessionId = sessionId,
+        )
+        return postJsonOrNull(
+            "asr/upload-ticket",
+            body = json.encodeToString(AsrUploadTicketReq.serializer(), req),
+            respSerializer = ApiResp.serializer(AsrUploadTicketPayload.serializer()),
+            authToken = authTokenOrNull(),
+            baseUrlOverride = baseUrl,
+        ) ?: throw ApiException(9002, "空响应")
+    }
+
+    suspend fun uploadFileToTicket(
+        uploadHost: String,
+        formFields: Map<String, String>,
+        fileName: String,
+        contentType: String?,
+        bytes: ByteArray,
+    ) = withContext(Dispatchers.IO) {
+        val multipart = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .apply {
+                formFields.forEach { (k, v) -> addFormDataPart(k, v) }
+                val contentTypeValue = (contentType ?: "application/octet-stream").toMediaType()
+                addFormDataPart(
+                    name = "file",
+                    filename = fileName,
+                    body = bytes.toRequestBody(contentTypeValue),
+                )
+            }
+            .build()
+
+        val req = Request.Builder()
+            .url(uploadHost)
+            .post(multipart)
+            .build()
+
+        HttpClientProvider.client.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) {
+                val text = resp.body?.string().orEmpty()
+                throw ApiException(9501, "上传音频失败（${resp.code}）：$text")
+            }
+        }
+    }
+
+    suspend fun createAsrJob(
+        fileUrl: String,
+        sessionId: String?,
+        options: AsrOptionsReq,
+        model: String = "qwen3-asr-flash-filetrans",
+        baseUrl: String? = null,
+    ): AsrCreateJobPayload {
+        val req = AsrCreateJobReq(
+            model = model,
+            fileUrl = fileUrl,
+            sessionId = sessionId,
+            options = options,
+        )
+        return postJsonOrNull(
+            "asr/jobs",
+            body = json.encodeToString(AsrCreateJobReq.serializer(), req),
+            respSerializer = ApiResp.serializer(AsrCreateJobPayload.serializer()),
+            authToken = authTokenOrNull(),
+            baseUrlOverride = baseUrl,
+        ) ?: throw ApiException(9002, "空响应")
+    }
+
+    suspend fun pollAsrJob(
+        jobId: String,
+        baseUrl: String? = null,
+    ): AsrJobPayload =
+        getJsonOrNull(
+            "asr/jobs/$jobId",
+            respSerializer = ApiResp.serializer(AsrJobPayload.serializer()),
+            authToken = authTokenOrNull(),
+            baseUrlOverride = baseUrl,
+        ) ?: throw ApiException(9002, "空响应")
+
+    suspend fun getAsrResult(
+        jobId: String,
+        baseUrl: String? = null,
+    ): AsrResultPayload =
+        getJsonOrNull(
+            "asr/jobs/$jobId/result",
+            respSerializer = ApiResp.serializer(AsrResultPayload.serializer()),
+            authToken = authTokenOrNull(),
+            baseUrlOverride = baseUrl,
+        ) ?: throw ApiException(9002, "空响应")
+}
+
+private fun String.toKeyHint(): String {
+    if (isBlank()) return ""
+    val tail = takeLast(4)
+    return "sk-****$tail"
 }

@@ -10,7 +10,7 @@ object SubMakerPrefs {
     var serverBaseUrl: String by mutableDataSaverStateOf(
         DataSaverUtils,
         key = "SERVER_BASE_URL",
-        initialValue = "http://127.0.0.1:5002",
+        initialValue = "http://192.168.1.118:5002",
     )
 
     var apiPrefix: String by mutableDataSaverStateOf(
@@ -40,4 +40,3 @@ object SubMakerPrefs {
         user = UserProfile()
     }
 }
-

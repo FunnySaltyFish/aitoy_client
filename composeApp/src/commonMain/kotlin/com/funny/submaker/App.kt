@@ -59,7 +59,7 @@ fun App() {
                     RootScreen.Asr -> AsrScreen(
                         vm = asrVm,
                         onStart = {
-                            asrVm.startMockAsr()
+                            asrVm.startAsr()
                         },
                     )
 
