@@ -17,6 +17,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
@@ -27,12 +31,25 @@ import kotlin.math.max
 @Composable
 fun AuthScreen(
     vm: AuthViewModel,
+    onLoginSuccess: (() -> Unit)? = null,
+    onBack: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
+    var loginDelivered by remember { mutableStateOf(false) }
+
     LaunchedEffect(Unit) {
         vm.bootstrap()
         if (vm.products.isEmpty()) vm.loadProducts()
         if (vm.isLoggedIn) vm.page = AuthPage.Account
+    }
+    LaunchedEffect(vm.page, vm.isLoggedIn) {
+        if (vm.page == AuthPage.Account && vm.isLoggedIn && !loginDelivered) {
+            loginDelivered = true
+            onLoginSuccess?.invoke()
+        }
+        if (vm.page != AuthPage.Account) {
+            loginDelivered = false
+        }
     }
 
     Column(
@@ -48,6 +65,9 @@ fun AuthScreen(
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        if (onBack != null) {
+            TextButton(onClick = onBack) { Text("返回上一页") }
+        }
 
         ServerConfigCard()
         TrialCard(vm)

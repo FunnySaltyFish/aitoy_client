@@ -23,6 +23,8 @@ import com.funny.submaker.core.utils.FileSize
 fun AsrScreen(
     vm: AsrViewModel,
     onStart: () -> Unit,
+    onOpenAuth: (() -> Unit)? = null,
+    message: String? = null,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -118,6 +120,15 @@ fun AsrScreen(
                 ) {
                     Text(if (vm.running) "处理中…" else "开始识别")
                 }
+                if (onOpenAuth != null) {
+                    Button(
+                        onClick = onOpenAuth,
+                        enabled = !vm.running,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("打开账号与权益")
+                    }
+                }
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -142,6 +153,9 @@ fun AsrScreen(
                 val result = vm.lastResult
                 if (result != null) {
                     Text(result, style = MaterialTheme.typography.bodyMedium)
+                }
+                if (message != null) {
+                    Text(message, style = MaterialTheme.typography.bodyMedium)
                 }
 
                 val errorMessage = vm.errorMessage
