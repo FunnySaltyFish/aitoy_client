@@ -13,8 +13,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.unit.dp
 import androidx.navigation3.runtime.NavBackStack
 import androidx.navigation3.runtime.NavKey
-import androidx.navigation3.runtime.rememberNavBackStack
-import androidx.savedstate.serialization.SavedStateConfiguration
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
 
@@ -83,10 +81,9 @@ class Navigator internal constructor(
 
 @Composable
 fun rememberNavigator(
-    config: SavedStateConfiguration,
-    vararg startRoutes: NavKey,
+    vararg elements: NavKey,
 ): Navigator {
-    val backStack = rememberNavBackStack(config, *startRoutes)
+    val backStack = rememberKmpNavBackStack(*elements)
     return remember(backStack) { Navigator(backStack) }
 }
 
@@ -134,3 +131,9 @@ private object ResultStore {
         channel.trySend(result)
     }
 }
+
+/**
+ * 跨平台的、无需 conf 参数的包装
+ */
+@Composable
+expect fun rememberKmpNavBackStack(vararg elements: NavKey): NavBackStack<NavKey>

@@ -4,14 +4,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
-import com.funny.submaker.core.model.DeviceProfile
 import com.funny.submaker.core.kmp.appCtx
 import com.funny.submaker.core.kmp.openUrl
+import com.funny.submaker.core.model.DeviceProfile
 import com.funny.submaker.core.prefs.SubMakerPrefs
 import com.funny.submaker.network.api.ApiException
+import com.funny.submaker.network.api.SubMakerServices
 import com.funny.submaker.network.api.apiRequest
 import com.funny.submaker.network.api.apiRequestUnit
-import com.funny.submaker.network.api.SubMakerServices
 import com.funny.submaker.network.api.service.Product
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -19,19 +19,10 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-
-enum class AuthPage {
-    Login,
-    Register,
-    ForgotUsername,
-    ForgotPassword,
-    Account,
-}
+import kotlin.math.max
 
 class AuthViewModel : ViewModel() {
     private val vmScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-
-    var page by mutableStateOf(AuthPage.Login)
 
     var email by mutableStateOf("")
     var password by mutableStateOf("")
@@ -52,6 +43,7 @@ class AuthViewModel : ViewModel() {
     var payingOrderNo by mutableStateOf<String?>(null)
 
     val isLoggedIn: Boolean get() = SubMakerPrefs.isLoggedIn
+    val trialSecondsRemaining: Int get() = max(device.entitlement.trialSecondsRemaining, 0)
 
     fun clearMessages() {
         errorMessage = null
@@ -89,17 +81,24 @@ class AuthViewModel : ViewModel() {
 
     fun loadProducts() {
         vmScope.launch {
-            runCatching { apiRequest { SubMakerServices.payService.products() }.products }
-                .onSuccess { products = it }
-                .onFailure { errorMessage = it.userMessage() }
+            runCatching {
+                apiRequest { SubMakerServices.payService.products() }.products
+            }.onSuccess {
+                products = it
+            }.onFailure {
+                errorMessage = it.userMessage()
+            }
         }
     }
 
-    fun sendRegisterCode() = sendCode(purpose = "register")
-    fun sendFindUsernameCode() = sendCode(purpose = "find_username")
-    fun sendResetPasswordCode() = sendCode(purpose = "reset_password")
+    fun sendRegisterCode(onSuccess: (() -> Unit)? = null) = sendCode(purpose = "register", onSuccess = onSuccess)
+    fun sendFindUsernameCode(onSuccess: (() -> Unit)? = null) = sendCode(purpose = "find_username", onSuccess = onSuccess)
+    fun sendResetPasswordCode(onSuccess: (() -> Unit)? = null) = sendCode(purpose = "reset_password", onSuccess = onSuccess)
 
-    private fun sendCode(purpose: String) {
+    private fun sendCode(
+        purpose: String,
+        onSuccess: (() -> Unit)? = null,
+    ) {
         if (email.isBlank()) {
             errorMessage = "请先输入邮箱"
             return
@@ -115,7 +114,8 @@ class AuthViewModel : ViewModel() {
                     )
                 }
             }.onSuccess {
-                infoMessage = "验证码已发送（MVP：未配置 SMTP 时仅输出到服务端日志）"
+                infoMessage = "验证码已发送"
+                onSuccess?.invoke()
             }.onFailure {
                 errorMessage = it.userMessage()
             }
@@ -123,7 +123,7 @@ class AuthViewModel : ViewModel() {
         }
     }
 
-    fun login() {
+    fun login(onSuccess: (() -> Unit)? = null) {
         if (email.isBlank() || password.isBlank()) {
             errorMessage = "请填写邮箱和密码"
             return
@@ -142,9 +142,9 @@ class AuthViewModel : ViewModel() {
             }.onSuccess {
                 SubMakerPrefs.authToken = it.token
                 SubMakerPrefs.user = it.user
-                page = AuthPage.Account
                 refreshMe()
                 loadDeviceStatus()
+                onSuccess?.invoke()
             }.onFailure {
                 errorMessage = it.userMessage()
             }
@@ -152,7 +152,7 @@ class AuthViewModel : ViewModel() {
         }
     }
 
-    fun register() {
+    fun register(onSuccess: (() -> Unit)? = null) {
         if (email.isBlank() || password.isBlank() || verifyCode.isBlank()) {
             errorMessage = "请填写邮箱、密码、验证码"
             return
@@ -173,9 +173,9 @@ class AuthViewModel : ViewModel() {
             }.onSuccess {
                 SubMakerPrefs.authToken = it.token
                 SubMakerPrefs.user = it.user
-                page = AuthPage.Account
                 refreshMe()
                 loadDeviceStatus()
+                onSuccess?.invoke()
             }.onFailure {
                 errorMessage = it.userMessage()
             }
@@ -183,7 +183,7 @@ class AuthViewModel : ViewModel() {
         }
     }
 
-    fun findUsername() {
+    fun findUsername(onSuccess: ((String) -> Unit)? = null) {
         if (email.isBlank() || verifyCode.isBlank()) {
             errorMessage = "请填写邮箱和验证码"
             return
@@ -198,14 +198,17 @@ class AuthViewModel : ViewModel() {
                         code = verifyCode,
                     )
                 }.username
+            }.onSuccess {
+                infoMessage = "账号：$it"
+                onSuccess?.invoke(it)
+            }.onFailure {
+                errorMessage = it.userMessage()
             }
-                .onSuccess { infoMessage = "账号：$it" }
-                .onFailure { errorMessage = it.userMessage() }
             busy = false
         }
     }
 
-    fun resetPassword() {
+    fun resetPassword(onSuccess: (() -> Unit)? = null) {
         if (email.isBlank() || verifyCode.isBlank() || newPassword.isBlank()) {
             errorMessage = "请填写邮箱、验证码、新密码"
             return
@@ -225,16 +228,18 @@ class AuthViewModel : ViewModel() {
                         newPassword = newPassword,
                     )
                 }
+            }.onSuccess {
+                infoMessage = "密码已重置，请使用新密码登录"
+                onSuccess?.invoke()
+            }.onFailure {
+                errorMessage = it.userMessage()
             }
-                .onSuccess { infoMessage = "密码已重置，请使用新密码登录"; page = AuthPage.Login }
-                .onFailure { errorMessage = it.userMessage() }
             busy = false
         }
     }
 
     fun logout() {
         SubMakerPrefs.logout()
-        page = AuthPage.Login
         infoMessage = "已退出登录"
     }
 
@@ -253,7 +258,7 @@ class AuthViewModel : ViewModel() {
                 apiRequest { SubMakerServices.payService.createOrder(product.id) }
             }.onSuccess { order ->
                 payingOrderNo = order.orderNo
-                infoMessage = "已创建订单：${order.orderNo}，请在浏览器完成支付后返回（MVP：mock_checkout）"
+                infoMessage = "已创建订单：${order.orderNo}，请在浏览器完成支付后返回"
                 appCtx.openUrl(order.payUrl)
                 pollOrder(order.orderNo)
             }.onFailure {
@@ -268,16 +273,13 @@ class AuthViewModel : ViewModel() {
         while (paying && payingOrderNo == orderNo && System.currentTimeMillis() < deadline) {
             delay(1_000)
             runCatching { apiRequest { SubMakerServices.payService.queryOrder(orderNo) } }
-                .onSuccess { q ->
-                    if (q.status == "paid") {
+                .onSuccess { query ->
+                    if (query.status == "paid") {
                         paying = false
                         infoMessage = "购买成功，权益已发放"
                         refreshMe()
                         return
                     }
-                }
-                .onFailure {
-                    // ignore transient errors during polling
                 }
         }
         if (paying && payingOrderNo == orderNo) {

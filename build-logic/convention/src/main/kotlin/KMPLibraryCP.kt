@@ -40,6 +40,7 @@ fun Project.setupCommonKMP(
 ) {
     with(pluginManager) {
         apply("kotlin-multiplatform")
+        apply("org.jetbrains.kotlin.plugin.serialization")
     }
 
     val kotlin = extensions.getByType(KotlinMultiplatformExtension::class.java)
@@ -57,8 +58,6 @@ fun Project.setupCommonKMP(
             }
         }
     }
-
-
 
     tasks.withType<KotlinJvmCompile>().configureEach {
         compilerOptions {

@@ -11,6 +11,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
 import androidx.compose.material3.adaptive.navigation3.ListDetailSceneStrategy
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -21,20 +22,17 @@ import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.ui.NavDisplay
 import com.funny.submaker.core.navigation.LocalNavigator
-import com.funny.submaker.core.navigation.Navigator
 import com.funny.submaker.core.navigation.NavigatorProvider
 import com.funny.submaker.core.navigation.rememberListDetailStrategy
 import com.funny.submaker.core.navigation.rememberNavigator
 import com.funny.submaker.feature.asr.AsrScreen
 import com.funny.submaker.feature.asr.AsrViewModel
-import com.funny.submaker.feature.auth.AuthScreen
 import com.funny.submaker.feature.auth.AuthViewModel
-import com.funny.submaker.navigation.AppNavConfig
 import com.funny.submaker.navigation.AppRoute
 import com.funny.submaker.navigation.AuthResult
 import com.funny.submaker.navigation.Routes
+import com.funny.submaker.navigation.addAuthRoutes
 import com.funny.submaker.core.prefs.SubMakerPrefsInit
-import com.funny.submaker.core.prefs.SubMakerPrefs
 import com.funny.submaker.ui.theme.SubMakerTheme
 import kotlinx.coroutines.launch
 
@@ -43,10 +41,10 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalMaterial3AdaptiveApi::class)
 fun App() {
     SubMakerTheme {
-        remember { SubMakerPrefsInit.init() }
+        LaunchedEffect(Unit) { SubMakerPrefsInit.init() }
         val asrVm = remember { AsrViewModel() }
         val authVm = remember { AuthViewModel() }
-        val navigator = rememberNavigator(AppNavConfig, Routes.Workspace, Routes.Asr())
+        val navigator = rememberNavigator(Routes.Workspace, Routes.Asr())
         val scope = rememberCoroutineScope()
         val listDetailStrategy = rememberListDetailStrategy<NavKey>()
         val asrMessages = remember { mutableStateListOf<String>() }
@@ -80,33 +78,22 @@ fun App() {
                             onStart = asrVm::startAsr,
                             onOpenAuth = {
                                 scope.launch {
-                                    val result = navigator.navigateForResult<AuthResult>(Routes.Auth(from = "asr"))
+                                    val result = navigator.navigateForResult<AuthResult>(Routes.AuthLogin(from = "asr"))
                                     result?.let { asrMessages.add("登录成功：${it.email}") }
                                 }
                             },
                             message = asrMessages.lastOrNull(),
                         )
                     }
-                    entry<Routes.Auth>(
-                        metadata = ListDetailSceneStrategy.detailPane(),
-                    ) { route ->
-                        AuthScreen(
-                            vm = authVm,
-                            onLoginSuccess = if (route.from == "asr") {
-                                {
-                                    navigator.popWithResult(
-                                        AuthResult(
-                                            email = SubMakerPrefs.user.email,
-                                            proActive = SubMakerPrefs.user.entitlement.proActive,
-                                        ),
-                                    )
-                                }
-                            } else {
-                                null
-                            },
-                            onBack = navigator::popBackStack,
-                        )
-                    }
+                    addAuthRoutes(
+                        vm = authVm,
+                        onBack = navigator::popBackStack,
+                        onNavigate = { route -> navigator.navigate(route) },
+                        onReplaceTop = { route -> navigator.replaceTop(route) },
+                        onAuthResult = { result ->
+                            navigator.popWithResult(result)
+                        },
+                    )
                 }
             )
         }
@@ -135,10 +122,21 @@ private fun WorkspacePane(
             Text(text)
         }
         Button(
-            onClick = { navigator.navigate(Routes.Auth(from = "workspace"), singleTop = true) },
+            onClick = { navigator.navigate(Routes.AuthLogin(from = "workspace"), singleTop = true) },
             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp).padding(top = 8.dp),
         ) {
-            val text = if (selected is Routes.Auth) "账号（当前）" else "账号与权益"
+            val text = if (
+                selected is Routes.AuthLogin ||
+                selected is Routes.AuthVerify ||
+                selected is Routes.AuthForgotPassword ||
+                selected is Routes.AuthFindUsername ||
+                selected is Routes.AuthBetaWelcome ||
+                selected is Routes.AuthAccount
+            ) {
+                "账号（当前）"
+            } else {
+                "账号与权益"
+            }
             Text(text)
         }
     }
