@@ -2,11 +2,7 @@ package com.funny.submaker.navigation
 
 import androidx.compose.runtime.Stable
 import androidx.navigation3.runtime.NavKey
-import androidx.savedstate.serialization.SavedStateConfiguration
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.modules.SerializersModule
-import kotlinx.serialization.modules.polymorphic
-import kotlinx.serialization.modules.subclass
 
 @Serializable
 @Stable
@@ -33,17 +29,6 @@ object Routes {
 
     @Serializable
     data class AuthVerify(
-        val purpose: String,
-        val from: String? = null,
-    ) : AppRoute
-
-    @Serializable
-    data class AuthForgotPassword(
-        val from: String? = null,
-    ) : AppRoute
-
-    @Serializable
-    data class AuthFindUsername(
         val from: String? = null,
     ) : AppRoute
 

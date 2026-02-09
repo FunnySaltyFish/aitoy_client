@@ -51,5 +51,5 @@ suspend inline fun apiRequestUnit(crossinline request: suspend () -> ApiResp<*>?
 }
 
 suspend inline fun <T> apiRequestResult(crossinline request: suspend () -> ApiResp<T>): Result<T> {
-    return runCatching { apiRequest { request() } }
+    return runCatching { apiRequest(request) }
 }

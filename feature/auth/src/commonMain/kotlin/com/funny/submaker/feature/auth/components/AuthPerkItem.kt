@@ -1,15 +1,11 @@
 package com.funny.submaker.feature.auth.components
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -25,35 +21,41 @@ fun AuthPerkItem(
     badge: String,
     modifier: Modifier = Modifier,
 ) {
-    Row(
+    val tokens = rememberAuthUiTokens()
+    ListItem(
         modifier = modifier
-            .fillMaxWidth()
-            .clip(MaterialTheme.shapes.large)
-            .background(MaterialTheme.colorScheme.surfaceContainer)
-            .padding(14.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalAlignment = Alignment.Top,
-    ) {
-        Box(
-            modifier = Modifier
-                .size(38.dp)
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.primaryContainer),
-            contentAlignment = Alignment.Center,
-        ) {
+            .clip(AuthCardShape),
+        colors = ListItemDefaults.colors(
+            containerColor = tokens.listItemContainer,
+            headlineColor = tokens.titleColor,
+            supportingColor = tokens.subtitleColor,
+        ),
+        leadingContent = {
+            Box(
+                modifier = Modifier
+                    .size(34.dp)
+                    .clip(CircleShape)
+                    .background(tokens.listLeadingContainer),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = badge,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = tokens.listLeadingContent,
+                )
+            }
+        },
+        headlineContent = {
             Text(
-                text = badge,
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                text = title,
+                style = MaterialTheme.typography.titleSmall,
             )
-        }
-        Column(modifier = Modifier.fillMaxSize()) {
-            Text(text = title, style = MaterialTheme.typography.titleSmall)
+        },
+        supportingContent = {
             Text(
                 text = desc,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-        }
-    }
+        },
+    )
 }

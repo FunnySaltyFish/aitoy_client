@@ -16,7 +16,7 @@ object SubMakerPrefs {
     var apiPrefix: String by mutableDataSaverStateOf(
         DataSaverUtils,
         key = "API_PREFIX",
-        initialValue = "/api/v1",
+        initialValue = "submaker",
     )
 
     var authToken: String by mutableDataSaverStateOf(

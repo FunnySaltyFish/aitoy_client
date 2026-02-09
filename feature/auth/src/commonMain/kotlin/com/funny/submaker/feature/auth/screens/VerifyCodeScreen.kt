@@ -1,7 +1,10 @@
 package com.funny.submaker.feature.auth.screens
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
@@ -20,30 +23,29 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
 import com.funny.submaker.feature.auth.AuthViewModel
 import com.funny.submaker.feature.auth.components.OtpCodeField
+import com.funny.submaker.feature.auth.components.rememberAuthUiTokens
+import kotlinx.coroutines.delay
 
 @Composable
 fun VerifyCodeScreen(
     vm: AuthViewModel,
-    purpose: VerifyPurpose,
     onBack: () -> Unit,
-    onVerified: (String?) -> Unit,
+    onVerified: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val haptic = LocalHapticFeedback.current
+    val tokens = rememberAuthUiTokens()
     var code by remember { mutableStateOf(vm.verifyCode.filter(Char::isDigit).take(6)) }
     var pendingVerify by remember { mutableStateOf(false) }
     var errorTrigger by remember { mutableIntStateOf(0) }
+    var resendCountdown by remember { mutableIntStateOf(59) }
 
     LaunchedEffect(code) {
         vm.verifyCode = code
         if (code.length == 6 && !vm.busy) {
             pendingVerify = true
             vm.clearMessages()
-            when (purpose) {
-                VerifyPurpose.Register -> vm.register(onSuccess = { onVerified(null) })
-                VerifyPurpose.FindUsername -> vm.findUsername(onSuccess = { onVerified(it) })
-                VerifyPurpose.ResetPassword -> vm.resetPassword(onSuccess = { onVerified(null) })
-            }
+            vm.loginWithCode(onSuccess = onVerified)
         }
     }
 
@@ -57,16 +59,32 @@ fun VerifyCodeScreen(
         }
     }
 
+    LaunchedEffect(resendCountdown) {
+        if (resendCountdown > 0) {
+            delay(1_000)
+            resendCountdown -= 1
+        }
+    }
+
     Column(
-        modifier = modifier.padding(horizontal = 20.dp, vertical = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+        modifier = modifier
+            .fillMaxSize()
+            .background(tokens.pageBackground)
+            .padding(horizontal = 20.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        TextButton(onClick = onBack) { Text("返回") }
-        Text(text = "输入验证码", style = MaterialTheme.typography.headlineSmall)
+        TextButton(onClick = onBack) {
+            Text("←")
+        }
+        Text(
+            text = "输入验证码",
+            style = MaterialTheme.typography.headlineMedium,
+            color = tokens.titleColor,
+        )
         Text(
             text = "验证码已发送至 ${vm.email}",
             style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = tokens.subtitleColor,
         )
 
         OtpCodeField(
@@ -82,28 +100,25 @@ fun VerifyCodeScreen(
             },
         )
 
-        Text(
-            text = if (vm.busy) "校验中..." else "输入 6 位数字后将自动校验",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        TextButton(
-            onClick = {
-                when (purpose) {
-                    VerifyPurpose.Register -> vm.sendRegisterCode()
-                    VerifyPurpose.FindUsername -> vm.sendFindUsernameCode()
-                    VerifyPurpose.ResetPassword -> vm.sendResetPasswordCode()
-                }
-            },
-            enabled = !vm.busy,
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Start,
         ) {
-            Text("重新发送验证码")
+            Text(
+                text = "没有收到验证码？",
+                style = MaterialTheme.typography.bodyMedium,
+                color = tokens.subtitleColor,
+            )
+            TextButton(
+                onClick = {
+                    vm.sendLoginCode()
+                    resendCountdown = 59
+                },
+                enabled = !vm.busy && resendCountdown <= 0,
+            ) {
+                val label = if (resendCountdown > 0) "重新发送（${resendCountdown}s）" else "重新发送"
+                Text(label)
+            }
         }
     }
-}
-
-enum class VerifyPurpose {
-    Register,
-    FindUsername,
-    ResetPassword,
 }

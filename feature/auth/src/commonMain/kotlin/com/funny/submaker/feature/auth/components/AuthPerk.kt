@@ -8,18 +8,18 @@ data class AuthPerk(
 
 val DefaultAuthPerks = listOf(
     AuthPerk(
-        title = "自动保存",
-        desc = "字幕修改实时同步，意外退出也能恢复。",
+        title = "永久优先体验权",
+        desc = "Permanent Priority Access",
+        badge = "钥",
+    ),
+    AuthPerk(
+        title = "50GB 云存储空间",
+        desc = "High-speed Cloud Storage",
         badge = "云",
     ),
     AuthPerk(
-        title = "专业导出",
-        desc = "解锁 SRT/ASS 等专业级导出能力。",
-        badge = "导",
-    ),
-    AuthPerk(
-        title = "内测特权",
-        desc = "锁定 Founding Beta 身份与后续优惠。",
-        badge = "享",
+        title = "专属反馈通道",
+        desc = "Direct Feedback Channel",
+        badge = "讯",
     ),
 )

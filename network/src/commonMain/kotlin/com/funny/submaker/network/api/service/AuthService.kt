@@ -32,6 +32,14 @@ interface AuthService {
         @Field("deviceId") deviceId: String? = null,
     ): ApiResp<TokenUserPayload>
 
+    @POST("auth/login_code")
+    @FormUrlEncoded
+    suspend fun loginCode(
+        @Field("email") email: String,
+        @Field("code") code: String,
+        @Field("deviceId") deviceId: String? = null,
+    ): ApiResp<TokenUserPayload>
+
     @POST("auth/find_username")
     @FormUrlEncoded
     suspend fun findUsername(

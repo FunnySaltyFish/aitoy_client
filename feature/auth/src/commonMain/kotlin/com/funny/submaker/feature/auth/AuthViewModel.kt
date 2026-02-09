@@ -25,12 +25,7 @@ class AuthViewModel : ViewModel() {
     private val vmScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     var email by mutableStateOf("")
-    var password by mutableStateOf("")
-    var username by mutableStateOf("")
     var verifyCode by mutableStateOf("")
-
-    var newPassword by mutableStateOf("")
-    var repeatPassword by mutableStateOf("")
 
     var device by mutableStateOf(DeviceProfile(deviceId = SubMakerPrefs.deviceId))
     var products by mutableStateOf<List<Product>>(emptyList())
@@ -91,16 +86,26 @@ class AuthViewModel : ViewModel() {
         }
     }
 
-    fun sendRegisterCode(onSuccess: (() -> Unit)? = null) = sendCode(purpose = "register", onSuccess = onSuccess)
-    fun sendFindUsernameCode(onSuccess: (() -> Unit)? = null) = sendCode(purpose = "find_username", onSuccess = onSuccess)
-    fun sendResetPasswordCode(onSuccess: (() -> Unit)? = null) = sendCode(purpose = "reset_password", onSuccess = onSuccess)
+    fun emailFormatError(input: String = email): String? {
+        val normalized = input.trim().lowercase()
+        if (normalized.isBlank()) return "请输入邮箱"
+        if (!EMAIL_REGEX.matches(normalized)) return "邮箱格式不正确"
+        val domain = normalized.substringAfter('@', "")
+        if (domain !in SUPPORTED_EMAIL_DOMAINS) {
+            return "暂只支持主流邮箱（如 QQ/Gmail/Outlook/163）"
+        }
+        return null
+    }
+
+    fun sendLoginCode(onSuccess: (() -> Unit)? = null) = sendCode(purpose = "login", onSuccess = onSuccess)
 
     private fun sendCode(
         purpose: String,
         onSuccess: (() -> Unit)? = null,
     ) {
-        if (email.isBlank()) {
-            errorMessage = "请先输入邮箱"
+        val emailError = emailFormatError()
+        if (emailError != null) {
+            errorMessage = emailError
             return
         }
         busy = true
@@ -109,7 +114,7 @@ class AuthViewModel : ViewModel() {
             runCatching {
                 apiRequestUnit {
                     SubMakerServices.authService.sendAuthCode(
-                        email = email,
+                        email = email.trim(),
                         purpose = purpose,
                     )
                 }
@@ -123,9 +128,10 @@ class AuthViewModel : ViewModel() {
         }
     }
 
-    fun login(onSuccess: (() -> Unit)? = null) {
-        if (email.isBlank() || password.isBlank()) {
-            errorMessage = "请填写邮箱和密码"
+    fun loginWithCode(onSuccess: (() -> Unit)? = null) {
+        val emailError = emailFormatError()
+        if (emailError != null || verifyCode.length != 6) {
+            errorMessage = emailError ?: "请输入 6 位验证码"
             return
         }
         busy = true
@@ -133,9 +139,9 @@ class AuthViewModel : ViewModel() {
         vmScope.launch {
             runCatching {
                 apiRequest {
-                    SubMakerServices.authService.loginPassword(
-                        email = email,
-                        password = password,
+                    SubMakerServices.authService.loginCode(
+                        email = email.trim(),
+                        code = verifyCode,
                         deviceId = SubMakerPrefs.deviceId,
                     )
                 }
@@ -144,92 +150,6 @@ class AuthViewModel : ViewModel() {
                 SubMakerPrefs.user = it.user
                 refreshMe()
                 loadDeviceStatus()
-                onSuccess?.invoke()
-            }.onFailure {
-                errorMessage = it.userMessage()
-            }
-            busy = false
-        }
-    }
-
-    fun register(onSuccess: (() -> Unit)? = null) {
-        if (email.isBlank() || password.isBlank() || verifyCode.isBlank()) {
-            errorMessage = "请填写邮箱、密码、验证码"
-            return
-        }
-        busy = true
-        clearMessages()
-        vmScope.launch {
-            runCatching {
-                apiRequest {
-                    SubMakerServices.authService.register(
-                        email = email,
-                        password = password,
-                        code = verifyCode,
-                        username = username.takeIf { it.isNotBlank() },
-                        deviceId = SubMakerPrefs.deviceId,
-                    )
-                }
-            }.onSuccess {
-                SubMakerPrefs.authToken = it.token
-                SubMakerPrefs.user = it.user
-                refreshMe()
-                loadDeviceStatus()
-                onSuccess?.invoke()
-            }.onFailure {
-                errorMessage = it.userMessage()
-            }
-            busy = false
-        }
-    }
-
-    fun findUsername(onSuccess: ((String) -> Unit)? = null) {
-        if (email.isBlank() || verifyCode.isBlank()) {
-            errorMessage = "请填写邮箱和验证码"
-            return
-        }
-        busy = true
-        clearMessages()
-        vmScope.launch {
-            runCatching {
-                apiRequest {
-                    SubMakerServices.authService.findUsername(
-                        email = email,
-                        code = verifyCode,
-                    )
-                }.username
-            }.onSuccess {
-                infoMessage = "账号：$it"
-                onSuccess?.invoke(it)
-            }.onFailure {
-                errorMessage = it.userMessage()
-            }
-            busy = false
-        }
-    }
-
-    fun resetPassword(onSuccess: (() -> Unit)? = null) {
-        if (email.isBlank() || verifyCode.isBlank() || newPassword.isBlank()) {
-            errorMessage = "请填写邮箱、验证码、新密码"
-            return
-        }
-        if (newPassword != repeatPassword) {
-            errorMessage = "两次密码不一致"
-            return
-        }
-        busy = true
-        clearMessages()
-        vmScope.launch {
-            runCatching {
-                apiRequestUnit {
-                    SubMakerServices.authService.resetPassword(
-                        email = email,
-                        code = verifyCode,
-                        newPassword = newPassword,
-                    )
-                }
-            }.onSuccess {
-                infoMessage = "密码已重置，请使用新密码登录"
                 onSuccess?.invoke()
             }.onFailure {
                 errorMessage = it.userMessage()
@@ -293,6 +213,13 @@ class AuthViewModel : ViewModel() {
         super.onCleared()
     }
 }
+
+private val EMAIL_REGEX = Regex("^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$")
+private val SUPPORTED_EMAIL_DOMAINS = setOf(
+    "qq.com", "foxmail.com", "163.com", "126.com", "yeah.net",
+    "gmail.com", "outlook.com", "hotmail.com", "live.com", "msn.com",
+    "icloud.com", "yahoo.com", "proton.me", "protonmail.com",
+)
 
 private fun Throwable.userMessage(): String =
     when (this) {

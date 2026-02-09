@@ -128,8 +128,6 @@ private fun WorkspacePane(
             val text = if (
                 selected is Routes.AuthLogin ||
                 selected is Routes.AuthVerify ||
-                selected is Routes.AuthForgotPassword ||
-                selected is Routes.AuthFindUsername ||
                 selected is Routes.AuthBetaWelcome ||
                 selected is Routes.AuthAccount
             ) {
