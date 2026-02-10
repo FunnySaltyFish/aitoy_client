@@ -15,6 +15,7 @@ kotlin {
             implementation(libs.androidx.material3.adaptive.navigation3)
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.serialization.json)
+            implementation(libs.kotlinx.datetime)
             api(libs.eygraber.uri.kmp)
             implementation(libs.vinceglb.filekit.dialogs)
         }
