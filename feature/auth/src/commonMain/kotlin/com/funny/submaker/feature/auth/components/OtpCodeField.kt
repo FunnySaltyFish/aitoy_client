@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -24,7 +25,6 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -57,9 +57,9 @@ fun OtpCodeField(
     }
 
     BasicTextField(
-        value = TextFieldValue(value),
+        value = value,
         onValueChange = {
-            val next = it.text.filter(Char::isDigit).take(length)
+            val next = it.filter(Char::isDigit).take(length)
             if (next != value) onValueChange(next)
         },
         modifier = modifier
@@ -67,7 +67,7 @@ fun OtpCodeField(
             .offset { IntOffset(shake.value.roundToInt(), 0) },
         textStyle = TextStyle(fontSize = 0.sp),
         cursorBrush = SolidColor(tokens.otpActiveBorder),
-        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+        keyboardOptions = KeyboardOptions(
             keyboardType = KeyboardType.NumberPassword,
         ),
         visualTransformation = VisualTransformation.None,
