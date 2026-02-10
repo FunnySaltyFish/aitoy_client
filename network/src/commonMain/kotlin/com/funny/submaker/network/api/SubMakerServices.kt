@@ -5,6 +5,7 @@ import com.funny.submaker.network.api.service.AsrService
 import com.funny.submaker.network.api.service.AuthService
 import com.funny.submaker.network.api.service.EntitlementService
 import com.funny.submaker.network.api.service.PayService
+import com.funny.submaker.network.api.service.SyncService
 import com.funny.submaker.network.api.service.UploadService
 import com.funny.submaker.network.api.service.UserService
 
@@ -27,6 +28,10 @@ object SubMakerServices {
 
     val uploadService: UploadService by lazy(LazyThreadSafetyMode.PUBLICATION) {
         ServiceCreator.create(UploadService::class.java)
+    }
+
+    val syncService: SyncService by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        ServiceCreator.create(SyncService::class.java)
     }
 
     fun asrService(baseUrlOverride: String? = null): AsrService {

@@ -8,6 +8,9 @@ kotlin {
         commonMain.dependencies {
             implementation(projects.core)
             implementation(projects.network)
+            implementation(projects.database)
+            implementation(libs.androidx.room.common)
+            implementation(libs.kotlinx.serialization.json)
             implementation(libs.androidx.lifecycle.viewmodelCompose)
             implementation(libs.androidx.lifecycle.runtimeCompose)
             implementation(libs.compose.foundation)

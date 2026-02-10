@@ -148,6 +148,11 @@ class AuthViewModel : ViewModel() {
             }.onSuccess {
                 SubMakerPrefs.authToken = it.token
                 SubMakerPrefs.user = it.user
+                runCatching {
+                    SyncAfterLoginUseCase.executeAfterLogin()
+                }.onFailure {
+                    errorMessage = it.userMessage()
+                }
                 refreshMe()
                 loadDeviceStatus()
                 onSuccess?.invoke()
