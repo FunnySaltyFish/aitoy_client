@@ -7,7 +7,7 @@ import com.funny.submaker.database.model.SubtitleProjectEntity
 
 @Database(
     entities = [SubtitleProjectEntity::class],
-    version = 1,
+    version = 4,
     exportSchema = false,
 )
 abstract class SubMakerDatabase : RoomDatabase() {
