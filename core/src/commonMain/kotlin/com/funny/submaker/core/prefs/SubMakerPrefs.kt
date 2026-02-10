@@ -7,6 +7,10 @@ import com.funny.submaker.core.device.DeviceIdProvider
 import com.funny.submaker.core.model.UserProfile
 
 object SubMakerPrefs {
+    init {
+        SubMakerPrefsInit.init()
+    }
+
     var serverBaseUrl: String by mutableDataSaverStateOf(
         DataSaverUtils,
         key = "SERVER_BASE_URL",
