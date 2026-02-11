@@ -14,6 +14,7 @@ object Routes {
 
     @Serializable
     data class Asr(
+        val projectId: String? = null,
         val autoStart: Boolean = false,
     ) : AppRoute
 

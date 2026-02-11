@@ -9,8 +9,11 @@ import com.funny.submaker.core.kmp.displayName
 import com.funny.submaker.core.kmp.mimeType
 import com.funny.submaker.core.kmp.readBytes
 import com.funny.submaker.core.kmp.sizeBytes
+import com.funny.submaker.core.prefs.SubMakerPrefs
 import com.funny.submaker.core.subtitle.SubtitleSegment
 import com.funny.submaker.core.utils.nowMs
+import com.funny.submaker.database.SubtitleProjectRepository
+import com.funny.submaker.database.model.SubtitleProjectEntity
 import com.funny.submaker.network.api.ApiException
 import com.funny.submaker.network.api.SubMakerServices
 import com.funny.submaker.network.api.apiRequest
@@ -19,11 +22,11 @@ import com.funny.submaker.network.api.service.AsrOptionsReq
 import com.funny.submaker.network.api.service.AsrSessionReq
 import com.funny.submaker.network.api.service.AsrUploadTicketReq
 import com.funny.submaker.network.api.service.uploadFileToTicket
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 class AsrViewModel : ViewModel() {
@@ -45,6 +48,8 @@ class AsrViewModel : ViewModel() {
     var stageText by mutableStateOf("待开始")
     var lastResult by mutableStateOf<String?>(null)
     var errorMessage by mutableStateOf<String?>(null)
+    var linkedProjectId by mutableStateOf<String?>(null)
+    var linkedProjectName by mutableStateOf<String?>(null)
 
     fun clearError() {
         errorMessage = null
@@ -57,6 +62,30 @@ class AsrViewModel : ViewModel() {
         mediaSizeBytes = uri.sizeBytes()
         stageText = "已选择文件"
         clearError()
+        linkedProjectId?.let { projectId ->
+            upsertLinkedProject { current ->
+                current.copy(
+                    sourceFileName = mediaName ?: current.sourceFileName,
+                    updatedAtEpochMillis = nowMs(),
+                )
+            }
+        }
+    }
+
+    fun bindProject(projectId: String?) {
+        if (projectId == linkedProjectId) return
+        linkedProjectId = projectId
+        linkedProjectName = null
+        if (projectId == null) return
+        vmScope.launch {
+            SubtitleProjectRepository.queryOneById(currentOwnerUid(), projectId)
+                .onSuccess { entity ->
+                    linkedProjectName = entity?.name
+                    if (entity != null) {
+                        stageText = "已绑定项目：${entity.name}"
+                    }
+                }
+        }
     }
 
     fun startAsr() {
@@ -70,6 +99,7 @@ class AsrViewModel : ViewModel() {
         stageText = "准备上传"
         lastResult = null
         segments = emptyList()
+        updateLinkedProjectStatus(ProjectStatus.Running.value)
         vmScope.launch {
             runCatching {
                 val targetBaseUrl = apiBaseUrl.trim().ifBlank { null }
@@ -162,13 +192,26 @@ class AsrViewModel : ViewModel() {
                 segments = parsed
                 stageText = "完成"
                 lastResult = "识别完成：${segments.size} 段，可导出 SRT/VTT"
+                updateLinkedProjectStatus(ProjectStatus.Done.value)
             }.onFailure {
                 errorMessage = it.userMessage()
                 stageText = "失败"
+                updateLinkedProjectStatus(ProjectStatus.Failed.value)
                 running = false
             }.onSuccess {
                 running = false
             }
+        }
+    }
+
+    fun onExportSuccess(format: String) {
+        if (linkedProjectId == null) return
+        upsertLinkedProject { current ->
+            current.copy(
+                lastExportFormat = format,
+                segmentCount = segments.size,
+                updatedAtEpochMillis = nowMs(),
+            )
         }
     }
 
@@ -181,6 +224,38 @@ class AsrViewModel : ViewModel() {
         vmScope.cancel()
         super.onCleared()
     }
+
+    private fun updateLinkedProjectStatus(status: String) {
+        if (linkedProjectId == null) return
+        upsertLinkedProject { current ->
+            current.copy(
+                status = status,
+                sourceFileName = mediaName ?: current.sourceFileName,
+                segmentCount = if (segments.isEmpty()) current.segmentCount else segments.size,
+                durationMs = if (segments.isEmpty()) current.durationMs else (segments.lastOrNull()?.endMs
+                    ?: current.durationMs),
+                updatedAtEpochMillis = nowMs(),
+            )
+        }
+    }
+
+    private fun upsertLinkedProject(transform: (SubtitleProjectEntity) -> SubtitleProjectEntity) {
+        val projectId = linkedProjectId ?: return
+        vmScope.launch {
+            val ownerUid = currentOwnerUid()
+            SubtitleProjectRepository.queryOneById(ownerUid, projectId)
+                .onSuccess { entity ->
+                    val current = entity ?: return@onSuccess
+                    SubtitleProjectRepository.upsert(transform(current))
+                }
+        }
+    }
+
+    private fun currentOwnerUid(): String {
+        val uid = SubMakerPrefs.user.uid
+        if (uid.isNotBlank()) return "uid:$uid"
+        return "device:${SubMakerPrefs.deviceId}"
+    }
 }
 
 private fun Throwable.userMessage(): String =
@@ -192,4 +267,10 @@ private fun Throwable.userMessage(): String =
 private fun String.toKeyHint(): String {
     if (isBlank()) return ""
     return "sk-****${takeLast(4)}"
+}
+
+private enum class ProjectStatus(val value: String) {
+    Running("running"),
+    Done("done"),
+    Failed("failed"),
 }

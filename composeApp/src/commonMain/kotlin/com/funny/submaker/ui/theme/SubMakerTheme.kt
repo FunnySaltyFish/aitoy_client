@@ -24,6 +24,7 @@ private val DarkColorScheme = darkColorScheme(
     surfaceVariant = Color(0xFF17212B),
     onSurfaceVariant = Color(0xFFB9C4D0),
     outline = Color(0xFF445361),
+    outlineVariant = Color(0xFF293543),
 )
 
 private val LightColorScheme = lightColorScheme(
@@ -44,11 +45,13 @@ private val LightColorScheme = lightColorScheme(
     surfaceVariant = Color(0xFFE0E6F2),
     onSurfaceVariant = Color(0xFF424A59),
     outline = Color(0xFF727B8B),
+    outlineVariant = Color(0xFFC5CEDD),
 )
 
 @Composable
 fun SubMakerTheme(content: @Composable () -> Unit) {
-    val colorScheme = DarkColorScheme //if (isSystemInDarkTheme()) DarkColorScheme else LightColorScheme
+    val colorScheme =
+        DarkColorScheme // 出于 debug 原因，现在强制使用暗色主题，你不要改 if (isSystemInDarkTheme()) DarkColorScheme else LightColorScheme
     MaterialTheme(
         colorScheme = colorScheme,
         content = content,

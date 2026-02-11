@@ -53,15 +53,30 @@ fun AsrScreen(
                 val exportSrt = rememberExportTextFileAction(
                     mimeType = "text/plain",
                     fileName = { vm.suggestedExportFileName("srt") },
-                    onExported = { vm.lastResult = "SRT 导出成功：${vm.suggestedExportFileName("srt")}" },
+                    onExported = {
+                        vm.lastResult = "SRT 导出成功：${vm.suggestedExportFileName("srt")}"
+                        vm.onExportSuccess("SRT")
+                    },
                     onFailed = { vm.errorMessage = it.message ?: "SRT 导出失败" },
                 )
                 val exportVtt = rememberExportTextFileAction(
                     mimeType = "text/vtt",
                     fileName = { vm.suggestedExportFileName("vtt") },
-                    onExported = { vm.lastResult = "VTT 导出成功：${vm.suggestedExportFileName("vtt")}" },
+                    onExported = {
+                        vm.lastResult = "VTT 导出成功：${vm.suggestedExportFileName("vtt")}"
+                        vm.onExportSuccess("VTT")
+                    },
                     onFailed = { vm.errorMessage = it.message ?: "VTT 导出失败" },
                 )
+
+                val linkedProjectName = vm.linkedProjectName
+                if (linkedProjectName != null) {
+                    Text(
+                        text = "当前项目：$linkedProjectName",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
 
                 Button(
                     onClick = pickMedia,
