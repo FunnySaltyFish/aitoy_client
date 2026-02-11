@@ -15,19 +15,37 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.outlined.Description as DescriptionOutline
+import androidx.compose.material.icons.outlined.FolderOpen
+import androidx.compose.material.icons.outlined.Person as PersonOutline
+import androidx.compose.material.icons.outlined.Schedule as ScheduleOutline
+import androidx.compose.material.icons.outlined.Settings as SettingsOutline
+import androidx.compose.material.icons.outlined.StarOutline
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -43,7 +61,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.window.core.layout.WindowSizeClass
 import com.funny.submaker.core.utils.TimeUtils
@@ -110,7 +130,7 @@ fun WorkspaceScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(innerPadding)
-                        .padding(12.dp),
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
                 )
             }
         }
@@ -122,14 +142,21 @@ private fun WorkspaceBottomBar(
     selectedPage: WorkspaceMainPage,
     onSelect: (WorkspaceMainPage) -> Unit,
 ) {
+    val tokens = rememberWorkspaceUiTokens()
     NavigationBar(
         modifier = Modifier.navigationBarsPadding(),
+        containerColor = tokens.navigationContainer,
     ) {
         WorkspaceMainPage.entries.forEach { page ->
             NavigationBarItem(
                 selected = selectedPage == page,
                 onClick = { onSelect(page) },
-                icon = { Text(text = page.badge) },
+                icon = {
+                    Icon(
+                        imageVector = page.icon(selectedPage == page),
+                        contentDescription = page.label,
+                    )
+                },
                 label = { Text(page.label) },
             )
         }
@@ -142,17 +169,24 @@ private fun WorkspaceNavigationRail(
     onSelect: (WorkspaceMainPage) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val tokens = rememberWorkspaceUiTokens()
     NavigationRail(
         modifier = modifier
             .clip(WorkspacePanelShape)
-            .background(MaterialTheme.colorScheme.surfaceContainerLow),
+            .background(tokens.navigationContainer),
+        containerColor = tokens.navigationContainer,
     ) {
         Spacer(modifier = Modifier.height(8.dp))
         WorkspaceMainPage.entries.forEach { page ->
             NavigationRailItem(
                 selected = selectedPage == page,
                 onClick = { onSelect(page) },
-                icon = { Text(text = page.badge) },
+                icon = {
+                    Icon(
+                        imageVector = page.icon(selectedPage == page),
+                        contentDescription = page.label,
+                    )
+                },
                 label = { Text(page.label) },
                 alwaysShowLabel = true,
             )
@@ -208,22 +242,32 @@ private fun WorkspaceProjectsPage(
                     containerColor = MaterialTheme.colorScheme.background.copy(alpha = 0f),
                 ),
                 title = {
-                    Text(
-                        text = "我的项目",
-                        fontWeight = FontWeight.SemiBold,
-                    )
+                    Column {
+                        Text(
+                            text = "工作台",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = tokens.weakTextColor,
+                        )
+                        Text(
+                            text = "我的项目",
+                            style = MaterialTheme.typography.headlineSmall,
+                            color = tokens.titleColor,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
                 },
                 actions = {
                     Button(onClick = onOpenAsr) {
+                        Icon(
+                            imageVector = Icons.Filled.Add,
+                            contentDescription = "新建识别",
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Spacer(modifier = Modifier.size(6.dp))
                         Text("新建识别")
                     }
                 },
             )
-        },
-        floatingActionButton = {
-            FloatingActionButton(onClick = vm::createProject) {
-                Text("+")
-            }
         },
     ) { innerPadding ->
         Column(
@@ -236,12 +280,23 @@ private fun WorkspaceProjectsPage(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            WorkspaceSummaryCard(
+                projectCount = vm.projects.size,
+                starredCount = vm.projects.count { it.starred },
+            )
+
             OutlinedTextField(
                 value = vm.searchKeyword,
                 onValueChange = { vm.searchKeyword = it },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
                 label = { Text("搜索项目") },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Filled.Search,
+                        contentDescription = "搜索",
+                    )
+                },
                 placeholder = { Text("项目名 / 文件名") },
             )
 
@@ -260,13 +315,12 @@ private fun WorkspaceProjectsPage(
 
             val list = vm.filteredProjects
             if (vm.loading) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("正在加载项目...", color = tokens.weakTextColor)
-                }
+                WorkspaceEmptyState(text = "正在加载项目...", modifier = Modifier.fillMaxSize())
             } else if (list.isEmpty()) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("暂无项目，点击右下角“+”开始", color = tokens.weakTextColor)
-                }
+                WorkspaceEmptyState(
+                    text = "暂无项目，点击右上角“新建识别”开始",
+                    modifier = Modifier.fillMaxSize(),
+                )
             } else {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
@@ -297,6 +351,68 @@ private fun WorkspaceProjectsPage(
 }
 
 @Composable
+private fun WorkspaceSummaryCard(
+    projectCount: Int,
+    starredCount: Int,
+) {
+    val tokens = rememberWorkspaceUiTokens()
+    Card(
+        shape = WorkspaceCardShape,
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = tokens.heroCardColor),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    text = "项目总数 $projectCount",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = tokens.titleColor,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = "星标项目 $starredCount",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = tokens.weakTextColor,
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .clip(WorkspaceChipShape)
+                    .background(tokens.heroAccent)
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+            ) {
+                Text(
+                    text = "进行中",
+                    color = tokens.heroAccentText,
+                    style = MaterialTheme.typography.labelMedium,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun WorkspaceEmptyState(
+    text: String,
+    modifier: Modifier = Modifier,
+) {
+    val tokens = rememberWorkspaceUiTokens()
+    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+        Text(
+            text = text,
+            color = tokens.weakTextColor,
+            style = MaterialTheme.typography.bodyMedium,
+        )
+    }
+}
+
+@Composable
 private fun WorkspaceSettingsPage(
     onOpenAsr: () -> Unit,
     modifier: Modifier = Modifier,
@@ -322,18 +438,21 @@ private fun WorkspaceSettingsPage(
             style = MaterialTheme.typography.bodyMedium,
             color = tokens.weakTextColor,
         )
-        Card(shape = WorkspaceCardShape, modifier = Modifier.fillMaxWidth()) {
+        Card(
+            shape = WorkspaceCardShape,
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = tokens.heroCardColor),
+        ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(tokens.heroCardColor)
                     .padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(
-                    "快速入口",
+                    text = "快速入口",
                     style = MaterialTheme.typography.titleMedium,
-                    color = tokens.titleColor
+                    color = tokens.titleColor,
                 )
                 Button(onClick = onOpenAsr) {
                     Text("打开 ASR 页面")
@@ -365,11 +484,14 @@ private fun WorkspaceProfilePage(
             color = tokens.titleColor,
             fontWeight = FontWeight.SemiBold,
         )
-        Card(shape = WorkspaceCardShape, modifier = Modifier.fillMaxWidth()) {
+        Card(
+            shape = WorkspaceCardShape,
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = tokens.heroCardColor),
+        ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(tokens.heroCardColor)
                     .padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
@@ -408,11 +530,11 @@ private fun ProjectRow(
             .clip(WorkspaceCardShape)
             .clickable(onClick = onSelect)
             .border(1.dp, borderColor, WorkspaceCardShape),
+        colors = CardDefaults.cardColors(containerColor = tokens.listCardColor),
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(tokens.listCardColor)
                 .padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
@@ -421,65 +543,89 @@ private fun ProjectRow(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    text = project.name,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = tokens.titleColor,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Box(
-                    modifier = Modifier
-                        .clip(WorkspaceChipShape)
-                        .background(tokens.primaryChipContainer)
-                        .clickable(onClick = onToggleStar)
-                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                Row(
+                    modifier = Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(
-                        text = if (project.starred) "已星标" else "星标",
-                        color = tokens.primaryChipText,
-                        style = MaterialTheme.typography.labelMedium,
+                    Box(
+                        modifier = Modifier
+                            .size(34.dp)
+                            .clip(WorkspaceChipShape)
+                            .background(tokens.mutedContainer),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.FolderOpen,
+                            contentDescription = null,
+                            tint = tokens.mutedContainerText,
+                        )
+                    }
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            text = project.name,
+                            style = MaterialTheme.typography.titleMedium,
+                            color = tokens.titleColor,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            text = if (project.sourceFileName.isBlank()) "未关联源文件" else project.sourceFileName,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = tokens.weakTextColor,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+                IconButton(onClick = onToggleStar) {
+                    Icon(
+                        imageVector = if (project.starred) Icons.Filled.Star else Icons.Outlined.StarOutline,
+                        contentDescription = if (project.starred) "取消星标" else "设为星标",
+                        tint = if (project.starred) tokens.heroAccent else tokens.weakTextColor,
                     )
                 }
             }
-
-            Text(
-                text = if (project.sourceFileName.isBlank()) "未关联源文件" else project.sourceFileName,
-                style = MaterialTheme.typography.bodySmall,
-                color = tokens.weakTextColor,
-            )
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 StatusBadge(status = project.status)
-                MetadataBadge(text = "片段 ${project.segmentCount}")
-                MetadataBadge(text = formatDuration(project.durationMs))
+                MetadataBadge(
+                    icon = Icons.Outlined.DescriptionOutline,
+                    text = "片段 ${project.segmentCount}",
+                )
+                MetadataBadge(
+                    icon = Icons.Outlined.ScheduleOutline,
+                    text = formatDuration(project.durationMs),
+                )
                 val export = project.lastExportFormat
                 if (export.isNotBlank()) {
-                    MetadataBadge(text = export)
+                    MetadataBadge(icon = Icons.Filled.Description, text = export)
                 }
             }
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Button(onClick = onOpenAsr) {
+                Text(
+                    text = "更新时间 ${
+                        TimeUtils.formatTime(
+                            project.updatedAtEpochMillis,
+                            "%02d-%02d %02d:%02d",
+                        )
+                    }",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = tokens.weakTextColor,
+                )
+                OutlinedButton(onClick = onOpenAsr) {
                     Text("打开识别")
                 }
             }
-
-            Text(
-                text = "更新时间 ${
-                    TimeUtils.formatTime(
-                        project.updatedAtEpochMillis,
-                        "%02d-%02d %02d:%02d"
-                    )
-                }",
-                style = MaterialTheme.typography.labelSmall,
-                color = tokens.weakTextColor,
-            )
         }
     }
 }
@@ -491,25 +637,25 @@ private fun StatusBadge(status: String) {
         ProjectStatus.Done.value -> Triple(
             ProjectStatus.Done.label,
             tokens.successContainer,
-            tokens.successText
+            tokens.successText,
         )
 
         ProjectStatus.Running.value -> Triple(
             ProjectStatus.Running.label,
             tokens.warningContainer,
-            tokens.warningText
+            tokens.warningText,
         )
 
         ProjectStatus.Failed.value -> Triple(
             ProjectStatus.Failed.label,
             tokens.dangerContainer,
-            tokens.dangerText
+            tokens.dangerText,
         )
 
         else -> Triple(
             ProjectStatus.Draft.label,
             tokens.primaryChipContainer,
-            tokens.primaryChipText
+            tokens.primaryChipText,
         )
     }
     Box(
@@ -523,18 +669,29 @@ private fun StatusBadge(status: String) {
 }
 
 @Composable
-private fun MetadataBadge(text: String) {
+private fun MetadataBadge(
+    icon: ImageVector,
+    text: String,
+) {
     val tokens = rememberWorkspaceUiTokens()
-    Box(
+    Row(
         modifier = Modifier
             .clip(WorkspaceChipShape)
-            .background(tokens.primaryChipContainer.copy(alpha = 0.6f))
+            .background(tokens.mutedContainer)
             .padding(horizontal = 10.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            modifier = Modifier.size(14.dp),
+            tint = tokens.mutedContainerText,
+        )
         Text(
             text = text,
-            color = tokens.primaryChipText,
-            style = MaterialTheme.typography.labelMedium
+            color = tokens.mutedContainerText,
+            style = MaterialTheme.typography.labelMedium,
         )
     }
 }
@@ -549,9 +706,26 @@ private fun formatDuration(durationMs: Long): String {
 
 private enum class WorkspaceMainPage(
     val label: String,
-    val badge: String,
+    val activeIcon: ImageVector,
+    val inactiveIcon: ImageVector,
 ) {
-    Projects(label = "项目", badge = "项"),
-    Settings(label = "设置", badge = "设"),
-    Profile(label = "个人", badge = "我"),
+    Projects(
+        label = "项目",
+        activeIcon = Icons.Filled.Folder,
+        inactiveIcon = Icons.Outlined.FolderOpen,
+    ),
+    Settings(
+        label = "设置",
+        activeIcon = Icons.Filled.Settings,
+        inactiveIcon = Icons.Outlined.SettingsOutline,
+    ),
+    Profile(
+        label = "个人",
+        activeIcon = Icons.Filled.Person,
+        inactiveIcon = Icons.Outlined.PersonOutline,
+    ),
+}
+
+private fun WorkspaceMainPage.icon(selected: Boolean): ImageVector {
+    return if (selected) activeIcon else inactiveIcon
 }

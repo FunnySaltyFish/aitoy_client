@@ -37,6 +37,7 @@ kotlin {
             implementation(libs.compose.runtime)
             implementation(libs.compose.foundation)
             implementation(libs.compose.material3)
+            implementation(libs.compose.material.icons.extended)
             implementation(libs.androidx.navigation3.ui)
             implementation(libs.androidx.material3.adaptive)
             implementation(libs.androidx.material3.adaptive.navigation3)

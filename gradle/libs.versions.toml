@@ -24,6 +24,7 @@ kotlinx-datetime = "0.7.1"
 material3 = "1.10.0-alpha05"
 androidx-navigation3 = "1.0.0-alpha06"
 androidx-material3-adaptive = "1.3.0-alpha03"
+materialIconsExtended = "1.7.3"
 squareup-okhttp = "4.12.0"
 squareup-retrofit = "2.10.0"
 squareup-retrofit-kotlinx-serialization = "2.10.0"
@@ -58,6 +59,8 @@ androidx-material3-adaptive-navigation3 = { module = "org.jetbrains.compose.mate
 compose-ui = { module = "org.jetbrains.compose.ui:ui", version.ref = "composeMultiplatform" }
 compose-components-resources = { module = "org.jetbrains.compose.components:components-resources", version.ref = "composeMultiplatform" }
 compose-uiToolingPreview = { module = "org.jetbrains.compose.ui:ui-tooling-preview", version.ref = "composeMultiplatform" }
+compose-material-icons-extended = { module = "org.jetbrains.compose.material:material-icons-extended", version.ref = "materialIconsExtended" }
+
 kotlinx-coroutinesSwing = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-swing", version.ref = "kotlinx-coroutines" }
 tencent-mmkv = { module = "com.tencent:mmkv", version.ref = "tencent-mmkv" }
 vinceglb-filekit-dialogs = { module = "io.github.vinceglb:filekit-dialogs", version.ref = "filekit" }
