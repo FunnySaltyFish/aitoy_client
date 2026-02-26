@@ -1,6 +1,7 @@
 package com.funny.submaker.network
 
 import com.funny.submaker.core.prefs.SubMakerPrefs
+import com.funny.submaker.core.utils.JsonX
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.ResponseBody
 import retrofit2.Converter

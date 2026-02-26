@@ -1,7 +1,5 @@
-package com.funny.submaker.network
+package com.funny.submaker.core.utils
 
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 
 object JsonX {
