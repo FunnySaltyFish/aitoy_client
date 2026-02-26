@@ -36,7 +36,7 @@ actual fun Uri.writeText(text: String) {
     }.onFailure { it.printStackTrace() }
 }
 
-private fun Uri.toNioPath(): Path? {
+fun Uri.toNioPath(): Path? {
     return runCatching {
         val raw = toString()
         if (raw.startsWith("file:", ignoreCase = true)) {
