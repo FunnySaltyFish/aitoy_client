@@ -27,11 +27,7 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.outlined.Description as DescriptionOutline
 import androidx.compose.material.icons.outlined.FolderOpen
-import androidx.compose.material.icons.outlined.Person as PersonOutline
-import androidx.compose.material.icons.outlined.Schedule as ScheduleOutline
-import androidx.compose.material.icons.outlined.Settings as SettingsOutline
 import androidx.compose.material.icons.outlined.StarOutline
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -65,73 +61,80 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.window.core.layout.WindowSizeClass
 import com.funny.submaker.core.utils.TimeUtils
 import com.funny.submaker.database.model.SubtitleProjectEntity
+import androidx.compose.material.icons.outlined.Description as DescriptionOutline
+import androidx.compose.material.icons.outlined.Person as PersonOutline
+import androidx.compose.material.icons.outlined.Schedule as ScheduleOutline
+import androidx.compose.material.icons.outlined.Settings as SettingsOutline
 
 @Composable
 @OptIn(ExperimentalMaterial3AdaptiveApi::class)
 fun WorkspaceScreen(
-    vm: WorkspaceViewModel,
     onOpenAsr: () -> Unit,
     onOpenProjectAsr: (String) -> Unit,
     onOpenAccount: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val tokens = rememberWorkspaceUiTokens()
-    val adaptiveInfo = currentWindowAdaptiveInfo()
-    val useSideNavigation = adaptiveInfo.windowSizeClass.isWidthAtLeastBreakpoint(
-        WindowSizeClass.WIDTH_DP_MEDIUM_LOWER_BOUND,
-    )
-    var currentPage by rememberSaveable { mutableStateOf(WorkspaceMainPage.Projects) }
+    val vm = viewModel { WorkspaceViewModel() }
+    ProvideWorkspaceUiTokens {
+        val tokens = rememberWorkspaceUiTokens()
+        val adaptiveInfo = currentWindowAdaptiveInfo()
+        val useSideNavigation = adaptiveInfo.windowSizeClass.isWidthAtLeastBreakpoint(
+            WindowSizeClass.WIDTH_DP_MEDIUM_LOWER_BOUND,
+        )
+        var currentPage by rememberSaveable { mutableStateOf(WorkspaceMainPage.Projects) }
 
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(tokens.pageBackground),
-    ) {
-        if (useSideNavigation) {
-            Row(modifier = Modifier.fillMaxSize()) {
-                WorkspaceNavigationRail(
-                    selectedPage = currentPage,
-                    onSelect = { currentPage = it },
-                    modifier = Modifier
-                        .fillMaxHeight()
-                        .padding(start = 8.dp, top = 12.dp, bottom = 12.dp),
-                )
-                WorkspacePageContent(
-                    page = currentPage,
-                    vm = vm,
-                    onOpenAsr = onOpenAsr,
-                    onOpenProjectAsr = onOpenProjectAsr,
-                    onOpenAccount = onOpenAccount,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(12.dp),
-                )
-            }
-        } else {
-            Scaffold(
-                modifier = Modifier.fillMaxSize(),
-                containerColor = MaterialTheme.colorScheme.background.copy(alpha = 0f),
-                bottomBar = {
-                    WorkspaceBottomBar(
+        Box(
+            modifier = modifier
+                .fillMaxSize()
+                .background(tokens.pageBackground),
+        ) {
+            if (useSideNavigation) {
+                Row(modifier = Modifier.fillMaxSize()) {
+                    WorkspaceNavigationRail(
                         selectedPage = currentPage,
                         onSelect = { currentPage = it },
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .padding(start = 8.dp, top = 12.dp, bottom = 12.dp),
                     )
-                },
-            ) { innerPadding ->
-                WorkspacePageContent(
-                    page = currentPage,
-                    vm = vm,
-                    onOpenAsr = onOpenAsr,
-                    onOpenProjectAsr = onOpenProjectAsr,
-                    onOpenAccount = onOpenAccount,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(innerPadding)
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
-                )
+                    WorkspacePageContent(
+                        page = currentPage,
+                        vm = vm,
+                        onOpenAsr = onOpenAsr,
+                        onOpenProjectAsr = onOpenProjectAsr,
+                        onOpenAccount = onOpenAccount,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(12.dp),
+                    )
+                }
+            } else {
+                Scaffold(
+                    modifier = Modifier.fillMaxSize(),
+                    containerColor = MaterialTheme.colorScheme.background.copy(alpha = 0f),
+                    bottomBar = {
+                        WorkspaceBottomBar(
+                            selectedPage = currentPage,
+                            onSelect = { currentPage = it },
+                        )
+                    },
+                ) { innerPadding ->
+                    WorkspacePageContent(
+                        page = currentPage,
+                        vm = vm,
+                        onOpenAsr = onOpenAsr,
+                        onOpenProjectAsr = onOpenProjectAsr,
+                        onOpenAccount = onOpenAccount,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(innerPadding)
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                    )
+                }
             }
         }
     }

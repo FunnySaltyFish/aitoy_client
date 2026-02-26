@@ -11,8 +11,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.funny.submaker.core.subtitle.SrtWriter
 import com.funny.submaker.core.subtitle.VttWriter
 import com.funny.submaker.core.ui.rememberExportTextFileAction
@@ -21,12 +23,15 @@ import com.funny.submaker.core.utils.FileSize
 
 @Composable
 fun AsrScreen(
-    vm: AsrViewModel,
-    onStart: () -> Unit,
+    projectId: String? = null,
     onOpenAuth: (() -> Unit)? = null,
     message: String? = null,
     modifier: Modifier = Modifier,
 ) {
+    val vm = viewModel { AsrViewModel() }
+    LaunchedEffect(projectId) {
+        vm.bindProject(projectId)
+    }
     Column(
         modifier = modifier.padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -129,7 +134,7 @@ fun AsrScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Button(
-                    onClick = onStart,
+                    onClick = vm::startAsr,
                     enabled = !vm.running && vm.mediaUri != null,
                     modifier = Modifier.fillMaxWidth(),
                 ) {

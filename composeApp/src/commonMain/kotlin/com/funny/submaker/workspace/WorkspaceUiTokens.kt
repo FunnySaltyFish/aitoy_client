@@ -1,9 +1,14 @@
 package com.funny.submaker.workspace
 
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
@@ -37,39 +42,52 @@ data class WorkspaceUiTokens(
 
 val WorkspacePanelShape = RoundedCornerShape(28.dp)
 val WorkspaceCardShape = RoundedCornerShape(20.dp)
-val WorkspaceChipShape = RoundedCornerShape(999.dp)
+val WorkspaceChipShape = CircleShape
+
+private val LocalWorkspaceUiTokens = staticCompositionLocalOf<WorkspaceUiTokens> {
+    error("WorkspaceUiTokens not provided")
+}
 
 @Composable
-fun rememberWorkspaceUiTokens(): WorkspaceUiTokens {
+internal fun ProvideWorkspaceUiTokens(content: @Composable () -> Unit) {
     val scheme = MaterialTheme.colorScheme
-    return WorkspaceUiTokens(
-        pageBackground = Brush.verticalGradient(
-            colors = listOf(
-                scheme.background,
-                scheme.surfaceContainerLowest,
+    val tokens = remember(scheme) {
+        WorkspaceUiTokens(
+            pageBackground = Brush.verticalGradient(
+                colors = listOf(
+                    scheme.background,
+                    scheme.surfaceContainerLowest,
+                ),
             ),
-        ),
-        sidePanelColor = scheme.surface,
-        sidePanelBorder = scheme.outlineVariant,
-        navigationContainer = scheme.surfaceContainerLow,
-        heroCardColor = scheme.primaryContainer.copy(alpha = 0.54f),
-        heroAccent = scheme.primary,
-        heroAccentText = scheme.onPrimary,
-        listCardColor = scheme.surfaceContainerLow,
-        listCardBorder = scheme.outlineVariant.copy(alpha = 0.74f),
-        selectedCardBorder = scheme.primary,
-        titleColor = scheme.onSurface,
-        bodyColor = scheme.onSurface,
-        weakTextColor = scheme.onSurfaceVariant,
-        mutedContainer = scheme.surfaceContainerHighest,
-        mutedContainerText = scheme.onSurfaceVariant,
-        primaryChipContainer = scheme.secondaryContainer,
-        primaryChipText = scheme.onSecondaryContainer,
-        successContainer = scheme.tertiaryContainer,
-        successText = scheme.onTertiaryContainer,
-        warningContainer = scheme.secondaryContainer,
-        warningText = scheme.onSecondaryContainer,
-        dangerContainer = scheme.errorContainer,
-        dangerText = scheme.onErrorContainer,
-    )
+            sidePanelColor = scheme.surface,
+            sidePanelBorder = scheme.outlineVariant,
+            navigationContainer = scheme.surfaceContainerLow,
+            heroCardColor = scheme.primaryContainer.copy(alpha = 0.54f),
+            heroAccent = scheme.primary,
+            heroAccentText = scheme.onPrimary,
+            listCardColor = scheme.surfaceContainerLow,
+            listCardBorder = scheme.outlineVariant.copy(alpha = 0.74f),
+            selectedCardBorder = scheme.primary,
+            titleColor = scheme.onSurface,
+            bodyColor = scheme.onSurface,
+            weakTextColor = scheme.onSurfaceVariant,
+            mutedContainer = scheme.surfaceContainerHighest,
+            mutedContainerText = scheme.onSurfaceVariant,
+            primaryChipContainer = scheme.secondaryContainer,
+            primaryChipText = scheme.onSecondaryContainer,
+            successContainer = scheme.tertiaryContainer,
+            successText = scheme.onTertiaryContainer,
+            warningContainer = scheme.secondaryContainer,
+            warningText = scheme.onSecondaryContainer,
+            dangerContainer = scheme.errorContainer,
+            dangerText = scheme.onErrorContainer,
+        )
+    }
+    CompositionLocalProvider(LocalWorkspaceUiTokens provides tokens, content = content)
+}
+
+@Composable
+@ReadOnlyComposable
+fun rememberWorkspaceUiTokens(): WorkspaceUiTokens {
+    return LocalWorkspaceUiTokens.current
 }
