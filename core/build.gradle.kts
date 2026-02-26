@@ -6,6 +6,7 @@ plugins {
 
 kotlin {
     sourceSets {
+        // 此处为 core 层，依赖可能通用的均使用 api 传递
         commonMain.dependencies {
             implementation(libs.compose.runtime)
             implementation(libs.compose.ui)
@@ -13,16 +14,16 @@ kotlin {
             implementation(libs.androidx.navigation3.ui)
             implementation(libs.androidx.material3.adaptive)
             implementation(libs.androidx.material3.adaptive.navigation3)
-            implementation(libs.kotlinx.coroutines.core)
-            implementation(libs.kotlinx.serialization.json)
-            implementation(libs.kotlinx.datetime)
+            api(libs.kotlinx.coroutines.core)
+            api(libs.kotlinx.serialization.json)
+            api(libs.kotlinx.datetime)
             api(libs.eygraber.uri.kmp)
             implementation(libs.vinceglb.filekit.dialogs)
         }
         androidMain.dependencies {
             implementation(libs.androidx.activity.compose)
             implementation(libs.tencent.mmkv)
-            implementation(libs.androidx.core.ktx)
+            api(libs.androidx.core.ktx)
         }
     }
 }
