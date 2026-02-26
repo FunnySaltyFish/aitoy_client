@@ -9,6 +9,7 @@ kotlin {
             api(libs.androidx.room.common)
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.serialization.json)
+            implementation(libs.compose.runtime)
         }
         androidMain.dependencies {
             implementation(libs.androidx.room.runtime)

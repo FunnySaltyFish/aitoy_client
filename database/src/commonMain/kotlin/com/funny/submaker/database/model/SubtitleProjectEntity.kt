@@ -1,5 +1,6 @@
 package com.funny.submaker.database.model
 
+import androidx.compose.runtime.Stable
 import androidx.room.Entity
 import androidx.room.Index
 
@@ -11,6 +12,7 @@ import androidx.room.Index
         Index(value = ["ownerUid", "starred", "updatedAtEpochMillis"]),
     ],
 )
+@Stable
 data class SubtitleProjectEntity(
     val ownerUid: String,
     val id: String,
