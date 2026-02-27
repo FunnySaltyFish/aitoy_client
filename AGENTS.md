@@ -9,6 +9,8 @@
 - 优先 import + 使用简单类名，即代码中 `import androidx.compose.material3.Text; Text {}` 优于 `androidx.compose.material3.Text {}`
 - 确保你的代码优雅简洁、UI效果丝滑流畅，富有美感
 - Modifier parameter should be the first optional parameter
+- 控制单文件的长度，模块内可复用的组件放到 components 目录下，一组/一个为一个文件，项目可复用的组件放在
+  core 模块下
 
 ## 依赖
 - 使用 VersionCatalogs，以 作者名-库名 命名。比如 androidx 的库应该是 androidx-xxx，如果它有子库，才是 androidx-xxx-yyy，引用时 `libs.androidx.xxx.yyy`

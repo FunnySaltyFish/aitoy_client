@@ -14,10 +14,10 @@ import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.ui.NavDisplay
 import com.funny.submaker.core.navigation.NavigatorProvider
 import com.funny.submaker.core.navigation.rememberNavigator
-import com.funny.submaker.feature.asr.AsrScreen
 import com.funny.submaker.feature.auth.AuthViewModel
 import com.funny.submaker.navigation.AuthResult
 import com.funny.submaker.navigation.Routes
+import com.funny.submaker.navigation.addAsrRoutes
 import com.funny.submaker.navigation.addAuthRoutes
 import com.funny.submaker.ui.theme.SubMakerTheme
 import com.funny.submaker.ui.toast.GlobalToastOverlay
@@ -56,20 +56,18 @@ fun App() {
                                 },
                             )
                         }
-                        entry<Routes.Asr> { route ->
-                            AsrScreen(
-                                projectId = route.projectId,
-                                onOpenAuth = {
-                                    scope.launch {
-                                        val result = navigator.navigateForResult<AuthResult>(
-                                            Routes.AuthLogin(from = "asr")
-                                        )
-                                        result?.let { asrMessages.add("登录成功：${it.email}") }
-                                    }
-                                },
-                                message = asrMessages.lastOrNull(),
-                            )
-                        }
+                        addAsrRoutes(
+                            message = asrMessages.lastOrNull(),
+                            onBack = navigator::popBackStack,
+                            onOpenAuth = {
+                                scope.launch {
+                                    val result = navigator.navigateForResult<AuthResult>(
+                                        Routes.AuthLogin(from = "asr")
+                                    )
+                                    result?.let { asrMessages.add("登录成功：${it.email}") }
+                                }
+                            },
+                        )
                         addAuthRoutes(
                             vm = authVm,
                             onBack = navigator::popBackStack,
