@@ -18,11 +18,13 @@ kotlin {
             api(libs.kotlinx.serialization.json)
             api(libs.kotlinx.datetime)
             api(libs.eygraber.uri.kmp)
+            api(libs.datasaver.core)
             implementation(libs.vinceglb.filekit.dialogs)
         }
         androidMain.dependencies {
             implementation(libs.androidx.activity.compose)
             implementation(libs.tencent.mmkv)
+            api(libs.datasaver.mmkv)
             api(libs.androidx.core.ktx)
         }
     }

@@ -1,10 +1,12 @@
 package com.funny.submaker.core.prefs
 
+import com.funny.data_saver.core.DataSaverEncryptedProperties
 import com.funny.data_saver.core.DataSaverInterface
 
 actual val DataSaverUtils: DataSaverInterface by lazy(LazyThreadSafetyMode.PUBLICATION) {
-    DataSaverProperties(
+    DataSaverEncryptedProperties(
         filePath = defaultDataSaverFilePath(),
+        encryptionKey = DATA_SAVER_ENC_KEY
     )
 }
 
@@ -16,3 +18,4 @@ private fun defaultDataSaverFilePath(): String {
     return baseDir.resolve("data_saver.properties").absolutePath
 }
 
+const val DATA_SAVER_ENC_KEY = "SubMakerMagicKey"
