@@ -10,7 +10,10 @@ import com.funny.submaker.core.kmp.mimeType
 import com.funny.submaker.core.kmp.readBytes
 import com.funny.submaker.core.kmp.sizeBytes
 import com.funny.submaker.core.prefs.SubMakerPrefs
+import com.funny.submaker.core.prefs.currentUserDataOwnerId
+import com.funny.submaker.core.prefs.userDataSaverState
 import com.funny.submaker.core.subtitle.SubtitleSegment
+import com.funny.submaker.core.utils.JsonX
 import com.funny.submaker.core.utils.nowMs
 import com.funny.submaker.database.SubtitleProjectRepository
 import com.funny.submaker.database.model.SubtitleProjectEntity
@@ -28,11 +31,32 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonObjectBuilder
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 class AsrViewModel : ViewModel() {
     private val vmScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val modelName = "qwen3-asr-flash-filetrans"
     private val maxPollCount = 120
+
+    private val recentMediaKey = "ASR_RECENT_MEDIA_JSON"
+    private val recentLanguagePairKey = "ASR_RECENT_LANGUAGE_PAIRS_JSON"
+    private val sourceLanguageKey = "ASR_SOURCE_LANGUAGE"
+    private val targetLanguageKey = "ASR_TARGET_LANGUAGE"
+    private var scopedOwnerId = currentUserDataOwnerId()
+
+    private var sourceLanguageName by userDataSaverState(sourceLanguageKey, AsrLanguage.Auto.name)
+    private var targetLanguageName by userDataSaverState(targetLanguageKey, AsrLanguage.Zh.name)
+    private var recentMediaJson by userDataSaverState(recentMediaKey, "[]")
+    private var recentLanguagePairJson by userDataSaverState(recentLanguagePairKey, "[]")
 
     var apiBaseUrl by mutableStateOf("")
     var apiKey by mutableStateOf("")
@@ -41,6 +65,11 @@ class AsrViewModel : ViewModel() {
     var mediaName by mutableStateOf<String?>(null)
     var mediaMimeType by mutableStateOf<String?>(null)
     var mediaSizeBytes by mutableStateOf<Long?>(null)
+
+    var sourceLanguage by mutableStateOf(sourceLanguageName.toAsrLanguageOr(AsrLanguage.Auto))
+    var targetLanguage by mutableStateOf(targetLanguageName.toAsrLanguageOr(AsrLanguage.Zh))
+    var recentMedia by mutableStateOf(loadRecentMedia(recentMediaJson))
+    var recentLanguagePairs by mutableStateOf(loadRecentLanguagePairs(recentLanguagePairJson))
 
     var segments by mutableStateOf<List<SubtitleSegment>>(emptyList())
 
@@ -56,13 +85,23 @@ class AsrViewModel : ViewModel() {
     }
 
     fun onMediaPicked(uri: Uri) {
+        syncScopedStateIfNeeded()
         mediaUri = uri
         mediaName = uri.displayName()
         mediaMimeType = uri.mimeType()
         mediaSizeBytes = uri.sizeBytes()
         stageText = "已选择文件"
         clearError()
-        linkedProjectId?.let { projectId ->
+        saveRecentMedia(
+            AsrRecentMedia(
+                uri = uri.toString(),
+                name = mediaName ?: "未命名文件",
+                mimeType = mediaMimeType,
+                sizeBytes = mediaSizeBytes,
+                updatedAtMs = nowMs(),
+            )
+        )
+        linkedProjectId?.let {
             upsertLinkedProject { current ->
                 current.copy(
                     sourceFileName = mediaName ?: current.sourceFileName,
@@ -72,7 +111,62 @@ class AsrViewModel : ViewModel() {
         }
     }
 
+    fun onRecentMediaSelected(item: AsrRecentMedia) {
+        syncScopedStateIfNeeded()
+        mediaUri = Uri.parse(item.uri)
+        mediaName = item.name
+        mediaMimeType = item.mimeType
+        mediaSizeBytes = item.sizeBytes
+        stageText = "已选择最近文件"
+        clearError()
+        saveRecentMedia(item.copy(updatedAtMs = nowMs()))
+    }
+
+    fun updateSourceLanguage(language: AsrLanguage) {
+        syncScopedStateIfNeeded()
+        sourceLanguage = language
+        persistLanguageSelection()
+    }
+
+    fun updateTargetLanguage(language: AsrLanguage) {
+        syncScopedStateIfNeeded()
+        targetLanguage = language
+        persistLanguageSelection()
+    }
+
+    fun swapLanguages() {
+        syncScopedStateIfNeeded()
+        val from = sourceLanguage
+        sourceLanguage = targetLanguage
+        targetLanguage = from
+        persistLanguageSelection()
+    }
+
+    fun applyRecentLanguagePair(pair: AsrRecentLanguagePair) {
+        syncScopedStateIfNeeded()
+        sourceLanguage = pair.source
+        targetLanguage = pair.target
+        persistLanguageSelection()
+    }
+
+    fun confirmLanguageSelection() {
+        syncScopedStateIfNeeded()
+        persistLanguageSelection()
+        val next = AsrRecentLanguagePair(
+            source = sourceLanguage,
+            target = targetLanguage,
+            updatedAtMs = nowMs(),
+        )
+        val merged = buildList {
+            add(next)
+            addAll(recentLanguagePairs.filterNot { it.source == next.source && it.target == next.target })
+        }.take(4)
+        recentLanguagePairs = merged
+        persistRecentLanguagePairs(merged)
+    }
+
     fun bindProject(projectId: String?) {
+        syncScopedStateIfNeeded()
         if (projectId == linkedProjectId) return
         linkedProjectId = projectId
         linkedProjectName = null
@@ -89,11 +183,13 @@ class AsrViewModel : ViewModel() {
     }
 
     fun startAsr() {
+        syncScopedStateIfNeeded()
         if (running) return
         val uri = mediaUri ?: run {
             errorMessage = "请先选择媒体文件"
             return
         }
+        confirmLanguageSelection()
         running = true
         clearError()
         stageText = "准备上传"
@@ -156,7 +252,7 @@ class AsrViewModel : ViewModel() {
                             fileUrl = ticket.resolvedFileUrl,
                             sessionId = sessionId,
                             options = AsrOptionsReq(
-                                language = null,
+                                language = sourceLanguage.code,
                                 enableItn = false,
                                 enableWords = false,
                                 channelId = listOf(0),
@@ -205,6 +301,7 @@ class AsrViewModel : ViewModel() {
     }
 
     fun onExportSuccess(format: String) {
+        syncScopedStateIfNeeded()
         if (linkedProjectId == null) return
         upsertLinkedProject { current ->
             current.copy(
@@ -225,6 +322,92 @@ class AsrViewModel : ViewModel() {
         super.onCleared()
     }
 
+    private fun persistLanguageSelection() {
+        sourceLanguageName = sourceLanguage.name
+        targetLanguageName = targetLanguage.name
+    }
+
+    private fun saveRecentMedia(item: AsrRecentMedia) {
+        val merged = buildList {
+            add(item)
+            addAll(recentMedia.filterNot { it.uri == item.uri })
+        }.take(5)
+        recentMedia = merged
+        persistRecentMedia(merged)
+    }
+
+    private fun persistRecentMedia(items: List<AsrRecentMedia>) {
+        val payload = buildJsonArray {
+            items.forEach { media ->
+                add(
+                    buildJsonObject {
+                        putString("uri", media.uri)
+                        putString("name", media.name)
+                        media.mimeType?.let { putString("mimeType", it) }
+                        media.sizeBytes?.let { putLong("sizeBytes", it) }
+                        putLong("updatedAtMs", media.updatedAtMs)
+                    }
+                )
+            }
+        }.toString()
+        recentMediaJson = payload
+    }
+
+    private fun loadRecentMedia(raw: String): List<AsrRecentMedia> {
+        val arr = raw.toJsonArrayOrEmpty()
+        return arr.mapNotNull { item ->
+            val obj = item.jsonObject
+            val uri = obj.string("uri") ?: return@mapNotNull null
+            val name = obj.string("name") ?: return@mapNotNull null
+            AsrRecentMedia(
+                uri = uri,
+                name = name,
+                mimeType = obj.string("mimeType"),
+                sizeBytes = obj.long("sizeBytes"),
+                updatedAtMs = obj.long("updatedAtMs") ?: 0L,
+            )
+        }.sortedByDescending { it.updatedAtMs }.take(5)
+    }
+
+    private fun persistRecentLanguagePairs(items: List<AsrRecentLanguagePair>) {
+        val payload = buildJsonArray {
+            items.forEach { pair ->
+                add(
+                    buildJsonObject {
+                        putString("source", pair.source.name)
+                        putString("target", pair.target.name)
+                        putLong("updatedAtMs", pair.updatedAtMs)
+                    }
+                )
+            }
+        }.toString()
+        recentLanguagePairJson = payload
+    }
+
+    private fun loadRecentLanguagePairs(raw: String): List<AsrRecentLanguagePair> {
+        val arr = raw.toJsonArrayOrEmpty()
+        return arr.mapNotNull { item ->
+            val obj = item.jsonObject
+            val source = obj.enum<AsrLanguage>("source") ?: return@mapNotNull null
+            val target = obj.enum<AsrLanguage>("target") ?: return@mapNotNull null
+            AsrRecentLanguagePair(
+                source = source,
+                target = target,
+                updatedAtMs = obj.long("updatedAtMs") ?: 0L,
+            )
+        }.sortedByDescending { it.updatedAtMs }.take(4)
+    }
+
+    private fun syncScopedStateIfNeeded() {
+        val ownerId = currentUserDataOwnerId()
+        if (ownerId == scopedOwnerId) return
+        scopedOwnerId = ownerId
+        sourceLanguage = sourceLanguageName.toAsrLanguageOr(AsrLanguage.Auto)
+        targetLanguage = targetLanguageName.toAsrLanguageOr(AsrLanguage.Zh)
+        recentMedia = loadRecentMedia(recentMediaJson)
+        recentLanguagePairs = loadRecentLanguagePairs(recentLanguagePairJson)
+    }
+
     private fun updateLinkedProjectStatus(status: String) {
         if (linkedProjectId == null) return
         upsertLinkedProject { current ->
@@ -232,8 +415,11 @@ class AsrViewModel : ViewModel() {
                 status = status,
                 sourceFileName = mediaName ?: current.sourceFileName,
                 segmentCount = if (segments.isEmpty()) current.segmentCount else segments.size,
-                durationMs = if (segments.isEmpty()) current.durationMs else (segments.lastOrNull()?.endMs
-                    ?: current.durationMs),
+                durationMs = if (segments.isEmpty()) {
+                    current.durationMs
+                } else {
+                    segments.lastOrNull()?.endMs ?: current.durationMs
+                },
                 updatedAtEpochMillis = nowMs(),
             )
         }
@@ -258,19 +444,48 @@ class AsrViewModel : ViewModel() {
     }
 }
 
-private fun Throwable.userMessage(): String =
-    when (this) {
-        is ApiException -> message
-        else -> message ?: "请求失败"
-    }
+private fun String.toJsonArrayOrEmpty(): JsonArray {
+    return runCatching {
+        JsonX.json.parseToJsonElement(this).jsonArray
+    }.getOrDefault(JsonArray(emptyList()))
+}
 
-private fun String.toKeyHint(): String {
-    if (isBlank()) return ""
-    return "sk-****${takeLast(4)}"
+private fun JsonObject.string(key: String): String? = this[key]?.jsonPrimitive?.contentOrNull
+
+private fun JsonObject.long(key: String): Long? =
+    this[key]?.jsonPrimitive?.contentOrNull?.toLongOrNull()
+
+private inline fun <reified T : Enum<T>> JsonObject.enum(key: String): T? {
+    val name = string(key) ?: return null
+    return enumValues<T>().firstOrNull { it.name == name }
+}
+
+private fun JsonObjectBuilder.putString(key: String, value: String) {
+    put(key, JsonPrimitive(value))
+}
+
+private fun JsonObjectBuilder.putLong(key: String, value: Long) {
+    put(key, JsonPrimitive(value))
+}
+
+private fun String.toAsrLanguageOr(default: AsrLanguage): AsrLanguage {
+    return AsrLanguage.entries.firstOrNull { it.name == this } ?: default
 }
 
 private enum class ProjectStatus(val value: String) {
     Running("running"),
     Done("done"),
     Failed("failed"),
+}
+
+private fun String.toKeyHint(): String {
+    if (length <= 8) return this
+    return "${take(4)}****${takeLast(4)}"
+}
+
+private fun Throwable.userMessage(): String {
+    return when (this) {
+        is ApiException -> message
+        else -> message ?: "请求失败"
+    }
 }

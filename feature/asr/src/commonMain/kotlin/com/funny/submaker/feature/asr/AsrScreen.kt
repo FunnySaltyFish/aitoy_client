@@ -75,16 +75,16 @@ private enum class WizardStep(
     AiConfig(3, "AI配置"),
 }
 
-private data class RecentMedia(
+private data class RecentMediaUi(
     val title: String,
     val format: String,
     val duration: String,
-    val sizeLabel: String,
+    val sizeLabel: String?,
     val path: String,
     val isAudio: Boolean,
 ) {
     val meta: String
-        get() = "$format  |  $duration  |  $sizeLabel"
+        get() = listOfNotNull(format, duration, sizeLabel).joinToString("  |  ")
 }
 
 private data class SelectedMediaPreview(
@@ -119,9 +119,9 @@ fun AsrScreen(
     LaunchedEffect(projectId) {
         vm.bindProject(projectId)
     }
-    LaunchedEffect(vm.mediaName, vm.mediaSizeBytes) {
+    LaunchedEffect(vm.mediaUri, vm.mediaName, vm.mediaSizeBytes) {
         val fileName = vm.mediaName ?: return@LaunchedEffect
-        selectedPreview = fileName.toPickedPreview(vm.mediaSizeBytes)
+        selectedPreview = fileName.toPickedPreview(vm.mediaSizeBytes, vm.mediaUri?.toString())
         showUploadSheet = true
         sheetState.partialExpand()
     }
@@ -158,10 +158,12 @@ fun AsrScreen(
                         mediaName = vm.mediaName,
                         mediaSize = vm.mediaSizeBytes,
                         linkedProject = vm.linkedProjectName,
+                        recentFiles = vm.recentMedia,
                         stageText = vm.stageText,
                         errorText = vm.errorMessage,
                         onPickMedia = openMediaPicker,
                         onRecentClicked = { recent ->
+                            vm.onRecentMediaSelected(recent)
                             selectedPreview = recent.toPreview()
                             showUploadSheet = true
                             scope.launch { sheetState.partialExpand() }
@@ -171,8 +173,18 @@ fun AsrScreen(
                     )
 
                     WizardStep.Language.index -> AsrLanguageStep(
+                        sourceLanguage = vm.sourceLanguage,
+                        targetLanguage = vm.targetLanguage,
+                        recentPairs = vm.recentLanguagePairs,
+                        onSourceChange = vm::updateSourceLanguage,
+                        onTargetChange = vm::updateTargetLanguage,
+                        onSwap = vm::swapLanguages,
+                        onRecentPairClick = vm::applyRecentLanguagePair,
                         onBack = { currentStep = WizardStep.Upload.index },
-                        onNext = { currentStep = WizardStep.AiConfig.index },
+                        onNext = {
+                            vm.confirmLanguageSelection()
+                            currentStep = WizardStep.AiConfig.index
+                        },
                     )
 
                     else -> AsrAiConfigStep(
@@ -330,35 +342,16 @@ private fun UploadStepPage(
     mediaName: String?,
     mediaSize: Long?,
     linkedProject: String?,
+    recentFiles: List<AsrRecentMedia>,
     stageText: String,
     errorText: String?,
     onPickMedia: () -> Unit,
-    onRecentClicked: (RecentMedia) -> Unit,
+    onRecentClicked: (AsrRecentMedia) -> Unit,
     message: String?,
     bottomPadding: androidx.compose.ui.unit.Dp,
     modifier: Modifier = Modifier,
 ) {
     val tokens = rememberAsrUiTokens()
-    val recentFiles = remember {
-        listOf(
-            RecentMedia(
-                title = "Project_Alpha_v2_FINAL.mp4",
-                format = "1080P",
-                duration = "04:32",
-                sizeLabel = "124 MB",
-                path = "/ Internal Storage/DCIM/Camera",
-                isAudio = false,
-            ),
-            RecentMedia(
-                title = "Interview_Session_04.wav",
-                format = "Audio",
-                duration = "15:00",
-                sizeLabel = "45 MB",
-                path = "/ Internal Storage/Recordings",
-                isAudio = true,
-            ),
-        )
-    }
 
     Column(
         modifier = modifier
@@ -441,12 +434,22 @@ private fun UploadStepPage(
             textAlign = TextAlign.Center,
         )
 
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            recentFiles.forEach { item ->
-                RecentMediaCard(
-                    item = item,
-                    onClick = { onRecentClicked(item) },
-                )
+        if (recentFiles.isEmpty()) {
+            Text(
+                text = "暂无最近文件",
+                style = MaterialTheme.typography.bodySmall,
+                color = tokens.mutedText,
+                modifier = Modifier.fillMaxWidth(),
+                textAlign = TextAlign.Center,
+            )
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                recentFiles.forEach { item ->
+                    RecentMediaCard(
+                        item = item.toUi(),
+                        onClick = { onRecentClicked(item) },
+                    )
+                }
             }
         }
 
@@ -484,7 +487,7 @@ private fun UploadStepPage(
 
 @Composable
 private fun RecentMediaCard(
-    item: RecentMedia,
+    item: RecentMediaUi,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -698,25 +701,37 @@ private fun Modifier.dashedRoundBorder(color: Color): Modifier =
         )
     }
 
-private fun RecentMedia.toPreview(): SelectedMediaPreview {
+private fun AsrRecentMedia.toPreview(): SelectedMediaPreview {
     return SelectedMediaPreview(
-        title = title,
-        format = format,
-        duration = duration,
+        title = name,
+        format = name.substringAfterLast('.', "媒体").uppercase(),
+        duration = "--:--",
         fps = "30fps",
-        path = path,
-        sizeLabel = sizeLabel,
+        path = uri,
+        sizeLabel = sizeBytes?.let { FileSize.fromBytes(it).toString() },
     )
 }
 
-private fun String.toPickedPreview(sizeBytes: Long?): SelectedMediaPreview {
+private fun String.toPickedPreview(sizeBytes: Long?, uriText: String?): SelectedMediaPreview {
     val formatText = substringAfterLast('.', "MP4").uppercase()
     return SelectedMediaPreview(
         title = this,
         format = formatText,
-        duration = "04:32",
+        duration = "--:--",
         fps = "30fps",
-        path = "/ Internal Storage/DCIM/Camera",
+        path = uriText ?: "-",
         sizeLabel = sizeBytes?.let { FileSize.fromBytes(it).toString() },
+    )
+}
+
+private fun AsrRecentMedia.toUi(): RecentMediaUi {
+    val titleText = name.ifBlank { "未命名文件" }
+    return RecentMediaUi(
+        title = titleText,
+        format = titleText.substringAfterLast('.', "媒体").uppercase(),
+        duration = "--:--",
+        sizeLabel = sizeBytes?.let { FileSize.fromBytes(it).toString() },
+        path = uri,
+        isAudio = mimeType?.startsWith("audio/") == true,
     )
 }

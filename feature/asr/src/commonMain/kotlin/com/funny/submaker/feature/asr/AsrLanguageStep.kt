@@ -24,20 +24,19 @@ import androidx.compose.material.icons.rounded.ArrowDropDown
 import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.SwapVert
 import androidx.compose.material.icons.rounded.Translate
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -45,40 +44,20 @@ import androidx.compose.ui.unit.dp
 import com.funny.submaker.feature.asr.components.AsrFieldLabel
 import com.funny.submaker.feature.asr.components.AsrWizardBottomActions
 
-private enum class LanguageMode(val label: String) {
-    Mono("单语"),
-    Bilingual("双语"),
-}
-
-private data class LanguageOption(
-    val name: String,
-    val hint: String,
-)
-
-private data class RecentLanguagePair(
-    val shortFrom: String,
-    val shortTo: String,
-    val label: String,
-    val dotColor: Color,
-)
-
 @Composable
 fun AsrLanguageStep(
+    sourceLanguage: AsrLanguage,
+    targetLanguage: AsrLanguage,
+    recentPairs: List<AsrRecentLanguagePair>,
+    onSourceChange: (AsrLanguage) -> Unit,
+    onTargetChange: (AsrLanguage) -> Unit,
+    onSwap: () -> Unit,
+    onRecentPairClick: (AsrRecentLanguagePair) -> Unit,
     onBack: () -> Unit,
     onNext: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val tokens = rememberAsrUiTokens()
-    var mode by rememberSaveable { mutableStateOf(LanguageMode.Bilingual) }
-    val source = remember { LanguageOption("英语 (English)", "自动检测中...") }
-    val target = remember { LanguageOption("简体中文 (Chinese)", "默认") }
-    val recentPairs = remember {
-        listOf(
-            RecentLanguagePair("En", "Zh", "英语 -> 中文", Color(0xFF4AD8A6)),
-            RecentLanguagePair("Ja", "Zh", "日语 -> 中文", Color(0xFF60A5FA)),
-            RecentLanguagePair("Ko", "Zh", "韩语 -> 中文", Color(0xFFB58BFF)),
-        )
-    }
 
     Box(modifier = modifier.fillMaxSize()) {
         Column(
@@ -97,50 +76,25 @@ fun AsrLanguageStep(
                     fontWeight = FontWeight.Bold,
                 )
                 Text(
-                    text = "设置字幕翻译的源语言和目标语言。",
+                    text = "设置识别语种与后续翻译语种。",
                     style = MaterialTheme.typography.bodyMedium,
                     color = tokens.mutedText,
                 )
             }
 
+            /* API 暂不支持翻译模式切换，先注释 UI，后续配合流式翻译能力开放。
             Surface(
                 color = tokens.panelContainer,
                 shape = RoundedCornerShape(16.dp),
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            "工作模式",
-                            style = MaterialTheme.typography.titleSmall,
-                            color = tokens.bodyText
-                        )
-                        ModeSegment(
-                            mode = mode,
-                            onModeChange = { mode = it },
-                        )
-                    }
-                    Text(
-                        text = "生成包含源语言和目标语言的双语字幕。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = tokens.mutedText,
-                    )
-                }
-            }
+            ) { ... }
+            */
 
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 AsrFieldLabel(text = "源语言 (SOURCE)")
                 LanguageSelectorCard(
-                    title = source.name,
-                    hint = source.hint,
+                    selected = sourceLanguage,
+                    options = AsrLanguage.entries,
+                    hint = "用于 ASR 识别；自动检测会传空 language",
                     icon = {
                         Icon(
                             imageVector = Icons.Rounded.Translate,
@@ -149,6 +103,7 @@ fun AsrLanguageStep(
                             modifier = Modifier.size(18.dp),
                         )
                     },
+                    onSelect = onSourceChange,
                 )
 
                 Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
@@ -156,7 +111,8 @@ fun AsrLanguageStep(
                         modifier = Modifier
                             .size(42.dp)
                             .clip(AsrStepShape)
-                            .background(tokens.chipContainer),
+                            .background(tokens.chipContainer)
+                            .clickable(onClick = onSwap),
                         contentAlignment = Alignment.Center,
                     ) {
                         Icon(
@@ -169,8 +125,9 @@ fun AsrLanguageStep(
 
                 AsrFieldLabel(text = "目标语言 (TARGET)")
                 LanguageSelectorCard(
-                    title = target.name,
-                    hint = target.hint,
+                    selected = targetLanguage,
+                    options = AsrLanguage.entries,
+                    hint = "翻译目标语种（当前仅保存配置，翻译能力后续接入）",
                     icon = {
                         Icon(
                             imageVector = Icons.Rounded.Language,
@@ -179,6 +136,7 @@ fun AsrLanguageStep(
                             modifier = Modifier.size(18.dp),
                         )
                     },
+                    onSelect = onTargetChange,
                 )
             }
 
@@ -196,20 +154,21 @@ fun AsrLanguageStep(
                 Spacer(modifier = Modifier.weight(1f).height(1.dp).background(tokens.topBarBorder))
             }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                RecentPairCard(
-                    pair = recentPairs[0],
-                    modifier = Modifier.weight(1f),
+            if (recentPairs.isEmpty()) {
+                Text(
+                    text = "暂无最近语种对",
+                    color = tokens.mutedText,
+                    style = MaterialTheme.typography.bodySmall,
                 )
-                RecentPairCard(
-                    pair = recentPairs[1],
-                    modifier = Modifier.weight(1f),
-                )
+            } else {
+                recentPairs.forEach { pair ->
+                    RecentPairCard(
+                        pair = pair,
+                        onClick = { onRecentPairClick(pair) },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
             }
-            RecentPairCard(pair = recentPairs[2], modifier = Modifier.fillMaxWidth(0.48f))
         }
 
         AsrWizardBottomActions(
@@ -225,32 +184,67 @@ fun AsrLanguageStep(
 }
 
 @Composable
-private fun ModeSegment(
-    mode: LanguageMode,
-    onModeChange: (LanguageMode) -> Unit,
+private fun LanguageSelectorCard(
+    selected: AsrLanguage,
+    options: List<AsrLanguage>,
+    hint: String,
+    icon: @Composable () -> Unit,
+    onSelect: (AsrLanguage) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val tokens = rememberAsrUiTokens()
-    Row(
-        modifier = modifier
-            .clip(RoundedCornerShape(999.dp))
-            .background(tokens.chipContainer)
-            .padding(2.dp),
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
-    ) {
-        LanguageMode.entries.forEach { item ->
-            val selected = mode == item
+    var expanded by remember { mutableStateOf(false) }
+
+    Box(modifier = modifier) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .background(tokens.inputCardContainer)
+                .clickable { expanded = true }
+                .padding(horizontal = 12.dp, vertical = 11.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Box(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(if (selected) tokens.modeSelectedContainer else Color.Transparent)
-                    .clickable { onModeChange(item) }
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                    .size(34.dp)
+                    .clip(AsrStepShape)
+                    .background(tokens.inputLeadingContainer),
+                contentAlignment = Alignment.Center,
             ) {
+                icon()
+            }
+            Spacer(modifier = Modifier.width(10.dp))
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = item.label,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = if (selected) tokens.modeSelectedText else tokens.mutedText,
+                    text = selected.displayName,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = tokens.bodyText,
+                )
+                Text(
+                    text = hint,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = tokens.mutedText,
+                )
+            }
+            Icon(
+                imageVector = Icons.Rounded.ArrowDropDown,
+                contentDescription = null,
+                tint = tokens.mutedText,
+            )
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.fillMaxWidth(0.96f),
+        ) {
+            options.forEach { item ->
+                DropdownMenuItem(
+                    text = { Text(item.displayName) },
+                    onClick = {
+                        onSelect(item)
+                        expanded = false
+                    },
                 )
             }
         }
@@ -258,55 +252,9 @@ private fun ModeSegment(
 }
 
 @Composable
-private fun LanguageSelectorCard(
-    title: String,
-    hint: String,
-    icon: @Composable () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val tokens = rememberAsrUiTokens()
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(tokens.inputCardContainer)
-            .clickable { }
-            .padding(horizontal = 12.dp, vertical = 11.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            modifier = Modifier
-                .size(34.dp)
-                .clip(AsrStepShape)
-                .background(tokens.inputLeadingContainer),
-            contentAlignment = Alignment.Center,
-        ) {
-            icon()
-        }
-        Spacer(modifier = Modifier.width(10.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleSmall,
-                color = tokens.bodyText,
-            )
-            Text(
-                text = hint,
-                style = MaterialTheme.typography.bodySmall,
-                color = tokens.mutedText,
-            )
-        }
-        Icon(
-            imageVector = Icons.Rounded.ArrowDropDown,
-            contentDescription = null,
-            tint = tokens.mutedText,
-        )
-    }
-}
-
-@Composable
 private fun RecentPairCard(
-    pair: RecentLanguagePair,
+    pair: AsrRecentLanguagePair,
+    onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val tokens = rememberAsrUiTokens()
@@ -314,6 +262,7 @@ private fun RecentPairCard(
         modifier = modifier
             .clip(RoundedCornerShape(14.dp))
             .background(tokens.inputCardContainer)
+            .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
@@ -321,14 +270,8 @@ private fun RecentPairCard(
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(
-                modifier = Modifier
-                    .size(6.dp)
-                    .clip(AsrStepShape)
-                    .background(pair.dotColor),
-            )
             Text(
-                pair.shortFrom,
+                pair.source.shortLabel,
                 style = MaterialTheme.typography.labelSmall,
                 color = tokens.mutedText
             )
@@ -339,13 +282,13 @@ private fun RecentPairCard(
                 modifier = Modifier.size(14.dp),
             )
             Text(
-                pair.shortTo,
+                pair.target.shortLabel,
                 style = MaterialTheme.typography.labelSmall,
                 color = tokens.mutedText
             )
         }
         Text(
-            text = pair.label,
+            text = "${pair.source.label} -> ${pair.target.label}",
             style = MaterialTheme.typography.titleSmall,
             color = tokens.bodyText,
             maxLines = 1,
