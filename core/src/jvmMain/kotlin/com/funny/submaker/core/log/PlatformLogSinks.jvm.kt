@@ -1,5 +1,7 @@
 package com.funny.submaker.core.log
 
+import com.funny.submaker.core.cache.CacheManager
+import com.funny.submaker.core.cache.fileSubDir
 import java.io.BufferedWriter
 import java.io.File
 import java.io.FileWriter
@@ -37,10 +39,7 @@ private object JvmHourlyFileLogSink : LogSink {
     private const val MAX_BUFFERED_LINE = 20
 
     private val logDir: File by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
-        File(System.getProperty("user.home"))
-            .resolve(".submaker")
-            .resolve("logs")
-            .apply { mkdirs() }
+        CacheManager.fileSubDir("logs")
     }
 
     private var currentHourKey: String? = null
@@ -128,4 +127,3 @@ private fun Throwable.stackTraceToText(): String {
     }
     return stringWriter.toString().trimEnd()
 }
-

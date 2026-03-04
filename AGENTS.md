@@ -39,6 +39,20 @@ DataSaverConverter.registerTypeConverters<Language>( // enum
 )
 ```
 
+## 缓存
+
+使用 CacheManager 统一管理缓存目录，按需创建子目录：
+
+```kotlin
+expect object CacheManager {
+  val cacheDir: File
+  val fileDir: File
+}
+
+fun CacheManager.cacheSubDir(name: String) = cacheDir.resolve(name).ensureDirectory()
+fun CacheManager.fileSubDir(name: String) = fileDir.resolve(name).ensureDirectory()
+```
+
 ## 网络层约定
 
 - 网络请求统一使用 Retrofit + Service 接口

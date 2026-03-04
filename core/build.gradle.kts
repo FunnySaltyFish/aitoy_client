@@ -27,6 +27,9 @@ kotlin {
             api(libs.datasaver.mmkv)
             api(libs.androidx.core.ktx)
         }
+        jvmMain.dependencies {
+            implementation(libs.gosyer.appdirs)
+        }
     }
 }
 
