@@ -16,30 +16,23 @@
 - 使用 VersionCatalogs，以 作者名-库名 命名。比如 androidx 的库应该是 androidx-xxx，如果它有子库，才是 androidx-xxx-yyy，引用时 `libs.androidx.xxx.yyy`
 
 ## 持久化
-项目使用 DataSaverUtils 全局变量 .readData 和 .saveData，一般使用其高层封装 `DataSaverState`，用法：
+
+项目统一使用 `DataSaverUtils` + `dataSaverState` 体系：
+
+- 用户相关数据（登录态/偏好/最近记录）统一使用 `userDataSaverState(key, initialValue)`（`core.prefs`
+  ），优先 `by` 委托。
+- `userDataSaverState` 会按当前 owner（`uid:*` / `device:*`）自动切换独立存储；登录后对设备态数据无感迁移；登出后与账号数据隔离。
+- 非用户作用域的全局配置（如 `serverBaseUrl`）使用 `mutableDataSaverStateOf(DataSaverUtils, ...)` 或
+  `rememberDataSaverState(...)`。
 
 ```kotlin
-// ViewModel 或 object 中
-
 var checked: Boolean by mutableDataSaverStateOf(DataSaverUtils, "AUTO_LANGUAGE_CHECKED", false)
 onClick = { checked = true } // 自动保存并触发 UI 更新
 
-// 也支持自定义类型
-var targetLanguage: Language by mutableDataSaverStateOf(DataSaverUtils, "ASR_TARGET_LANG", Language.ENGLISH)
-// 需要在 com.funny.submaker.core.prefs.SubMakerPrefsInit 注册
+// 自定义类型需先注册转换器（在 SubMakerPrefsInit）
 DataSaverConverter.registerTypeConverters<Language>( // enum
     save = { it.name },
     restore = { Language.valueOf(it) }
-)
-DataSaverConverter.registerTypeConverters<EditablePrompt>( // serializable class
-    save = { it.toJson() },  // com.funny.submaker.core.utils.JsonX.toJson()
-    restore = { it.fromJson<EditablePrompt>() }
-)
-
-// Composable 中
-var showHelpDialog by rememberDataSaverState(
-    key = "show_model_manager_help",
-    initialValue = true
 )
 ```
 
