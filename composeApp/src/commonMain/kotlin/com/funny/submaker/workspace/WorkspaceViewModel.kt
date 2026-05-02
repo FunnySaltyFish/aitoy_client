@@ -4,6 +4,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
+import com.funny.submaker.core.kmp.ToastType
+import com.funny.submaker.core.kmp.toast
 import com.funny.submaker.core.prefs.SubMakerPrefs
 import com.funny.submaker.core.utils.nowMs
 import com.funny.submaker.database.SubtitleProjectRepository
@@ -23,7 +25,6 @@ class WorkspaceViewModel : ViewModel() {
     var statusFilter by mutableStateOf(ProjectStatusFilter.All)
     var projects by mutableStateOf<List<SubtitleProjectEntity>>(emptyList())
     var selectedProjectId by mutableStateOf<String?>(null)
-    var errorMessage by mutableStateOf<String?>(null)
 
     init {
         observeWorkspaceProjects()
@@ -117,7 +118,7 @@ class WorkspaceViewModel : ViewModel() {
                     selectedProjectId = entity.id
                 }
                 .onFailure {
-                    errorMessage = it.message ?: "保存项目失败"
+                    toast(it.message ?: "保存项目失败", type = ToastType.Error)
                 }
         }
     }

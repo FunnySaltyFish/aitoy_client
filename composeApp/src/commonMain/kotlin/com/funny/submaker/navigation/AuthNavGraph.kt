@@ -7,7 +7,6 @@ import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.EntryProviderScope
 import com.funny.submaker.core.prefs.SubMakerPrefs
 import com.funny.submaker.feature.auth.AuthViewModel
-import com.funny.submaker.feature.auth.components.AuthMessageCard
 import com.funny.submaker.feature.auth.screens.AccountScreen
 import com.funny.submaker.feature.auth.screens.BetaWelcomeScreen
 import com.funny.submaker.feature.auth.screens.LoginScreen
@@ -42,8 +41,6 @@ fun EntryProviderScope<NavKey>.addAuthRoutes(
                 onNavigate(Routes.AuthVerify(from = route.from))
             },
         )
-        vm.infoMessage?.let { AuthMessageCard(text = it, isError = false) }
-        vm.errorMessage?.let { AuthMessageCard(text = it, isError = true) }
     }
 
     entry<Routes.AuthVerify>(
@@ -56,8 +53,6 @@ fun EntryProviderScope<NavKey>.addAuthRoutes(
                 onNavigate(Routes.AuthBetaWelcome(from = route.from))
             },
         )
-        vm.infoMessage?.let { AuthMessageCard(text = it, isError = false) }
-        vm.errorMessage?.let { AuthMessageCard(text = it, isError = true) }
     }
 
     entry<Routes.AuthBetaWelcome>(
@@ -99,7 +94,5 @@ fun EntryProviderScope<NavKey>.addAuthRoutes(
                 onReplaceTop(Routes.AuthLogin(from = route.from))
             },
         )
-        vm.infoMessage?.let { AuthMessageCard(text = it, isError = false) }
-        vm.errorMessage?.let { AuthMessageCard(text = it, isError = true) }
     }
 }

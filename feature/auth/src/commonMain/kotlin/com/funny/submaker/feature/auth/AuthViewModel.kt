@@ -6,6 +6,8 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import com.funny.submaker.core.kmp.appCtx
 import com.funny.submaker.core.kmp.openUrl
+import com.funny.submaker.core.kmp.ToastType
+import com.funny.submaker.core.kmp.toast
 import com.funny.submaker.core.model.DeviceProfile
 import com.funny.submaker.core.prefs.SubMakerPrefs
 import com.funny.submaker.network.api.ApiException
@@ -45,6 +47,20 @@ class AuthViewModel : ViewModel() {
         infoMessage = null
     }
 
+    private fun setError(message: String?) {
+        val text = message?.trim().orEmpty()
+        if (text.isBlank()) return
+        errorMessage = text
+        toast(text, type = ToastType.Error)
+    }
+
+    private fun setInfo(message: String?) {
+        val text = message?.trim().orEmpty()
+        if (text.isBlank()) return
+        infoMessage = text
+        toast(text, type = ToastType.Info)
+    }
+
     fun bootstrap() {
         loadDeviceStatus()
         if (isLoggedIn) refreshMe()
@@ -57,7 +73,7 @@ class AuthViewModel : ViewModel() {
             }.onSuccess {
                 device = it
             }.onFailure {
-                errorMessage = it.userMessage()
+                setError(it.userMessage())
             }
         }
     }
@@ -69,7 +85,7 @@ class AuthViewModel : ViewModel() {
             }.onSuccess {
                 SubMakerPrefs.user = it
             }.onFailure {
-                errorMessage = it.userMessage()
+                setError(it.userMessage())
             }
         }
     }
@@ -81,7 +97,7 @@ class AuthViewModel : ViewModel() {
             }.onSuccess {
                 products = it
             }.onFailure {
-                errorMessage = it.userMessage()
+                setError(it.userMessage())
             }
         }
     }
@@ -105,7 +121,7 @@ class AuthViewModel : ViewModel() {
     ) {
         val emailError = emailFormatError()
         if (emailError != null) {
-            errorMessage = emailError
+            setError(emailError)
             return
         }
         busy = true
@@ -119,10 +135,10 @@ class AuthViewModel : ViewModel() {
                     )
                 }
             }.onSuccess {
-                infoMessage = "验证码已发送"
+                setInfo("验证码已发送")
                 onSuccess?.invoke()
             }.onFailure {
-                errorMessage = it.userMessage()
+                setError(it.userMessage())
             }
             busy = false
         }
@@ -131,7 +147,7 @@ class AuthViewModel : ViewModel() {
     fun loginWithCode(onSuccess: (() -> Unit)? = null) {
         val emailError = emailFormatError()
         if (emailError != null || verifyCode.length != 6) {
-            errorMessage = emailError ?: "请输入 6 位验证码"
+            setError(emailError ?: "请输入 6 位验证码")
             return
         }
         busy = true
@@ -151,13 +167,13 @@ class AuthViewModel : ViewModel() {
                 runCatching {
                     SyncAfterLoginUseCase.executeAfterLogin()
                 }.onFailure {
-                    errorMessage = it.userMessage()
+                    setError(it.userMessage())
                 }
                 refreshMe()
                 loadDeviceStatus()
                 onSuccess?.invoke()
             }.onFailure {
-                errorMessage = it.userMessage()
+                setError(it.userMessage())
             }
             busy = false
         }
@@ -165,12 +181,12 @@ class AuthViewModel : ViewModel() {
 
     fun logout() {
         SubMakerPrefs.logout()
-        infoMessage = "已退出登录"
+        setInfo("已退出登录")
     }
 
     fun buy(product: Product) {
         if (!isLoggedIn) {
-            errorMessage = "请先登录"
+            setError("请先登录")
             return
         }
         if (paying) return
@@ -183,12 +199,12 @@ class AuthViewModel : ViewModel() {
                 apiRequest { SubMakerServices.payService.createOrder(product.id) }
             }.onSuccess { order ->
                 payingOrderNo = order.orderNo
-                infoMessage = "已创建订单：${order.orderNo}，请在浏览器完成支付后返回"
+                setInfo("已创建订单：${order.orderNo}，请在浏览器完成支付后返回")
                 appCtx.openUrl(order.payUrl)
                 pollOrder(order.orderNo)
             }.onFailure {
                 paying = false
-                errorMessage = it.userMessage()
+                setError(it.userMessage())
             }
         }
     }
@@ -201,7 +217,7 @@ class AuthViewModel : ViewModel() {
                 .onSuccess { query ->
                     if (query.status == "paid") {
                         paying = false
-                        infoMessage = "购买成功，权益已发放"
+                        setInfo("购买成功，权益已发放")
                         refreshMe()
                         return
                     }
@@ -209,7 +225,7 @@ class AuthViewModel : ViewModel() {
         }
         if (paying && payingOrderNo == orderNo) {
             paying = false
-            infoMessage = "已停止轮询订单状态，你可以手动刷新"
+            setInfo("已停止轮询订单状态，你可以手动刷新")
         }
     }
 

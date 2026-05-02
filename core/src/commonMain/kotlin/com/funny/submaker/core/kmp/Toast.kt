@@ -46,6 +46,13 @@ fun toast(
     showPlatformToast(appCtx, msg, type)
 }
 
+fun toastError(
+    msg: String,
+) {
+    if (msg.isBlank()) return
+    showPlatformToast(appCtx, msg, ToastType.Error)
+}
+
 internal expect fun showPlatformToast(
     context: KMPContext,
     msg: String,

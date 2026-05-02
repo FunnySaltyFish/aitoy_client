@@ -70,7 +70,7 @@ fun CacheManager.fileSubDir(name: String) = fileDir.resolve(name).ensureDirector
 > 下述：.core 代表 com.funny.submaker.core
 
 - 日志 `Log.d(TAG) { "message: $variable" }`
-- Toast `toast("message", [type = ToastType.Error])`
+- Toast `toast("message", [type = ToastType.Error])` 或简便方法 `toastError("message")`
 - .core.utils.nowMs() 获取当前时间戳（毫秒）
 - .core.utils.runOnUI { }，安卓在主线程运行
 

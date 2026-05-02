@@ -340,15 +340,6 @@ private fun WorkspaceProjectsPage(
                     }
                 }
             }
-
-            val err = vm.errorMessage
-            if (err != null) {
-                Text(
-                    text = err,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                )
-            }
         }
     }
 }
