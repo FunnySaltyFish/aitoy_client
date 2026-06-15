@@ -40,6 +40,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.funny.aitoy.ble.BleConnectionState
 import com.funny.aitoy.ble.ScannedBleDevice
@@ -71,6 +74,8 @@ fun App() {
             LazyColumn(
                 modifier = Modifier
                     .fillMaxSize()
+                    .semantics { testTagsAsResourceId = true }
+                    .testTag("aitoy_root")
                     .statusBarsPadding()
                     .padding(horizontal = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
@@ -202,7 +207,10 @@ private fun ScanSection(
         )
         Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Button(onClick = onScan) {
+            Button(
+                modifier = Modifier.testTag("scan_toggle"),
+                onClick = onScan,
+            ) {
                 Text(if (vm.scanning) "停止扫描" else "开始扫描")
             }
             if (vm.connectionState != BleConnectionState.Idle) {
@@ -244,7 +252,13 @@ private fun DeviceCard(
                 )
             }
             Spacer(Modifier.width(10.dp))
-            Button(onClick = onConnect, enabled = device.connectable) {
+            Button(
+                modifier = Modifier.testTag(
+                    "device_connect_${device.address.replace(":", "_")}",
+                ),
+                onClick = onConnect,
+                enabled = device.connectable,
+            ) {
                 Text(if (device.connectable) "连接" else "仅广播")
             }
         }
@@ -255,7 +269,7 @@ private fun DeviceCard(
 private fun ProtocolSection(vm: BridgeViewModel) {
     SectionCard(title = "设备协议") {
         Text(
-            text = "填写设备说明中对应的服务和写入特征。常见 FFE0 协议已作为默认值。",
+            text = "已支持的设备会自动识别。只有在确认设备协议后，才使用高级手动模板。",
             color = TextSecondary,
         )
         Spacer(Modifier.height(12.dp))
@@ -270,6 +284,13 @@ private fun ProtocolSection(vm: BridgeViewModel) {
                 onCheckedChange = { vm.writeWithResponse = it },
             )
             Text("等待设备确认写入")
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Checkbox(
+                checked = vm.manualControlEnabled,
+                onCheckedChange = { vm.manualControlEnabled = it },
+            )
+            Text("启用高级手动控制")
         }
     }
 }
@@ -291,30 +312,49 @@ private fun ProtocolField(label: String, value: String, onValueChange: (String) 
 @Composable
 private fun TestSection(vm: BridgeViewModel) {
     SectionCard(title = "控制测试") {
-        Text("模式 ${vm.mode}", fontFamily = FontFamily.Monospace)
-        Slider(
-            value = vm.mode.toFloat(),
-            onValueChange = { vm.mode = it.roundToInt() },
-            valueRange = 1f..8f,
-            steps = 6,
+        Text(
+            text = "已识别：${vm.protocolStatus.displayName}",
+            color = if (vm.protocolStatus.controllable) Color(0xFFB9F3D2) else TextSecondary,
         )
+        if (!vm.protocolStatus.controllable && vm.connectionState == BleConnectionState.Ready) {
+            Text(
+                text = "当前设备暂未适配，为避免异常动作，控制功能已暂停。",
+                color = TextSecondary,
+            )
+        }
+        if (vm.protocolStatus.supportsMode) {
+            Text("模式 ${vm.mode}", fontFamily = FontFamily.Monospace)
+            Slider(
+                value = vm.mode.toFloat(),
+                onValueChange = { vm.mode = it.roundToInt() },
+                modifier = Modifier.testTag("mode_slider"),
+                valueRange = 1f..8f,
+                steps = 6,
+            )
+        }
         Text("强度 ${vm.intensity}", fontFamily = FontFamily.Monospace)
         Slider(
             value = vm.intensity.toFloat(),
             onValueChange = { vm.intensity = it.roundToInt() },
-            valueRange = 1f..5f,
-            steps = 3,
+            modifier = Modifier.testTag("intensity_slider"),
+            valueRange = 1f..maxOf(1, vm.protocolStatus.intensityMax).toFloat(),
+            steps = (vm.protocolStatus.intensityMax - 2).coerceAtLeast(0),
+            enabled = vm.protocolStatus.controllable,
         )
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Button(
+                modifier = Modifier.testTag("control_test"),
                 onClick = vm::sendTest,
-                enabled = vm.connectionState == BleConnectionState.Ready,
+                enabled = vm.connectionState == BleConnectionState.Ready &&
+                    vm.protocolStatus.controllable,
             ) {
                 Text("轻轻试一下")
             }
             Button(
+                modifier = Modifier.testTag("control_stop"),
                 onClick = vm::stopDevice,
-                enabled = vm.connectionState == BleConnectionState.Ready,
+                enabled = vm.connectionState == BleConnectionState.Ready &&
+                    vm.protocolStatus.controllable,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = Danger,
                     contentColor = Color.White,
@@ -345,6 +385,7 @@ private fun LogSection(vm: BridgeViewModel) {
         LazyColumn(
             modifier = Modifier
                 .fillMaxWidth()
+                .testTag("protocol_logs")
                 .height(260.dp)
                 .background(Color(0xFF0B090C), RoundedCornerShape(12.dp))
                 .padding(10.dp),

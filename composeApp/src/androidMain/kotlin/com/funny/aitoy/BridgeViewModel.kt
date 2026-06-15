@@ -9,6 +9,7 @@ import android.os.Handler
 import android.os.Looper
 import com.funny.aitoy.ble.AndroidBleController
 import com.funny.aitoy.ble.BleConnectionState
+import com.funny.aitoy.ble.BleProtocolStatus
 import com.funny.aitoy.ble.ProtocolTemplate
 import com.funny.aitoy.ble.ScannedBleDevice
 import com.funny.aitoy.core.prefs.DataSaverUtils
@@ -33,6 +34,8 @@ class BridgeViewModel : ViewModel() {
     var selectedName by mutableStateOf("")
         private set
     var relayState by mutableStateOf("未连接")
+        private set
+    var protocolStatus by mutableStateOf(BleProtocolStatus())
         private set
 
     var serverUrl: String by mutableDataSaverStateOf(
@@ -76,6 +79,11 @@ class BridgeViewModel : ViewModel() {
         "BLE_WRITE_WITH_RESPONSE",
         false,
     )
+    var manualControlEnabled: Boolean by mutableDataSaverStateOf(
+        DataSaverUtils,
+        "BLE_MANUAL_CONTROL_ENABLED",
+        false,
+    )
     var mode by mutableStateOf(1)
     var intensity by mutableStateOf(1)
     var errorMessage by mutableStateOf<String?>(null)
@@ -87,11 +95,12 @@ class BridgeViewModel : ViewModel() {
             connectionState = it
             if (it == BleConnectionState.Ready) syncRelayDevice()
         },
+        onProtocol = { protocolStatus = it },
         onLog = ::appendLog,
     )
     private val mainHandler = Handler(Looper.getMainLooper())
     private val autoStop = Runnable {
-        runCatching { controller.write(currentTemplate().stopBytes()) }
+        runCatching { controller.stopDevice() }
             .onSuccess { appendLog("安全计时结束，已自动发送停止指令") }
             .onFailure { appendLog("自动停止失败：${it.message}") }
     }
@@ -120,7 +129,7 @@ class BridgeViewModel : ViewModel() {
         selectedAddress = device.address
         selectedName = device.name
         scanning = false
-        controller.connect(device.address, currentTemplate())
+        controller.connect(device, currentTemplate())
     }
 
     fun disconnect() {
@@ -128,11 +137,11 @@ class BridgeViewModel : ViewModel() {
     }
 
     fun sendTest() = runAction {
-        controller.write(currentTemplate().commandBytes(mode, intensity))
+        controller.sendCommand(mode, intensity)
     }
 
     fun stopDevice() = runAction {
-        controller.write(currentTemplate().stopBytes())
+        controller.stopDevice()
     }
 
     fun clearLogs() {
@@ -152,6 +161,7 @@ class BridgeViewModel : ViewModel() {
         writeUuid = writeUuid.trim(),
         notifyUuid = notifyUuid.trim(),
         writeWithResponse = writeWithResponse,
+        manualControlEnabled = manualControlEnabled,
         commandTemplate = commandTemplate,
         stopTemplate = stopTemplate,
     )
@@ -189,11 +199,9 @@ class BridgeViewModel : ViewModel() {
                     val mappedIntensity = (
                         1 + ((command.intensity ?: 0).coerceIn(0, 100) / 100.0) * 4
                         ).roundToInt().coerceIn(1, 5)
-                    controller.write(
-                        currentTemplate().commandBytes(
-                            mode = command.mode?.coerceAtLeast(1) ?: 1,
-                            intensity = mappedIntensity,
-                        )
+                    controller.sendCommand(
+                        mode = command.mode?.coerceAtLeast(1) ?: 1,
+                        intensity = mappedIntensity.coerceAtMost(protocolStatus.intensityMax),
                     )
                     mainHandler.postDelayed(
                         autoStop,
@@ -202,7 +210,7 @@ class BridgeViewModel : ViewModel() {
                 }
                 "stop", "stop_all" -> {
                     mainHandler.removeCallbacks(autoStop)
-                    controller.write(currentTemplate().stopBytes())
+                    controller.stopDevice()
                 }
                 else -> error("不支持的命令：${command.action}")
             }

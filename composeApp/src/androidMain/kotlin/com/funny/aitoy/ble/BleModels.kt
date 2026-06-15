@@ -21,6 +21,7 @@ data class ProtocolTemplate(
     val writeUuid: String,
     val notifyUuid: String,
     val writeWithResponse: Boolean,
+    val manualControlEnabled: Boolean,
     val commandTemplate: String,
     val stopTemplate: String,
 ) {
@@ -29,6 +30,15 @@ data class ProtocolTemplate(
 
     fun stopBytes(): ByteArray = parseHexTemplate(stopTemplate, mode = 0, intensity = 0)
 }
+
+data class BleProtocolStatus(
+    val id: String = "",
+    val displayName: String = "尚未识别",
+    val controllable: Boolean = false,
+    val intensityMax: Int = 0,
+    val supportsMode: Boolean = false,
+    val automatic: Boolean = false,
+)
 
 fun parseHexTemplate(template: String, mode: Int, intensity: Int): ByteArray {
     val resolved = template

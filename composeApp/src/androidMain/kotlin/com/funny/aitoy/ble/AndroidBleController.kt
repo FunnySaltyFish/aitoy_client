@@ -17,11 +17,13 @@ import android.os.Looper
 import android.util.Log
 import com.funny.aitoy.core.platform.AndroidPlatformInit
 import java.util.UUID
+import java.util.ArrayDeque
 
 @SuppressLint("MissingPermission")
 class AndroidBleController(
     private val onDevice: (ScannedBleDevice) -> Unit,
     private val onState: (BleConnectionState) -> Unit,
+    private val onProtocol: (BleProtocolStatus) -> Unit,
     private val onLog: (String) -> Unit,
 ) {
     private val context: Context = AndroidPlatformInit.appContext
@@ -29,8 +31,13 @@ class AndroidBleController(
     private val mainHandler = Handler(Looper.getMainLooper())
     private var gatt: BluetoothGatt? = null
     private var template: ProtocolTemplate? = null
+    private var connectedName = ""
+    private var activeProtocol: BleDeviceProtocol? = null
     private var resolvedWriteCharacteristic: BluetoothGattCharacteristic? = null
+    private val operationQueue = ArrayDeque<BleProtocolOperation>()
+    private var operationInProgress = false
     private var operationId = 0L
+    private val scanSignatures = mutableMapOf<String, String>()
 
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
@@ -46,10 +53,27 @@ class AndroidBleController(
             mainHandler.post {
                 onDevice(ScannedBleDevice(name, device.address, result.rssi, connectable))
             }
-            trace(
-                "扫描结果 name=$name address=${device.address} rssi=${result.rssi} " +
-                    "connectable=$connectable",
-            )
+            val record = result.scanRecord
+            val signature = buildString {
+                append("name=$name address=${device.address} connectable=$connectable")
+                append(" services=${record?.serviceUuids?.joinToString { it.uuid.toString() } ?: "<none>"}")
+                append(" manufacturer=")
+                val manufacturerData = record?.manufacturerSpecificData
+                if (manufacturerData == null || manufacturerData.size() == 0) {
+                    append("<none>")
+                } else {
+                    append(
+                        (0 until manufacturerData.size()).joinToString {
+                            val id = manufacturerData.keyAt(it)
+                            "0x${id.toString(16)}:${manufacturerData.valueAt(it).toHexString()}"
+                        },
+                    )
+                }
+                append(" record=${record?.bytes?.toHexString() ?: "<none>"}")
+            }
+            if (scanSignatures.put(device.address, signature) != signature) {
+                trace("扫描结果 $signature rssi=${result.rssi}")
+            }
         }
 
         override fun onScanFailed(errorCode: Int) {
@@ -91,6 +115,21 @@ class AndroidBleController(
                 return
             }
             val config = template ?: return
+            val fingerprint = BleGattFingerprint(
+                name = connectedName,
+                characteristicUuids = gatt.services
+                    .flatMap { it.characteristics }
+                    .map { it.uuid }
+                    .toSet(),
+            )
+            activeProtocol = BleProtocolRegistry.resolve(fingerprint)
+            activeProtocol?.let { protocol ->
+                trace("自动识别协议 id=${protocol.status.id} name=${protocol.status.displayName}")
+                onProtocol(protocol.status)
+                enqueue(protocol.initialize(fingerprint))
+                if (operationQueue.isEmpty()) updateState(BleConnectionState.Ready)
+                return
+            }
             val configuredService = gatt.getService(config.serviceUuid.toUuidOrNull())
             val configuredWrite = configuredService?.getCharacteristic(config.writeUuid.toUuidOrNull())
             trace("协议匹配 service=${configuredService != null} write=${configuredWrite != null}")
@@ -113,6 +152,21 @@ class AndroidBleController(
                 return
             }
             subscribeNotify(gatt, config)
+            if (config.manualControlEnabled) {
+                activeProtocol = ManualBleProtocol(resolvedWriteCharacteristic!!.uuid, config)
+                onProtocol(activeProtocol!!.status)
+                trace("未找到内置协议，已启用用户确认的高级手动模板")
+            } else {
+                onProtocol(
+                    BleProtocolStatus(
+                        id = "manual",
+                        displayName = "尚未适配",
+                        controllable = false,
+                        automatic = false,
+                    ),
+                )
+                trace("未找到内置协议，已禁止自动控制；可查看 GATT 日志后补充适配")
+            }
             updateState(BleConnectionState.Ready)
         }
 
@@ -122,6 +176,31 @@ class AndroidBleController(
             status: Int,
         ) {
             trace("写入回调 uuid=${characteristic.uuid} status=$status success=${status == BluetoothGatt.GATT_SUCCESS}")
+            operationInProgress = false
+            if (status == BluetoothGatt.GATT_SUCCESS) {
+                executeNextOperation()
+            } else {
+                operationQueue.clear()
+                updateState(BleConnectionState.Error)
+            }
+        }
+
+        @Deprecated("Android 13 之前的回调")
+        override fun onCharacteristicRead(
+            gatt: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic,
+            status: Int,
+        ) {
+            handleCharacteristicRead(characteristic.uuid, characteristic.value ?: byteArrayOf(), status)
+        }
+
+        override fun onCharacteristicRead(
+            gatt: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic,
+            value: ByteArray,
+            status: Int,
+        ) {
+            handleCharacteristicRead(characteristic.uuid, value, status)
         }
 
         @Deprecated("Android 13 之前的回调")
@@ -152,6 +231,7 @@ class AndroidBleController(
             return
         }
         trace("开始扫描 BLE 设备")
+        scanSignatures.clear()
         adapter.bluetoothLeScanner?.startScan(scanCallback)
     }
 
@@ -160,32 +240,47 @@ class AndroidBleController(
         trace("停止扫描")
     }
 
-    fun connect(address: String, protocolTemplate: ProtocolTemplate) {
+    fun connect(device: ScannedBleDevice, protocolTemplate: ProtocolTemplate) {
         stopScan()
         disconnect()
+        connectedName = device.name
         template = protocolTemplate
+        activeProtocol = null
         resolvedWriteCharacteristic = null
+        operationQueue.clear()
+        operationInProgress = false
+        onProtocol(BleProtocolStatus())
         operationId++
         trace(
-            "连接请求 op=$operationId address=$address service=${protocolTemplate.serviceUuid} " +
+            "连接请求 op=$operationId name=${device.name} address=${device.address} service=${protocolTemplate.serviceUuid} " +
                 "write=${protocolTemplate.writeUuid} notify=${protocolTemplate.notifyUuid.ifBlank { "<none>" }}",
         )
         updateState(BleConnectionState.Connecting)
-        val device = adapter?.getRemoteDevice(address)
-        gatt = device?.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
+        val remoteDevice = adapter?.getRemoteDevice(device.address)
+        gatt = remoteDevice?.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
         if (gatt == null) {
             trace("无法创建 GATT 连接", error = true)
             updateState(BleConnectionState.Error)
         }
     }
 
-    fun write(bytes: ByteArray) {
+    fun sendCommand(mode: Int, intensity: Int) {
+        val protocol = activeProtocol ?: error("当前设备尚无可用的内置协议")
+        enqueue(listOf(protocol.setCommand(mode, intensity)))
+    }
+
+    fun stopDevice() {
+        val protocol = activeProtocol ?: error("当前设备尚无可用的内置协议")
+        enqueue(listOf(protocol.stopCommand()))
+    }
+
+    private fun write(operation: BleProtocolOperation.Write) {
         val currentGatt = gatt ?: error("设备尚未连接")
-        val config = template ?: error("协议尚未配置")
-        val characteristic = resolvedWriteCharacteristic ?: error("设备尚未准备好写入")
+        val characteristic = findCharacteristic(operation.characteristicUuid)
+            ?: error("找不到写入特征：${operation.characteristicUuid}")
         val supportsNoResponse =
             characteristic.properties and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE != 0
-        val writeWithResponse = config.writeWithResponse || !supportsNoResponse
+        val writeWithResponse = operation.withResponse || !supportsNoResponse
         val writeType = if (writeWithResponse) {
             BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
         } else {
@@ -194,19 +289,27 @@ class AndroidBleController(
         trace(
             "准备写入 op=$operationId uuid=${characteristic.uuid} mode=" +
                 "${if (writeWithResponse) "with-response" else "without-response"} " +
-                "length=${bytes.size} bytes=${bytes.toHexString()}",
+            "length=${operation.bytes.size} bytes=${operation.bytes.toHexString()}",
         )
         val result = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            currentGatt.writeCharacteristic(characteristic, bytes, writeType)
+            currentGatt.writeCharacteristic(characteristic, operation.bytes, writeType)
         } else {
             @Suppress("DEPRECATION")
             characteristic.writeType = writeType
             @Suppress("DEPRECATION")
-            characteristic.value = bytes
+            characteristic.value = operation.bytes
             @Suppress("DEPRECATION")
             if (currentGatt.writeCharacteristic(characteristic)) 0 else -1
         }
         trace("写入已提交 result=$result")
+        if (result != 0) {
+            operationInProgress = false
+            error("提交写入失败：$result")
+        }
+        if (!writeWithResponse) {
+            operationInProgress = false
+            mainHandler.postDelayed(::executeNextOperation, 40)
+        }
     }
 
     fun disconnect() {
@@ -264,6 +367,56 @@ class AndroidBleController(
         if (gatt === target) gatt = null
         trace("GATT 资源已释放")
     }
+
+    private fun enqueue(operations: List<BleProtocolOperation>) {
+        operationQueue.addAll(operations)
+        executeNextOperation()
+    }
+
+    private fun executeNextOperation() {
+        if (operationInProgress) return
+        val operation = if (operationQueue.isEmpty()) null else operationQueue.removeFirst()
+        if (operation == null) {
+            if (connectionStateNeedsReady()) updateState(BleConnectionState.Ready)
+            return
+        }
+        operationInProgress = true
+        when (operation) {
+            is BleProtocolOperation.Read -> {
+                val characteristic = findCharacteristic(operation.characteristicUuid)
+                    ?: error("找不到读取特征：${operation.characteristicUuid}")
+                trace("准备读取 uuid=${characteristic.uuid}")
+                val started = gatt?.readCharacteristic(characteristic) == true
+                trace("读取已提交 result=$started")
+                if (!started) {
+                    operationInProgress = false
+                    error("提交读取失败：${characteristic.uuid}")
+                }
+            }
+            is BleProtocolOperation.Write -> write(operation)
+        }
+    }
+
+    private fun handleCharacteristicRead(uuid: UUID, bytes: ByteArray, status: Int) {
+        trace("读取回调 uuid=$uuid status=$status bytes=${bytes.toHexString()}")
+        operationInProgress = false
+        if (status != BluetoothGatt.GATT_SUCCESS) {
+            operationQueue.clear()
+            updateState(BleConnectionState.Error)
+            return
+        }
+        activeProtocol?.onRead(uuid, bytes)?.let(operationQueue::addAll)
+        executeNextOperation()
+    }
+
+    private fun findCharacteristic(uuid: UUID): BluetoothGattCharacteristic? =
+        gatt?.services
+            ?.asSequence()
+            ?.mapNotNull { it.getCharacteristic(uuid) }
+            ?.firstOrNull()
+
+    private fun connectionStateNeedsReady(): Boolean =
+        activeProtocol != null
 
     private fun updateState(state: BleConnectionState) {
         mainHandler.post { onState(state) }
