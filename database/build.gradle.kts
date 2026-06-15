@@ -1,5 +1,5 @@
 plugins {
-    id("submaker.kmp.library")
+    id("aitoy.kmp.library")
     alias(libs.plugins.google.ksp)
 }
 
@@ -27,5 +27,5 @@ dependencies {
 }
 
 android {
-    namespace = "com.funny.submaker.database"
+    namespace = "com.funny.aitoy.database"
 }

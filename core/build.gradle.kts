@@ -1,5 +1,5 @@
 plugins {
-    id("submaker.kmp.library")
+    id("aitoy.kmp.library")
     alias(libs.plugins.composeCompiler)
     alias(libs.plugins.kotlinSerialization)
 }
@@ -34,5 +34,5 @@ kotlin {
 }
 
 android {
-    namespace = "com.funny.submaker.core"
+    namespace = "com.funny.aitoy.core"
 }

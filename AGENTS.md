@@ -32,7 +32,7 @@
 var checked: Boolean by mutableDataSaverStateOf(DataSaverUtils, "AUTO_LANGUAGE_CHECKED", false)
 onClick = { checked = true } // 自动保存并触发 UI 更新
 
-// 自定义类型需先注册转换器（在 SubMakerPrefsInit）
+// 自定义类型需先注册转换器（在 AiToyPrefsInit）
 DataSaverConverter.registerTypeConverters<Language>( // enum
     save = { it.name },
     restore = { Language.valueOf(it) }
@@ -67,7 +67,7 @@ fun CacheManager.fileSubDir(name: String) = fileDir.resolve(name).ensureDirector
 
 ## 全局信息
 
-> 下述：.core 代表 com.funny.submaker.core
+> 下述：.core 代表 com.funny.aitoy.core
 
 - 日志 `Log.d(TAG) { "message: $variable" }`
 - Toast `toast("message", [type = ToastType.Error])` 或简便方法 `toastError("message")`

@@ -1,8 +1,8 @@
 
 import com.android.build.api.dsl.CommonExtension
 import com.android.build.gradle.LibraryExtension
-import com.funny.submaker.buildlogic.findVersionAsInt
-import com.funny.submaker.buildlogic.libs
+import com.funny.aitoy.buildlogic.findVersionAsInt
+import com.funny.aitoy.buildlogic.libs
 import org.gradle.api.JavaVersion
 import org.gradle.api.Plugin
 import org.gradle.api.Project

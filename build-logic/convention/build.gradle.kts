@@ -20,7 +20,7 @@ plugins {
     `kotlin-dsl`
 }
 
-group = "com.funny.submaker.buildlogic"
+group = "com.funny.aitoy.buildlogic"
 
 // Configure the build-logic plugins to target JDK 17
 // This matches the JDK used to build the project, and is not related to what is running on device.
@@ -48,7 +48,7 @@ tasks {
 
 gradlePlugin {
     plugins {
-        val prefix = "submaker"
+        val prefix = "aitoy"
         register("kmpLibrary") {
             id = "$prefix.kmp.library"
             implementationClass = "KMPLibraryCP"

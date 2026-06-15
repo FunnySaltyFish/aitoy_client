@@ -1,7 +1,7 @@
 
 import com.android.build.api.dsl.ApplicationExtension
-import com.funny.submaker.buildlogic.findVersionAsInt
-import com.funny.submaker.buildlogic.libs
+import com.funny.aitoy.buildlogic.findVersionAsInt
+import com.funny.aitoy.buildlogic.libs
 import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.kotlin.dsl.dependencies

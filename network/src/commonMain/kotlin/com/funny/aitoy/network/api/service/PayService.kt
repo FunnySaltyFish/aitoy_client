@@ -1,0 +1,54 @@
+package com.funny.aitoy.network.api.service
+
+import com.funny.aitoy.network.api.ApiResp
+import com.funny.aitoy.network.GetCache
+import kotlinx.serialization.Serializable
+import retrofit2.http.Field
+import retrofit2.http.FormUrlEncoded
+import retrofit2.http.GET
+import retrofit2.http.POST
+import retrofit2.http.Query
+
+interface PayService {
+    @GET("pay/products")
+    @GetCache(refreshAt4Am = true, minSeconds = 300)
+    suspend fun products(): ApiResp<ProductsPayload>
+
+    @POST("pay/create_order")
+    @FormUrlEncoded
+    suspend fun createOrder(
+        @Field("productId") productId: String,
+    ): ApiResp<CreateOrderPayload>
+
+    @GET("pay/query_order")
+    suspend fun queryOrder(
+        @Query("orderNo") orderNo: String,
+    ): ApiResp<QueryOrderPayload>
+}
+
+@Serializable
+data class Product(
+    val id: String,
+    val name: String,
+    val priceCents: Int,
+    val proDays: Int,
+)
+
+@Serializable
+data class ProductsPayload(
+    val products: List<Product> = emptyList(),
+)
+
+@Serializable
+data class CreateOrderPayload(
+    val orderNo: String,
+    val payUrl: String,
+)
+
+@Serializable
+data class QueryOrderPayload(
+    val orderNo: String,
+    val status: String,
+    val productId: String,
+    val paidAtMs: Long = 0,
+)

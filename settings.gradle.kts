@@ -1,4 +1,4 @@
-rootProject.name = "SubMaker"
+rootProject.name = "AI-Toy-Bridge"
 enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
 
 pluginManagement {
@@ -42,5 +42,3 @@ include(":composeApp")
 include(":core")
 include(":network")
 include(":database")
-include(":feature:auth")
-include(":feature:asr")

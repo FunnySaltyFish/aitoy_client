@@ -1,41 +1,43 @@
-# SubMaker KMP
+# AI Toy Bridge Android
 
-目标平台：Android + Desktop(JVM)
+当前目标平台为 Android，应用 ID 为 `com.funny.aitoy`，Debug 包为
+`com.funny.aitoy.debug`。
 
 ## 运行
 
-- Android：`./gradlew :composeApp:assembleDebug`
-- Desktop：`./gradlew :composeApp:run`
+- 编译：`./gradlew :composeApp:assembleDebug --console=plain --quiet`
+- 安装：`adb install -r composeApp/build/outputs/apk/debug/composeApp-debug.apk`
+- 日志：`adb logcat -s AiToyBle:D AiToyRelay:D '*:S'`
 
-## 当前进度（MVP）
+## 已实现
 
-- `ASR` 页已接入：导入媒体文件（Android SAF / Desktop FileKit）→ 生成示例时间轴 → 导出 `SRT/VTT`
-- `core` 提供：KMP `Context/Launcher/Uri` 设施 + `SrtWriter/VttWriter`
-- ✅ 已接入服务端账号/试用/付费骨架：
-  - 邮箱 + 密码登录/注册
-  - 忘记账号（邮箱验证码找回 username）
-  - 忘记密码（邮箱验证码重置密码）
-  - 未登录试用（设备维度）+ 登录后自动同步到账号记录
-  - 付费（MVP：创建订单 + mock_checkout + 轮询订单状态）
+- BLE 权限、扫描、连接和 GATT 服务发现
+- 手动 Service/Write/Notify UUID 与十六进制指令模板
+- `{mode}`、`{intensity}` 模板替换
+- With Response / Without Response 写入
+- 本地低强度测试、立即停止和最长 15 秒自动停止
+- 长期 User Token、Relay WebSocket、设备状态上报
+- `set` / `stop` / `stop_all` 命令执行结果回传
+- 屏幕日志与 `AiToyBle` / `AiToyRelay` Logcat 详细日志
+- 复用原项目的 KV、Cache、网络动态拦截器与数据库同步基础
 
-## 服务端（SubMaker/server）
+## 实测设备
 
-先启动服务端再体验账号与试用：
+`ANKNI YWTD` 已完成扫描、连接和 GATT 发现：
 
-```bash
-cd ../server
-pip install -r requirements.txt
-python -m py_compile app.py
-python app.py
-```
+- Service：`0000dddd-0000-1000-8000-00805f9b34fb`
+- Write：`0000ddd1-0000-1000-8000-00805f9b34fb`
+- Notify：`0000ddd2-0000-1000-8000-00805f9b34fb`
 
-可选配置：
+设备能建立 GATT 连接。实际动作指令仍需结合设备反馈确认，App 已预置
+`NEW_TASK.md` 中的测试模板并保留完整字节日志。
 
-- SMTP（不配置时验证码仅输出到服务端日志）
-  - `SUBMAKER_SMTP_HOST` / `SUBMAKER_SMTP_PORT` / `SUBMAKER_SMTP_USER` / `SUBMAKER_SMTP_PASSWORD` / `SUBMAKER_SMTP_FROM`
-- Mock 支付（开发自测）
-  - `SUBMAKER_MOCK_PAY_SECRET=your_secret`
+最低强度启动指令与停止指令均已收到 GATT `status=0` 写入回调。
 
-## 客户端说明
+`DSJM` 已完成连接与自动特征发现：
 
-- 客户端可在“账号与权益”页里修改 `Base URL`/`API Prefix`（Android 真机请用局域网 IP，不要用 127.0.0.1）。
+- Service：`0000fffe-0000-1000-8000-00805f9b34fb`
+- Write：`0000fe02-0000-1000-8000-00805f9b34fb`
+
+两条测试指令同样收到 `status=0`。第三个高信号未命名设备使用随机地址，
+扫描结果明确为 `connectable=false`，当前只能广播，无法建立 GATT 连接。
