@@ -51,3 +51,22 @@ data class AsrRecentLanguagePair(
     val target: AsrLanguage,
     val updatedAtMs: Long = 0L,
 )
+
+enum class TranslationWorkflowStage {
+    Idle,
+    Scanning,
+    Ready,
+    Translating,
+}
+
+data class TranslationGlossaryTerm(
+    val id: String,
+    val source: String,
+    val target: String,
+)
+
+data class TranslationRecommendation(
+    val topic: String,
+    val style: String,
+    val summary: String,
+)

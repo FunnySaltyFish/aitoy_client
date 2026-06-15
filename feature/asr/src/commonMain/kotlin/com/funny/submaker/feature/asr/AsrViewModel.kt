@@ -54,9 +54,12 @@ class AsrViewModel : ViewModel() {
     private var scopedOwnerId = currentUserDataOwnerId()
 
     private var sourceLanguageName by userDataSaverState(sourceLanguageKey, AsrLanguage.Auto.name)
-    private var targetLanguageName by userDataSaverState(targetLanguageKey, AsrLanguage.Zh.name)
+    private var targetLanguageName by userDataSaverState(targetLanguageKey, AsrLanguage.En.name)
     private var recentMediaJson by userDataSaverState(recentMediaKey, "[]")
     private var recentLanguagePairJson by userDataSaverState(recentLanguagePairKey, "[]")
+
+    val translationTermbases = listOf("通用科技", "产品品牌", "人物访谈", "影视解说")
+    val translationModels = listOf("GPT-5.4", "GPT-5.4 Mini", "Qwen Max", "DeepSeek V3")
 
     var apiBaseUrl by mutableStateOf("")
     var apiKey by mutableStateOf("")
@@ -67,18 +70,28 @@ class AsrViewModel : ViewModel() {
     var mediaSizeBytes by mutableStateOf<Long?>(null)
 
     var sourceLanguage by mutableStateOf(sourceLanguageName.toAsrLanguageOr(AsrLanguage.Auto))
-    var targetLanguage by mutableStateOf(targetLanguageName.toAsrLanguageOr(AsrLanguage.Zh))
+    var targetLanguage by mutableStateOf(targetLanguageName.toAsrLanguageOr(AsrLanguage.En))
     var recentMedia by mutableStateOf(loadRecentMedia(recentMediaJson))
     var recentLanguagePairs by mutableStateOf(loadRecentLanguagePairs(recentLanguagePairJson))
 
     var segments by mutableStateOf<List<SubtitleSegment>>(emptyList())
+    var selectedSegmentIndex by mutableStateOf<Int?>(null)
+    var currentPreviewPositionMs by mutableStateOf(0L)
 
     var running by mutableStateOf(false)
     var stageText by mutableStateOf("待开始")
+    var transcriptionProgress by mutableStateOf(0f)
+    var estimatedRemainingText by mutableStateOf("预计约 01:20")
     var lastResult by mutableStateOf<String?>(null)
     var errorMessage by mutableStateOf<String?>(null)
     var linkedProjectId by mutableStateOf<String?>(null)
     var linkedProjectName by mutableStateOf<String?>(null)
+
+    var translationPhase by mutableStateOf(TranslationWorkflowStage.Idle)
+    var translationRecommendation by mutableStateOf<TranslationRecommendation?>(null)
+    var glossaryTerms by mutableStateOf<List<TranslationGlossaryTerm>>(emptyList())
+    var selectedTermbase by mutableStateOf(translationTermbases.first())
+    var selectedTranslationModel by mutableStateOf(translationModels.first())
 
     fun clearError() {
         errorMessage = null
@@ -90,8 +103,8 @@ class AsrViewModel : ViewModel() {
         mediaName = uri.displayName()
         mediaMimeType = uri.mimeType()
         mediaSizeBytes = uri.sizeBytes()
+        resetWorkspaceState()
         stageText = "已选择文件"
-        clearError()
         saveRecentMedia(
             AsrRecentMedia(
                 uri = uri.toString(),
@@ -117,8 +130,8 @@ class AsrViewModel : ViewModel() {
         mediaName = item.name
         mediaMimeType = item.mimeType
         mediaSizeBytes = item.sizeBytes
+        resetWorkspaceState()
         stageText = "已选择最近文件"
-        clearError()
         saveRecentMedia(item.copy(updatedAtMs = nowMs()))
     }
 
@@ -190,11 +203,10 @@ class AsrViewModel : ViewModel() {
             return
         }
         confirmLanguageSelection()
+        resetWorkspaceState()
         running = true
-        clearError()
+        updateProgress(0.06f, "预计约 01:20")
         stageText = "准备上传"
-        lastResult = null
-        segments = emptyList()
         updateLinkedProjectStatus(ProjectStatus.Running.value)
         vmScope.launch {
             runCatching {
@@ -203,6 +215,7 @@ class AsrViewModel : ViewModel() {
                 val asrService = SubMakerServices.asrService(targetBaseUrl)
                 val sessionId = if (localApiKey != null) {
                     stageText = "创建 ASR 会话"
+                    updateProgress(0.12f, "预计约 01:15")
                     apiRequest {
                         asrService.createSession(
                             AsrSessionReq(
@@ -216,6 +229,7 @@ class AsrViewModel : ViewModel() {
                 }
 
                 stageText = "读取本地文件"
+                updateProgress(0.18f, "预计约 01:10")
                 val fileBytes = uri.readBytes()
                 if (fileBytes.isEmpty()) {
                     throw ApiException(1001, "读取文件失败：内容为空")
@@ -224,6 +238,7 @@ class AsrViewModel : ViewModel() {
                 val fileType = mediaMimeType ?: "application/octet-stream"
 
                 stageText = "获取上传票据"
+                updateProgress(0.32f, "预计约 00:56")
                 val ticket = apiRequest {
                     asrService.createUploadTicket(
                         AsrUploadTicketReq(
@@ -235,7 +250,8 @@ class AsrViewModel : ViewModel() {
                     )
                 }
 
-                stageText = "直传音频到 OSS"
+                stageText = "传输媒体文件"
+                updateProgress(0.54f, "预计约 00:42")
                 SubMakerServices.uploadService.uploadFileToTicket(
                     uploadHost = ticket.uploadHost,
                     formFields = ticket.formFields,
@@ -245,6 +261,7 @@ class AsrViewModel : ViewModel() {
                 )
 
                 stageText = "提交识别任务"
+                updateProgress(0.68f, "预计约 00:28")
                 val created = apiRequest {
                     asrService.createJob(
                         AsrCreateJobReq(
@@ -265,7 +282,9 @@ class AsrViewModel : ViewModel() {
                 var status = created.status
                 while (pollCount < maxPollCount && status !in setOf("SUCCEEDED", "FAILED", "EXPIRED")) {
                     pollCount += 1
-                    stageText = "识别中（$pollCount）"
+                    stageText = "转录处理中"
+                    val fraction = 0.72f + (pollCount.toFloat() / maxPollCount.toFloat()) * 0.22f
+                    updateProgress(fraction, estimateTextForPoll(pollCount))
                     delay(1500)
                     status = apiRequest { asrService.pollJob(created.jobId) }.status
                 }
@@ -273,7 +292,8 @@ class AsrViewModel : ViewModel() {
                     throw ApiException(1502, "识别未完成，当前状态：$status")
                 }
 
-                stageText = "下载并解析结果"
+                stageText = "整理字幕结果"
+                updateProgress(0.96f, "预计约 00:03")
                 val result = apiRequest { asrService.getResult(created.jobId) }
                 if (result.status != "SUCCEEDED") {
                     val err = result.error?.message ?: "任务状态异常：${result.status}"
@@ -285,19 +305,133 @@ class AsrViewModel : ViewModel() {
                 if (parsed.isEmpty()) {
                     throw ApiException(1504, "识别结果为空")
                 }
+
                 segments = parsed
-                stageText = "完成"
-                lastResult = "识别完成：${segments.size} 段，可导出 SRT/VTT"
+                selectedSegmentIndex = 0
+                currentPreviewPositionMs = parsed.first().startMs
+                stageText = "转录完成"
+                updateProgress(1f, "已完成")
+                lastResult = "识别完成：${segments.size} 条字幕，已进入精修区"
                 updateLinkedProjectStatus(ProjectStatus.Done.value)
             }.onFailure {
                 errorMessage = it.userMessage()
                 stageText = "失败"
+                estimatedRemainingText = "请重试"
                 updateLinkedProjectStatus(ProjectStatus.Failed.value)
                 running = false
             }.onSuccess {
                 running = false
             }
         }
+    }
+
+    fun retryAsr() {
+        startAsr()
+    }
+
+    fun selectSegment(index: Int) {
+        val target = segments.getOrNull(index) ?: return
+        selectedSegmentIndex = index
+        currentPreviewPositionMs = target.startMs
+    }
+
+    fun updateSelectedSegmentText(text: String) {
+        updateSelectedSegment { it.copy(text = text) }
+    }
+
+    fun nudgeSelectedSegmentStart(deltaMs: Long) {
+        updateSelectedSegment { current ->
+            val nextStart = (current.startMs + deltaMs).coerceAtLeast(0L)
+            val safeEnd = maxOf(nextStart + 100L, current.endMs)
+            current.copy(startMs = minOf(nextStart, safeEnd - 100L), endMs = safeEnd).normalize()
+        }
+    }
+
+    fun nudgeSelectedSegmentEnd(deltaMs: Long) {
+        updateSelectedSegment { current ->
+            val nextEnd = (current.endMs + deltaMs).coerceAtLeast(current.startMs + 100L)
+            current.copy(endMs = nextEnd).normalize()
+        }
+    }
+
+    fun splitSelectedSegmentIntoTwoLines() {
+        updateSelectedSegment { current ->
+            val normalized = current.text.trim().replace("\n", " ")
+            if (normalized.length <= 8) return@updateSelectedSegment current
+            val splitIndex = normalized.findBalancedSplitIndex()
+            current.copy(text = normalized.substring(0, splitIndex).trim() + "\n" + normalized.substring(splitIndex).trim())
+        }
+    }
+
+    fun mergeSelectedWithNext() {
+        val index = selectedSegmentIndex ?: return
+        if (index >= segments.lastIndex) return
+        val current = segments[index]
+        val next = segments[index + 1]
+        val merged = SubtitleSegment(
+            startMs = current.startMs,
+            endMs = maxOf(current.endMs, next.endMs),
+            text = listOf(current.text.trim(), next.text.trim()).filter { it.isNotBlank() }.joinToString("\n"),
+        )
+        segments = buildList {
+            addAll(segments.subList(0, index))
+            add(merged)
+            addAll(segments.subList(index + 2, segments.size))
+        }
+        selectedSegmentIndex = index
+        currentPreviewPositionMs = merged.startMs
+    }
+
+    fun selectTranslationTermbase(label: String) {
+        selectedTermbase = label
+    }
+
+    fun selectTranslationModel(model: String) {
+        selectedTranslationModel = model
+    }
+
+    fun scanTranslationRecommendation() {
+        if (segments.isEmpty() || translationPhase == TranslationWorkflowStage.Scanning) return
+        translationPhase = TranslationWorkflowStage.Scanning
+        translationRecommendation = null
+        glossaryTerms = emptyList()
+        vmScope.launch {
+            delay(1200)
+            val recommendation = buildRecommendation()
+            translationRecommendation = recommendation
+            glossaryTerms = buildGlossaryTerms(recommendation.topic)
+            translationPhase = TranslationWorkflowStage.Ready
+        }
+    }
+
+    fun confirmTranslationRecommendation() {
+        if (translationPhase != TranslationWorkflowStage.Ready) return
+        translationPhase = TranslationWorkflowStage.Translating
+        stageText = "已进入翻译状态"
+    }
+
+    fun addGlossaryTerm() {
+        glossaryTerms = glossaryTerms + TranslationGlossaryTerm(
+            id = "term_${nowMs()}_${glossaryTerms.size}",
+            source = "",
+            target = "",
+        )
+    }
+
+    fun updateGlossaryTermSource(id: String, value: String) {
+        glossaryTerms = glossaryTerms.map { term ->
+            if (term.id == id) term.copy(source = value) else term
+        }
+    }
+
+    fun updateGlossaryTermTarget(id: String, value: String) {
+        glossaryTerms = glossaryTerms.map { term ->
+            if (term.id == id) term.copy(target = value) else term
+        }
+    }
+
+    fun deleteGlossaryTerm(id: String) {
+        glossaryTerms = glossaryTerms.filterNot { it.id == id }
     }
 
     fun onExportSuccess(format: String) {
@@ -320,6 +454,105 @@ class AsrViewModel : ViewModel() {
     override fun onCleared() {
         vmScope.cancel()
         super.onCleared()
+    }
+
+    private fun resetWorkspaceState() {
+        running = false
+        segments = emptyList()
+        selectedSegmentIndex = null
+        currentPreviewPositionMs = 0L
+        transcriptionProgress = 0f
+        estimatedRemainingText = "预计约 01:20"
+        lastResult = null
+        clearError()
+        resetTranslationState()
+    }
+
+    private fun resetTranslationState() {
+        translationPhase = TranslationWorkflowStage.Idle
+        translationRecommendation = null
+        glossaryTerms = emptyList()
+        selectedTermbase = translationTermbases.first()
+        selectedTranslationModel = translationModels.first()
+    }
+
+    private fun updateSelectedSegment(transform: (SubtitleSegment) -> SubtitleSegment) {
+        val index = selectedSegmentIndex ?: return
+        val current = segments.getOrNull(index) ?: return
+        val updated = transform(current).normalize()
+        segments = segments.toMutableList().also { it[index] = updated }
+        currentPreviewPositionMs = updated.startMs
+    }
+
+    private fun updateProgress(progress: Float, estimate: String) {
+        transcriptionProgress = progress.coerceIn(0f, 1f)
+        estimatedRemainingText = estimate
+    }
+
+    private fun estimateTextForPoll(pollCount: Int): String {
+        val remainSeconds = ((maxPollCount - pollCount).coerceAtLeast(1) * 1.5f).toInt()
+        val minutes = remainSeconds / 60
+        val seconds = remainSeconds % 60
+        return "预计约 ${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}"
+    }
+
+    private fun buildRecommendation(): TranslationRecommendation {
+        val corpus = buildString {
+            append(mediaName.orEmpty())
+            append(' ')
+            append(segments.take(6).joinToString(" ") { it.text })
+        }.lowercase()
+        val topic = when {
+            corpus.contains("interview") || corpus.contains("采访") || corpus.contains("主持") -> "人物访谈 / 纪实表达"
+            corpus.contains("game") || corpus.contains("剧情") || corpus.contains("直播") -> "影视娱乐 / 情绪表达"
+            corpus.contains("product") || corpus.contains("demo") || corpus.contains("模型") || corpus.contains("技术") -> "科技演示 / 产品讲解"
+            else -> "知识解说 / 通用内容"
+        }
+        val style = when (topic) {
+            "人物访谈 / 纪实表达" -> "口语顺滑、保留态度与语气"
+            "影视娱乐 / 情绪表达" -> "节奏鲜明、短句优先、兼顾情绪落点"
+            "科技演示 / 产品讲解" -> "专业克制、术语统一、优先信息准确"
+            else -> "自然直译、兼顾读感与完整度"
+        }
+        val summary = "专业翻译智能体检测到此视频为 $topic，将采用 $style 的翻译策略，并优先匹配 $selectedTermbase 术语库。"
+        return TranslationRecommendation(
+            topic = topic,
+            style = style,
+            summary = summary,
+        )
+    }
+
+    private fun buildGlossaryTerms(topic: String): List<TranslationGlossaryTerm> {
+        val terms = when (topic) {
+            "人物访谈 / 纪实表达" -> listOf(
+                "镜头前表达" to "on-camera delivery",
+                "追问" to "follow-up question",
+                "情绪停顿" to "emotional pause",
+            )
+            "影视娱乐 / 情绪表达" -> listOf(
+                "高能片段" to "highlight moment",
+                "剧情反转" to "plot twist",
+                "卡点" to "beat drop",
+            )
+            "科技演示 / 产品讲解" -> listOf(
+                "工作流" to "workflow",
+                "延迟" to "latency",
+                "上下文窗口" to "context window",
+                "推理模型" to "reasoning model",
+            )
+            else -> listOf(
+                "核心观点" to "core idea",
+                "重点信息" to "key message",
+                "补充说明" to "additional note",
+            )
+        }
+        return terms.mapIndexed { index, (source, target) ->
+            TranslationGlossaryTerm(
+                id = "term_${nowMs()}_$index",
+                source = source,
+                target = target,
+            )
+        }
     }
 
     private fun persistLanguageSelection() {
@@ -403,7 +636,7 @@ class AsrViewModel : ViewModel() {
         if (ownerId == scopedOwnerId) return
         scopedOwnerId = ownerId
         sourceLanguage = sourceLanguageName.toAsrLanguageOr(AsrLanguage.Auto)
-        targetLanguage = targetLanguageName.toAsrLanguageOr(AsrLanguage.Zh)
+        targetLanguage = targetLanguageName.toAsrLanguageOr(AsrLanguage.En)
         recentMedia = loadRecentMedia(recentMediaJson)
         recentLanguagePairs = loadRecentLanguagePairs(recentLanguagePairJson)
     }
@@ -487,5 +720,22 @@ private fun Throwable.userMessage(): String {
     return when (this) {
         is ApiException -> message
         else -> message ?: "请求失败"
+    }
+}
+
+private fun SubtitleSegment.normalize(): SubtitleSegment {
+    val nextStart = startMs.coerceAtLeast(0L)
+    val nextEnd = endMs.coerceAtLeast(nextStart + 100L)
+    return copy(startMs = nextStart, endMs = nextEnd)
+}
+
+private fun String.findBalancedSplitIndex(): Int {
+    val middle = length / 2
+    val left = lastIndexOf(' ', startIndex = middle)
+    val right = indexOf(' ', startIndex = middle)
+    return when {
+        left >= 4 -> left
+        right in 1 until lastIndex -> right
+        else -> middle
     }
 }

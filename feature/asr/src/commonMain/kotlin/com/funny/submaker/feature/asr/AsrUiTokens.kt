@@ -47,6 +47,19 @@ data class AsrUiTokens(
     val switchTrack: Color,
     val switchThumb: Color,
     val sliderTrack: Color,
+    val heroPanelContainer: Brush,
+    val heroPanelBorder: Color,
+    val playerPlaceholder: Brush,
+    val playerOverlay: Color,
+    val progressTrack: Color,
+    val progressIndicator: Color,
+    val subtitleCardContainer: Color,
+    val subtitleCardSelected: Brush,
+    val subtitleCardBorder: Color,
+    val editorAccent: Color,
+    val recommendationPanel: Brush,
+    val recommendationBorder: Color,
+    val dangerText: Color,
 )
 
 val AsrTopBarHeight = 64.dp
@@ -112,6 +125,40 @@ fun ProvideAsrUiTokens(content: @Composable () -> Unit) {
             switchTrack = scheme.surfaceContainerHighest,
             switchThumb = scheme.onSurface,
             sliderTrack = scheme.outline.copy(alpha = 0.44f),
+            heroPanelContainer = Brush.linearGradient(
+                colors = listOf(
+                    scheme.surfaceContainerHigh,
+                    scheme.surfaceContainerLow,
+                ),
+            ),
+            heroPanelBorder = scheme.outline.copy(alpha = 0.42f),
+            playerPlaceholder = Brush.verticalGradient(
+                colors = listOf(
+                    scheme.surfaceContainerHighest,
+                    scheme.surfaceContainer,
+                    scheme.surfaceContainerLow,
+                ),
+            ),
+            playerOverlay = scheme.scrim.copy(alpha = 0.38f),
+            progressTrack = scheme.surfaceContainerHighest,
+            progressIndicator = scheme.primary,
+            subtitleCardContainer = scheme.surfaceContainerLow,
+            subtitleCardSelected = Brush.horizontalGradient(
+                colors = listOf(
+                    scheme.primaryContainer.copy(alpha = 0.84f),
+                    scheme.secondaryContainer.copy(alpha = 0.56f),
+                ),
+            ),
+            subtitleCardBorder = scheme.outlineVariant.copy(alpha = 0.55f),
+            editorAccent = scheme.tertiary,
+            recommendationPanel = Brush.linearGradient(
+                colors = listOf(
+                    scheme.surfaceContainerHigh,
+                    scheme.surfaceContainer,
+                ),
+            ),
+            recommendationBorder = scheme.primary.copy(alpha = 0.22f),
+            dangerText = scheme.error,
         )
     }
     CompositionLocalProvider(LocalAsrUiTokens provides tokens, content = content)
