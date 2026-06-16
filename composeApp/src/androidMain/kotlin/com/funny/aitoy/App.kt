@@ -37,6 +37,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -199,11 +200,49 @@ private fun UpdateNotice(vm: BridgeViewModel) {
             Spacer(Modifier.height(6.dp))
             Text("最新版本 ${state.latestVersionName}", color = TextSoft)
         }
-        if (state.apkUrl.isNotBlank()) {
+        if (state.fileSizeBytes > 0) {
+            Spacer(Modifier.height(6.dp))
+            Text("安装包 ${formatBytes(state.fileSizeBytes)}", color = TextSoft)
+        }
+        if (state.updateLog.isNotBlank()) {
             Spacer(Modifier.height(8.dp))
-            Text(state.apkUrl, color = Honey, fontFamily = FontFamily.Monospace)
+            Text(state.updateLog, color = TextSoft)
+        }
+        if (state.message.isNotBlank()) {
+            Spacer(Modifier.height(8.dp))
+            Text(state.message, color = Honey)
+        }
+        if (vm.updateDownloading) {
+            Spacer(Modifier.height(12.dp))
+            LinearProgressIndicator(
+                progress = { vm.updateDownloadProgress / 100f },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(6.dp))
+            Text("正在下载 ${vm.updateDownloadProgress}%", color = TextSoft)
+        }
+        Spacer(Modifier.height(12.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Button(
+                onClick = vm::downloadAndInstallUpdate,
+                enabled = state.apkUrl.isNotBlank() && !vm.updateDownloading,
+                colors = ButtonDefaults.buttonColors(containerColor = Rose, contentColor = Ink),
+            ) {
+                Text(if (vm.updateDownloading) "下载中" else "下载并安装")
+            }
+            OutlinedButton(
+                onClick = vm::openUpdateInBrowser,
+                enabled = state.apkUrl.isNotBlank() || state.downloadPageUrl.isNotBlank(),
+            ) {
+                Text("浏览器下载")
+            }
         }
     }
+}
+
+private fun formatBytes(bytes: Long): String {
+    if (bytes < 1024 * 1024) return "${bytes / 1024} KB"
+    return "${bytes / 1024 / 1024} MB"
 }
 
 @Composable
@@ -515,6 +554,12 @@ private fun AiCompanion(vm: BridgeViewModel) {
             Icon(Icons.Outlined.ContentCopy, null)
             Spacer(Modifier.width(8.dp))
             Text("复制 MCP 配置")
+        }
+        Spacer(Modifier.height(8.dp))
+        OutlinedButton(onClick = vm::openAppDownloadPage) {
+            Icon(Icons.Outlined.Link, null)
+            Spacer(Modifier.width(8.dp))
+            Text("分享应用下载页")
         }
         Text(
             text = "即使手机暂时不在线，AI 也可以通过状态工具看到“手机还没有上线”。",

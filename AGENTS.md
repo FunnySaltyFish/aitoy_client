@@ -7,7 +7,7 @@
 - 不需要单独创建页面 State，直接写在 VM 里
 - VM 里优先直接使用 state（而不是 StateFlow + .collectAsState() 的形式）
 - 不需要 state.value 的设计，直接 value 即可
-- 整体符合 MD3 设计
+- 整体页面风格温馨、暧昧，有流畅的使用体验和优秀的交互设计
 - 代码可复用率高，提取公共 Composable、函数、Modifier 常量等
 - 优先 import + 使用简单类名，即代码中 `import androidx.compose.material3.Text; Text {}` 优于 `androidx.compose.material3.Text {}`
 - 确保你的代码优雅简洁、UI效果丝滑流畅，富有美感
@@ -20,8 +20,8 @@
 
 ## AI / 对话 / 工具调用
 
-- 如果需求明确要求使用 OpenAI SDK、Koog 或其他 AI SDK，必须优先使用该 SDK 的模型调用、流式输出、工具定义和参数反序列化能力；不要手写 OpenAI-compatible HTTP、SSE、function call 聚合或 JSON schema 拼接来替代。
-- 引入 AI SDK 前必须验证 Android/KMP 约束，尤其是 minSdk。Koog Android 依赖如果要求高于当前 minSdk，不要用 `tools:overrideLibrary` 强行绕过，应改用满足工程约束的 SDK。
+- 如果需求明确要求使用 AI SDK，必须优先使用该 SDK，不要手写 OpenAI-compatible HTTP、SSE、function call 聚合或 JSON schema 拼接来替代。
+- 引入 SDK 前必须验证 Android/KMP 约束，尤其是 minSdk。若依赖如果要求高于当前 minSdk，不要用 `tools:overrideLibrary` 强行绕过，应告知用户，由用户抉择。
 - 应用内工具只负责把 SDK 已解析出的类型化参数转成业务调用；工具执行结果要使用面向用户的短文案，不暴露协议、JSON、回调、MCP 等实现细节。
 
 ## 协程与网络
@@ -89,3 +89,7 @@ fun CacheManager.fileSubDir(name: String) = fileDir.resolve(name).ensureDirector
 ## 编译
 
 - :moduleName:compileDebugKotlinAndroid
+
+## 诊断
+
+- 获取线上崩溃日志：`python scripts/fetch_diagnostics.py --size 10`

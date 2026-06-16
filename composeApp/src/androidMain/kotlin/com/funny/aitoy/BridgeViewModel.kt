@@ -31,6 +31,7 @@ import com.funny.aitoy.update.AppUpdateInstaller
 import com.funny.data_saver.core.mutableDataSaverStateOf
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
@@ -403,6 +404,10 @@ class BridgeViewModel : ViewModel() {
         appCtx.openUrl(url)
     }
 
+    fun openAppDownloadPage() {
+        appCtx.openUrl("$PRODUCTION_BASE_URL/download")
+    }
+
     fun downloadAndInstallUpdate() {
         val url = updateState.apkUrl
         if (url.isBlank() || updateDownloading) return
@@ -414,15 +419,15 @@ class BridgeViewModel : ViewModel() {
                     url = url,
                     versionName = updateState.latestVersionName.ifBlank { "latest" },
                 ) { progress ->
-                    mainHandler.post { updateDownloadProgress = progress }
+                    viewModelScope.launch { updateDownloadProgress = progress }
                 }
             }.onSuccess {
-                mainHandler.post {
+                withContext(Dispatchers.Main) {
                     updateDownloading = false
                     updateDownloadProgress = 100
                 }
             }.onFailure {
-                mainHandler.post {
+                withContext(Dispatchers.Main) {
                     updateDownloading = false
                     updateState = updateState.copy(message = it.message ?: "下载失败")
                 }
