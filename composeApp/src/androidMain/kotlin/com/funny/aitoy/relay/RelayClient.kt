@@ -24,6 +24,10 @@ data class RelayDevice(
     val displayName: String,
     val connected: Boolean,
     val isDefault: Boolean,
+    val protocolName: String,
+    val intensity: Int,
+    val mode: Int,
+    val intensityMax: Int,
 )
 
 class RelayClient(
@@ -99,6 +103,10 @@ class RelayClient(
                                 .put("displayName", device.displayName)
                                 .put("connected", device.connected)
                                 .put("isDefault", device.isDefault)
+                                .put("protocolName", device.protocolName)
+                                .put("intensity", device.intensity)
+                                .put("mode", device.mode)
+                                .put("intensityMax", device.intensityMax)
                                 .put("adapterType", "template_ble")
                                 .put("capabilities", JSONArray(listOf("vibrate", "stop"))),
                         )

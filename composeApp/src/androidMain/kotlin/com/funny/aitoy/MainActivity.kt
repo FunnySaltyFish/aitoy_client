@@ -1,14 +1,20 @@
 package com.funny.aitoy
 
 import android.Manifest
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 
 class MainActivity : ComponentActivity() {
+    private var pendingImportLink by mutableStateOf<String?>(null)
+
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { }
@@ -17,7 +23,13 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         requestBluetoothPermissions()
-        setContent { App() }
+        pendingImportLink = intent?.dataString
+        setContent { App(pendingImportLink) }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        pendingImportLink = intent.dataString
     }
 
     private fun requestBluetoothPermissions() {

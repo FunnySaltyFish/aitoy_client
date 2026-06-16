@@ -1,13 +1,13 @@
 package com.funny.aitoy.ble
 
 import android.annotation.SuppressLint
+import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothGatt
 import android.bluetooth.BluetoothGattCallback
 import android.bluetooth.BluetoothGattCharacteristic
 import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
-import android.bluetooth.BluetoothDevice
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
 import android.content.Context
@@ -16,8 +16,8 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import com.funny.aitoy.core.platform.AndroidPlatformInit
-import java.util.UUID
 import java.util.ArrayDeque
+import java.util.UUID
 
 @SuppressLint("MissingPermission")
 class AndroidBleController(
@@ -266,12 +266,12 @@ class AndroidBleController(
 
     fun sendCommand(mode: Int, intensity: Int) {
         val protocol = activeProtocol ?: error("当前设备尚无可用的内置协议")
-        enqueue(listOf(protocol.setCommand(mode, intensity)))
+        enqueue(protocol.setCommands(mode, intensity))
     }
 
     fun stopDevice() {
         val protocol = activeProtocol ?: error("当前设备尚无可用的内置协议")
-        enqueue(listOf(protocol.stopCommand()))
+        enqueue(protocol.stopCommands())
     }
 
     private fun write(operation: BleProtocolOperation.Write) {
