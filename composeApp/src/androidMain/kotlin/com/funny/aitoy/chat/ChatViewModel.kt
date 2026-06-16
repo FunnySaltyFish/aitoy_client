@@ -1,5 +1,6 @@
 package com.funny.aitoy.chat
 
+import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -14,11 +15,10 @@ import com.funny.data_saver.core.mutableDataSaverStateOf
 import com.openai.client.OpenAIClient
 import com.openai.client.okhttp.OpenAIOkHttpClient
 import com.openai.core.JsonValue
-import com.openai.helpers.ChatCompletionAccumulator
-import com.openai.models.chat.completions.ChatCompletion
 import com.openai.models.chat.completions.ChatCompletionAssistantMessageParam
 import com.openai.models.chat.completions.ChatCompletionCreateParams
 import com.openai.models.chat.completions.ChatCompletionMessageParam
+import com.openai.models.chat.completions.ChatCompletionMessageFunctionToolCall
 import com.openai.models.chat.completions.ChatCompletionSystemMessageParam
 import com.openai.models.chat.completions.ChatCompletionToolMessageParam
 import com.openai.models.chat.completions.ChatCompletionUserMessageParam
@@ -96,9 +96,12 @@ class ChatViewModel(
                 }
                 replaceAssistantText(assistantId, answer)
                 statusText = ""
-            }.onFailure {
-                replaceAssistantText(assistantId, "这次没有收到可用回复。")
-                statusText = it.message ?: "请求没有完成"
+            }.onFailure { e ->
+                Log.e(TAG, "Chat request failed: ${e::class.simpleName} — ${e.message}", e)
+                val current = messages.firstOrNull { it.id == assistantId }?.content.orEmpty()
+                val errorSuffix = "\n\n[错误: ${e.message ?: "请求未完成"}]"
+                replaceAssistantText(assistantId, current.ifBlank { errorSuffix.trimStart() } + if (current.isNotBlank()) errorSuffix else "")
+                statusText = e.message ?: "请求没有完成"
             }
             streaming = false
         }
@@ -133,29 +136,50 @@ class ChatViewModel(
         val paramsBuilder = baseParamsBuilder()
         val output = StringBuilder()
         repeat(MAX_TOOL_ROUNDS) { round ->
-            viewModelScope.launch { statusText = if (round == 0) "正在思考..." else "正在整理结果..." }
-            val completion = streamOnce(client, paramsBuilder, assistantId, output)
-            val message = completion.choices().firstOrNull()?.message() ?: return output.toString()
-            val toolCalls = message.toolCalls().orElse(emptyList())
-            if (toolCalls.isEmpty()) {
+            withContext(Dispatchers.Main) { statusText = if (round == 0) "正在思考..." else "正在整理结果..." }
+            val result = streamOnce(client, paramsBuilder, assistantId, output)
+            if (result.toolCalls.isEmpty()) {
                 history += assistantMessage(output.toString())
                 return output.toString()
             }
-            paramsBuilder.addMessage(message)
-            toolCalls.forEach { toolCall ->
-                val functionCall = toolCall.asFunction()
-                val function = functionCall.function()
-                val toolResult = when (function.name()) {
+            Log.d(TAG, "round=$round toolCalls=${result.toolCalls.map { "${it.name}(${it.arguments})" }}")
+            // Build assistant history entry with tool calls so the model has context.
+            // ChatCompletionMessageToolCall is a union type; use addToolCall(FunctionToolCall) directly.
+            val assistantParamBuilder = ChatCompletionAssistantMessageParam.builder()
+                .apply { if (output.isNotEmpty()) content(output.toString()) }
+            result.toolCalls.forEach { call ->
+                assistantParamBuilder.addToolCall(
+                    ChatCompletionMessageFunctionToolCall.builder()
+                        .id(call.id)
+                        .type(JsonValue.from("function"))
+                        .function(
+                            ChatCompletionMessageFunctionToolCall.Function.builder()
+                                .name(call.name)
+                                .arguments(call.arguments)
+                                .build()
+                        )
+                        .build()
+                )
+            }
+            paramsBuilder.addMessage(
+                ChatCompletionMessageParam.ofAssistant(assistantParamBuilder.build())
+            )
+            result.toolCalls.forEach { toolCall ->
+                val toolResult = when (toolCall.name) {
                     GetToyStatus::class.java.simpleName -> bridgeVm.getToyStatusForChat()
                     SetToyVibration::class.java.simpleName -> {
-                        val args = function.arguments(SetToyVibration::class.java)
-                        bridgeVm.setToyVibrationForChat(args.intensity, args.mode, args.durationSec)
+                        val obj = JsonX.json.decodeFromString<kotlinx.serialization.json.JsonObject>(toolCall.arguments)
+                        val intensity = obj["intensity"]?.jsonPrimitive?.intOrNull ?: 15
+                        val mode = obj["mode"]?.jsonPrimitive?.intOrNull ?: 1
+                        val durationSec = obj["durationSec"]?.jsonPrimitive?.intOrNull
+                            ?: obj["duration_sec"]?.jsonPrimitive?.intOrNull ?: 6
+                        bridgeVm.setToyVibrationForChat(intensity, mode, durationSec)
                     }
                     StopToy::class.java.simpleName -> bridgeVm.stopToyForChat(all = false)
                     StopAllToys::class.java.simpleName -> bridgeVm.stopToyForChat(all = true)
                     else -> ToyToolResult(false, "暂不支持这个操作。")
                 }
-                viewModelScope.launch {
+                withContext(Dispatchers.Main) {
                     messages += ChatMessage(
                         id = nextId(),
                         role = ChatRole.Tool,
@@ -166,7 +190,7 @@ class ChatViewModel(
                 }
                 paramsBuilder.addMessage(
                     ChatCompletionToolMessageParam.builder()
-                        .toolCallId(functionCall.id())
+                        .toolCallId(toolCall.id)
                         .contentAsJson(toolResult)
                         .build(),
                 )
@@ -176,37 +200,59 @@ class ChatViewModel(
         return output.toString().ifBlank { "已完成。" }
     }
 
+    /** Manually accumulates tool-call deltas from chunks, bypassing ChatCompletionAccumulator
+     *  which fails on providers (e.g. DeepSeek) that omit the final usage chunk. */
     private suspend fun streamOnce(
         client: OpenAIClient,
         paramsBuilder: ChatCompletionCreateParams.Builder,
         assistantId: String,
         output: StringBuilder,
-    ): ChatCompletion {
-        val accumulator = ChatCompletionAccumulator.create()
+    ): StreamResult {
+        // index → mutable builder for each parallel tool call
+        val toolBuilders = mutableMapOf<Int, ToolCallBuilder>()
         val coroutineContext = currentCoroutineContext()
+        var chunkIndex = 0
+        var finishReason: String? = null
+        Log.d(TAG, "streamOnce: start streaming")
         client.chat().completions().createStreaming(paramsBuilder.build()).use { streamResponse ->
-            streamResponse.stream().forEach { chunk ->
+            val iter = streamResponse.stream().iterator()
+            while (iter.hasNext()) {
                 coroutineContext.ensureActive()
-                accumulator.accumulate(chunk)
-                appendChunkText(chunk, assistantId, output)
-            }
-        }
-        return accumulator.chatCompletion()
-    }
-
-    private fun appendChunkText(
-        chunk: ChatCompletionChunk,
-        assistantId: String,
-        output: StringBuilder,
-    ) {
-        chunk.choices().forEach { choice ->
-            choice.delta().content().ifPresent { part ->
-                if (part.isNotEmpty()) {
-                    output.append(part)
-                    viewModelScope.launch { replaceAssistantText(assistantId, output.toString()) }
+                val chunk = iter.next()
+                chunk.choices().forEach { choice ->
+                    choice.finishReason().ifPresent { finishReason = it.toString() }
+                    val delta = choice.delta()
+                    // Accumulate text content.
+                    delta.content().ifPresent { part ->
+                        if (part.isNotEmpty()) output.append(part)
+                    }
+                    // Accumulate tool call deltas.
+                    delta.toolCalls().ifPresent { toolCallDeltas ->
+                        toolCallDeltas.forEach { tc ->
+                            val idx = tc.index().toInt()
+                            val b = toolBuilders.getOrPut(idx) { ToolCallBuilder() }
+                            tc.id().ifPresent { b.id = it }
+                            tc.function().ifPresent { fn ->
+                                fn.name().ifPresent { b.name += it }
+                                fn.arguments().ifPresent { b.args.append(it) }
+                            }
+                        }
+                    }
                 }
+                // Update UI on main thread after each chunk.
+                if (output.isNotEmpty()) {
+                    withContext(Dispatchers.Main) {
+                        replaceAssistantText(assistantId, output.toString())
+                    }
+                }
+                chunkIndex++
             }
         }
+        val toolCalls = toolBuilders.entries
+            .sortedBy { it.key }
+            .map { (_, b) -> AccumulatedToolCall(b.id, b.name, b.args.toString()) }
+        Log.d(TAG, "streamOnce: ended after $chunkIndex chunks, text=${output.length}, toolCalls=${toolCalls.size}, finishReason=$finishReason")
+        return StreamResult(output.toString(), toolCalls)
     }
 
     private fun baseParamsBuilder(): ChatCompletionCreateParams.Builder {
@@ -323,6 +369,19 @@ class ChatViewModel(
         var now: Boolean = true
     }
 
+    private data class StreamResult(
+        val text: String,
+        val toolCalls: List<AccumulatedToolCall>,
+    )
+
+    private data class AccumulatedToolCall(val id: String, val name: String, val arguments: String)
+
+    private class ToolCallBuilder {
+        var id: String = ""
+        var name: String = ""
+        val args = StringBuilder()
+    }
+
     private data class ParsedExtraParams(
         val maxTokens: Int? = null,
         val topP: Double? = null,
@@ -333,6 +392,7 @@ class ChatViewModel(
     )
 
     companion object {
+        private const val TAG = "ChatViewModel"
         private const val MAX_TOOL_ROUNDS = 4
         private val KNOWN_EXTRA_KEYS = setOf(
             "maxTokens",

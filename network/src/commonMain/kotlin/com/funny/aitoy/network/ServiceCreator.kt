@@ -1,6 +1,5 @@
 package com.funny.aitoy.network
 
-import com.funny.aitoy.core.prefs.AiToyPrefs
 import com.funny.aitoy.core.utils.JsonX
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.ResponseBody
@@ -14,10 +13,7 @@ object ServiceCreator {
     private val retrofitCache = ConcurrentHashMap<String, Retrofit>()
 
     fun normalizeApiBaseUrl(baseUrlOverride: String? = null): String {
-        val base = (baseUrlOverride?.trim()?.trimEnd('/').takeUnless { it.isNullOrBlank() })
-            ?: AiToyPrefs.serverBaseUrl.trim().trimEnd('/')
-        val prefix = AiToyPrefs.apiPrefix.trim().trim('/').trim()
-        return if (prefix.isBlank()) "$base/" else "$base/$prefix/"
+        return OkHttpUtils.apiBaseUrl(baseUrlOverride)
     }
 
     fun <T> create(service: Class<T>, baseUrlOverride: String? = null): T {

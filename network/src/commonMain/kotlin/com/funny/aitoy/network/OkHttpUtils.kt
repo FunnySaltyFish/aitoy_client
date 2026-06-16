@@ -1,13 +1,19 @@
 package com.funny.aitoy.network
 
+import com.funny.aitoy.core.prefs.AiToyPrefs
 import okhttp3.Cache
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.logging.HttpLoggingInterceptor
+import java.net.URI
 import java.io.File
 import java.util.concurrent.TimeUnit
 
 object OkHttpUtils {
+    const val PRODUCTION_BASE_URL = "https://aitoy.funnysaltyfish.fun"
+    const val LOCAL_BASE_URL = "http://192.168.1.118:8601"
+    const val DEFAULT_API_PREFIX = "api"
+
     val okHttpClient: OkHttpClient by lazy(LazyThreadSafetyMode.PUBLICATION) {
         val logger = HttpLoggingInterceptor().apply {
             level = HttpLoggingInterceptor.Level.BASIC
@@ -26,6 +32,61 @@ object OkHttpUtils {
             .addNetworkInterceptor(CacheControlInterceptor)
             .addInterceptor(logger)
             .build()
+    }
+
+    val currentBaseUrl: String
+        get() = normalizeBaseUrl(AiToyPrefs.serverBaseUrl.ifBlank { PRODUCTION_BASE_URL })
+
+    val currentApiBaseUrl: String
+        get() = apiBaseUrl()
+
+    val currentMcpUrl: String
+        get() = externalUrl("mcp")
+
+    fun useProductionBaseUrl() {
+        AiToyPrefs.serverBaseUrl = PRODUCTION_BASE_URL
+        AiToyPrefs.apiPrefix = DEFAULT_API_PREFIX
+    }
+
+    fun useLocalBaseUrl() {
+        AiToyPrefs.serverBaseUrl = LOCAL_BASE_URL
+        AiToyPrefs.apiPrefix = DEFAULT_API_PREFIX
+    }
+
+    fun saveBaseUrl(value: String): Boolean {
+        val normalized = normalizeBaseUrl(value)
+        if (!isHttpUrl(normalized)) return false
+        AiToyPrefs.serverBaseUrl = normalized
+        if (AiToyPrefs.apiPrefix.isBlank()) AiToyPrefs.apiPrefix = DEFAULT_API_PREFIX
+        return true
+    }
+
+    fun apiBaseUrl(baseUrlOverride: String? = null): String {
+        val base = normalizeBaseUrl(baseUrlOverride ?: currentBaseUrl)
+        val prefix = AiToyPrefs.apiPrefix.trim().trim('/').ifBlank { DEFAULT_API_PREFIX }
+        return "$base/$prefix/"
+    }
+
+    fun externalUrl(path: String = "", baseUrl: String = currentBaseUrl): String {
+        val normalizedPath = path.trim().trimStart('/')
+        val base = normalizeBaseUrl(baseUrl)
+        return if (normalizedPath.isBlank()) base else "$base/$normalizedPath"
+    }
+
+    fun normalizeBaseUrl(value: String): String {
+        val trimmed = value.trim().trimEnd('/')
+        return when {
+            trimmed.isBlank() -> PRODUCTION_BASE_URL
+            trimmed.startsWith("http://") || trimmed.startsWith("https://") -> trimmed
+            else -> "http://$trimmed"
+        }
+    }
+
+    fun isHttpUrl(value: String): Boolean {
+        return runCatching {
+            val uri = URI(value)
+            (uri.scheme == "http" || uri.scheme == "https") && !uri.host.isNullOrBlank()
+        }.getOrDefault(false)
     }
 
     private fun cacheDir(): File {

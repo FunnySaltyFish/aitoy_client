@@ -33,6 +33,9 @@ class AndroidBleController(
     private var template: ProtocolTemplate? = null
     private var connectedName = ""
     private var activeProtocol: BleDeviceProtocol? = null
+    private var protocolReady = false
+    private var protocolCandidates = emptyList<BleDeviceProtocol>()
+    private var protocolCandidateIndex = -1
     private var resolvedWriteCharacteristic: BluetoothGattCharacteristic? = null
     private val operationQueue = ArrayDeque<BleProtocolOperation>()
     private var operationInProgress = false
@@ -122,52 +125,14 @@ class AndroidBleController(
                     .map { it.uuid }
                     .toSet(),
             )
-            activeProtocol = BleProtocolRegistry.resolve(fingerprint)
-            activeProtocol?.let { protocol ->
-                trace("自动识别协议 id=${protocol.status.id} name=${protocol.status.displayName}")
-                onProtocol(protocol.status)
-                enqueue(protocol.initialize(fingerprint))
-                if (operationQueue.isEmpty()) updateState(BleConnectionState.Ready)
+            protocolCandidates = BleProtocolRegistry.resolveAll(fingerprint)
+            protocolCandidateIndex = -1
+            if (protocolCandidates.isNotEmpty()) {
+                trace("找到 ${protocolCandidates.size} 个候选协议，开始依次确认")
+                tryNextProtocol(fingerprint, gatt, config)
                 return
             }
-            val configuredService = gatt.getService(config.serviceUuid.toUuidOrNull())
-            val configuredWrite = configuredService?.getCharacteristic(config.writeUuid.toUuidOrNull())
-            trace("协议匹配 service=${configuredService != null} write=${configuredWrite != null}")
-            resolvedWriteCharacteristic = configuredWrite ?: gatt.services.asSequence()
-                .flatMap { it.characteristics.asSequence() }
-                .firstOrNull {
-                    it.properties and BluetoothGattCharacteristic.PROPERTY_WRITE != 0 ||
-                        it.properties and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE != 0
-                }
-            if (configuredWrite == null && resolvedWriteCharacteristic != null) {
-                trace(
-                    "自动选择写入特征 service=${resolvedWriteCharacteristic?.service?.uuid} " +
-                        "uuid=${resolvedWriteCharacteristic?.uuid} properties=0x" +
-                        resolvedWriteCharacteristic?.properties?.toString(16),
-                )
-            }
-            if (resolvedWriteCharacteristic == null) {
-                updateState(BleConnectionState.Error)
-                trace("设备没有可写特征", error = true)
-                return
-            }
-            subscribeNotify(gatt, config)
-            if (config.manualControlEnabled) {
-                activeProtocol = ManualBleProtocol(resolvedWriteCharacteristic!!.uuid, config)
-                onProtocol(activeProtocol!!.status)
-                trace("未找到内置协议，已启用用户确认的高级手动模板")
-            } else {
-                onProtocol(
-                    BleProtocolStatus(
-                        id = "manual",
-                        displayName = "尚未适配",
-                        controllable = false,
-                        automatic = false,
-                    ),
-                )
-                trace("未找到内置协议，已禁止自动控制；可查看 GATT 日志后补充适配")
-            }
-            updateState(BleConnectionState.Ready)
+            finishWithManualOrUnsupported(gatt, config)
         }
 
         override fun onCharacteristicWrite(
@@ -180,8 +145,7 @@ class AndroidBleController(
             if (status == BluetoothGatt.GATT_SUCCESS) {
                 executeNextOperation()
             } else {
-                operationQueue.clear()
-                updateState(BleConnectionState.Error)
+                handleProtocolOperationFailed("协议确认写入失败 status=$status")
             }
         }
 
@@ -246,6 +210,9 @@ class AndroidBleController(
         connectedName = device.name
         template = protocolTemplate
         activeProtocol = null
+        protocolReady = false
+        protocolCandidates = emptyList()
+        protocolCandidateIndex = -1
         resolvedWriteCharacteristic = null
         operationQueue.clear()
         operationInProgress = false
@@ -275,9 +242,15 @@ class AndroidBleController(
     }
 
     private fun write(operation: BleProtocolOperation.Write) {
-        val currentGatt = gatt ?: error("设备尚未连接")
+        val currentGatt = gatt ?: run {
+            handleProtocolOperationFailed("设备尚未连接")
+            return
+        }
         val characteristic = findCharacteristic(operation.characteristicUuid)
-            ?: error("找不到写入特征：${operation.characteristicUuid}")
+            ?: run {
+                handleProtocolOperationFailed("找不到写入通道：${operation.characteristicUuid}")
+                return
+            }
         val supportsNoResponse =
             characteristic.properties and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE != 0
         val writeWithResponse = operation.withResponse || !supportsNoResponse
@@ -304,7 +277,8 @@ class AndroidBleController(
         trace("写入已提交 result=$result")
         if (result != 0) {
             operationInProgress = false
-            error("提交写入失败：$result")
+            handleProtocolOperationFailed("提交写入失败：$result")
+            return
         }
         if (!writeWithResponse) {
             operationInProgress = false
@@ -362,6 +336,76 @@ class AndroidBleController(
         }
     }
 
+    private fun tryNextProtocol(
+        fingerprint: BleGattFingerprint,
+        gatt: BluetoothGatt,
+        config: ProtocolTemplate,
+        reason: String = "",
+    ) {
+        if (reason.isNotBlank()) trace(reason, error = true)
+        protocolCandidateIndex += 1
+        val protocol = protocolCandidates.getOrNull(protocolCandidateIndex)
+        if (protocol == null) {
+            finishWithManualOrUnsupported(gatt, config)
+            return
+        }
+        activeProtocol = protocol
+        protocolReady = false
+        operationQueue.clear()
+        operationInProgress = false
+        trace("确认协议 ${protocolCandidateIndex + 1}/${protocolCandidates.size}：${protocol.status.displayName}")
+        onProtocol(protocol.status)
+        enqueue(protocol.initialize(fingerprint))
+        if (operationQueue.isEmpty()) {
+            protocolReady = true
+            updateState(BleConnectionState.Ready)
+        }
+    }
+
+    private fun finishWithManualOrUnsupported(gatt: BluetoothGatt, config: ProtocolTemplate) {
+        val configuredService = gatt.getService(config.serviceUuid.toUuidOrNull())
+        val configuredWrite = configuredService?.getCharacteristic(config.writeUuid.toUuidOrNull())
+        trace("协议匹配 service=${configuredService != null} write=${configuredWrite != null}")
+        resolvedWriteCharacteristic = configuredWrite ?: gatt.services.asSequence()
+            .flatMap { it.characteristics.asSequence() }
+            .firstOrNull {
+                it.properties and BluetoothGattCharacteristic.PROPERTY_WRITE != 0 ||
+                    it.properties and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE != 0
+            }
+        if (configuredWrite == null && resolvedWriteCharacteristic != null) {
+            trace(
+                "自动选择写入特征 service=${resolvedWriteCharacteristic?.service?.uuid} " +
+                    "uuid=${resolvedWriteCharacteristic?.uuid} properties=0x" +
+                    resolvedWriteCharacteristic?.properties?.toString(16),
+            )
+        }
+        if (resolvedWriteCharacteristic == null) {
+            updateState(BleConnectionState.Error)
+            trace("设备没有可写特征", error = true)
+            return
+        }
+        subscribeNotify(gatt, config)
+        if (config.manualControlEnabled) {
+            activeProtocol = ManualBleProtocol(resolvedWriteCharacteristic!!.uuid, config)
+            protocolReady = true
+            onProtocol(activeProtocol!!.status)
+            trace("未找到可用内置协议，已启用用户确认的高级手动模板")
+        } else {
+            activeProtocol = null
+            protocolReady = false
+            onProtocol(
+                BleProtocolStatus(
+                    id = "manual",
+                    displayName = "尚未适配",
+                    controllable = false,
+                    automatic = false,
+                ),
+            )
+            trace("未找到可用内置协议；可导入同款设备指令或按教程补充适配信息")
+        }
+        updateState(BleConnectionState.Ready)
+    }
+
     private fun closeGatt(target: BluetoothGatt) {
         target.close()
         if (gatt === target) gatt = null
@@ -377,20 +421,27 @@ class AndroidBleController(
         if (operationInProgress) return
         val operation = if (operationQueue.isEmpty()) null else operationQueue.removeFirst()
         if (operation == null) {
-            if (connectionStateNeedsReady()) updateState(BleConnectionState.Ready)
+            if (connectionStateNeedsReady()) {
+                protocolReady = true
+                updateState(BleConnectionState.Ready)
+            }
             return
         }
         operationInProgress = true
         when (operation) {
             is BleProtocolOperation.Read -> {
                 val characteristic = findCharacteristic(operation.characteristicUuid)
-                    ?: error("找不到读取特征：${operation.characteristicUuid}")
+                    ?: run {
+                        operationInProgress = false
+                        handleProtocolOperationFailed("找不到读取通道：${operation.characteristicUuid}")
+                        return
+                    }
                 trace("准备读取 uuid=${characteristic.uuid}")
                 val started = gatt?.readCharacteristic(characteristic) == true
                 trace("读取已提交 result=$started")
                 if (!started) {
                     operationInProgress = false
-                    error("提交读取失败：${characteristic.uuid}")
+                    handleProtocolOperationFailed("提交读取失败：${characteristic.uuid}")
                 }
             }
             is BleProtocolOperation.Write -> write(operation)
@@ -401,12 +452,37 @@ class AndroidBleController(
         trace("读取回调 uuid=$uuid status=$status bytes=${bytes.toHexString()}")
         operationInProgress = false
         if (status != BluetoothGatt.GATT_SUCCESS) {
-            operationQueue.clear()
-            updateState(BleConnectionState.Error)
+            handleProtocolOperationFailed("协议确认读取失败 status=$status")
             return
         }
-        activeProtocol?.onRead(uuid, bytes)?.let(operationQueue::addAll)
+        runCatching {
+            activeProtocol?.onRead(uuid, bytes)?.let(operationQueue::addAll)
+        }.onFailure {
+            handleProtocolOperationFailed(it.message ?: "协议确认失败")
+            return
+        }
         executeNextOperation()
+    }
+
+    private fun handleProtocolOperationFailed(reason: String) {
+        operationQueue.clear()
+        if (!protocolReady && protocolCandidates.isNotEmpty()) {
+            val currentGatt = gatt
+            val currentTemplate = template
+            if (currentGatt != null && currentTemplate != null) {
+                val fingerprint = BleGattFingerprint(
+                    name = connectedName,
+                    characteristicUuids = currentGatt.services
+                        .flatMap { it.characteristics }
+                        .map { it.uuid }
+                        .toSet(),
+                )
+                tryNextProtocol(fingerprint, currentGatt, currentTemplate, reason)
+                return
+            }
+        }
+        trace(reason, error = true)
+        updateState(BleConnectionState.Error)
     }
 
     private fun findCharacteristic(uuid: UUID): BluetoothGattCharacteristic? =

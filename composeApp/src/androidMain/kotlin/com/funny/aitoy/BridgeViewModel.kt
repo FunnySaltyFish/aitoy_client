@@ -21,6 +21,7 @@ import com.funny.aitoy.core.prefs.DataSaverUtils
 import com.funny.aitoy.core.kmp.appCtx
 import com.funny.aitoy.core.kmp.openUrl
 import com.funny.aitoy.diagnostics.AiToyCrashReporter
+import com.funny.aitoy.network.OkHttpUtils
 import com.funny.aitoy.network.api.AiToyServices
 import com.funny.aitoy.network.api.apiRequest
 import com.funny.aitoy.network.api.service.CreateProtocolShareRequest
@@ -111,10 +112,15 @@ class BridgeViewModel : ViewModel() {
     var crashNotice by mutableStateOf(AiToyCrashReporter.consumeLastCrashNotice().orEmpty())
         private set
 
-    var serverUrl: String by mutableDataSaverStateOf(
+    var serverUrl by mutableStateOf(OkHttpUtils.currentBaseUrl)
+        private set
+    var baseUrlDraft by mutableStateOf(OkHttpUtils.currentBaseUrl)
+    var baseUrlMessage by mutableStateOf("")
+        private set
+    var developerMode: Boolean by mutableDataSaverStateOf(
         DataSaverUtils,
-        "AITOY_SERVER_URL",
-        PRODUCTION_BASE_URL,
+        "DEVELOPER_MODE",
+        false,
     )
     var userToken: String by mutableDataSaverStateOf(
         DataSaverUtils,
@@ -275,14 +281,16 @@ class BridgeViewModel : ViewModel() {
         onLog = ::appendLog,
         onCommand = ::handleRelayCommand,
     )
+    private var debugLogTapCount = 0
+
     init {
-        if (serverUrl.contains("127.0.0.1") || serverUrl.contains("192.168.")) {
-            serverUrl = PRODUCTION_BASE_URL
-        }
         if (AiToyPrefs.apiPrefix == "aitoy") {
-            AiToyPrefs.apiPrefix = "api"
+            AiToyPrefs.apiPrefix = OkHttpUtils.DEFAULT_API_PREFIX
         }
-        AiToyPrefs.serverBaseUrl = PRODUCTION_BASE_URL
+        if (AiToyPrefs.serverBaseUrl.isBlank()) {
+            OkHttpUtils.useProductionBaseUrl()
+        }
+        refreshBaseUrlState()
         checkAppConfig()
     }
 
@@ -387,7 +395,7 @@ class BridgeViewModel : ViewModel() {
     }
 
     fun connectRelay() {
-        relay.connect(serverUrl, userToken)
+        relay.connect(OkHttpUtils.currentBaseUrl, userToken)
     }
 
     fun disconnectRelay() {
@@ -405,7 +413,45 @@ class BridgeViewModel : ViewModel() {
     }
 
     fun openAppDownloadPage() {
-        appCtx.openUrl("$PRODUCTION_BASE_URL/download")
+        appCtx.openUrl(OkHttpUtils.externalUrl("download"))
+    }
+
+    fun onDebugLogTitleClick() {
+        if (developerMode) return
+        debugLogTapCount += 1
+        baseUrlMessage = if (debugLogTapCount >= 5) {
+            developerMode = true
+            "开发者模式已开启"
+        } else {
+            "再点 ${5 - debugLogTapCount} 次可打开开发者设置"
+        }
+    }
+
+    fun useProductionBaseUrl() {
+        if (!developerMode) return
+        OkHttpUtils.useProductionBaseUrl()
+        refreshBaseUrlState()
+        baseUrlMessage = "已切换到线上地址，新请求会立即使用；已在线的连接请重新上线。"
+        checkAppConfig()
+    }
+
+    fun useLocalBaseUrl() {
+        if (!developerMode) return
+        OkHttpUtils.useLocalBaseUrl()
+        refreshBaseUrlState()
+        baseUrlMessage = "已切换到本地地址，新请求会立即使用；已在线的连接请重新上线。"
+        checkAppConfig()
+    }
+
+    fun saveBaseUrl() {
+        if (!developerMode) return
+        if (OkHttpUtils.saveBaseUrl(baseUrlDraft)) {
+            refreshBaseUrlState()
+            baseUrlMessage = "已保存，新请求会立即使用；已在线的连接请重新上线。"
+            checkAppConfig()
+        } else {
+            baseUrlMessage = "地址格式不正确，请输入 http 或 https 地址。"
+        }
     }
 
     fun downloadAndInstallUpdate() {
@@ -490,8 +536,9 @@ class BridgeViewModel : ViewModel() {
         if (resolved.isBlank()) return
         val uri = runCatching { Uri.parse(resolved) }.getOrNull()
         val server = uri?.getQueryParameter("server")?.trim().orEmpty()
-        if (server == PRODUCTION_BASE_URL) {
-            serverUrl = server
+        if (developerMode && server.isNotBlank() && OkHttpUtils.isHttpUrl(OkHttpUtils.normalizeBaseUrl(server))) {
+            OkHttpUtils.saveBaseUrl(server)
+            refreshBaseUrlState()
         }
         importCode = resolved
         showAdvanced = true
@@ -543,10 +590,13 @@ class BridgeViewModel : ViewModel() {
             "${uri.scheme}://${uri.authority}"
         } else {
             uri?.getQueryParameter("server")?.takeIf {
-                it == PRODUCTION_BASE_URL
+                it.isNotBlank() && OkHttpUtils.isHttpUrl(OkHttpUtils.normalizeBaseUrl(it))
             }
         }?.trimEnd('/')
-        if (linkBaseUrl != null) serverUrl = linkBaseUrl
+        if (developerMode && linkBaseUrl != null) {
+            OkHttpUtils.saveBaseUrl(linkBaseUrl)
+            refreshBaseUrlState()
+        }
         val shareId = code.trimEnd('/')
             .substringBefore('?')
             .substringAfterLast('/')
@@ -700,7 +750,12 @@ class BridgeViewModel : ViewModel() {
     }
 
     private fun publicBaseUrl(): String {
-        return PRODUCTION_BASE_URL
+        return OkHttpUtils.currentBaseUrl
+    }
+
+    private fun refreshBaseUrlState() {
+        serverUrl = OkHttpUtils.currentBaseUrl
+        baseUrlDraft = serverUrl
     }
 
     private inline fun runAction(block: () -> Unit) {
@@ -715,8 +770,6 @@ class BridgeViewModel : ViewModel() {
     }
 
     companion object {
-        const val PRODUCTION_BASE_URL = "https://aitoy.funnysaltyfish.fun"
-        const val MCP_URL = "https://aitoy.funnysaltyfish.fun/mcp"
         const val APP_VERSION_CODE = 1
         const val APP_VERSION_NAME = "1.0"
     }

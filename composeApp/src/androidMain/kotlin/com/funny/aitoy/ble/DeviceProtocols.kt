@@ -49,6 +49,9 @@ internal object BleProtocolRegistry {
 
     fun resolve(fingerprint: BleGattFingerprint): BleDeviceProtocol? =
         protocols.firstOrNull { it.matches(fingerprint) }
+
+    fun resolveAll(fingerprint: BleGattFingerprint): List<BleDeviceProtocol> =
+        protocols.filter { it.matches(fingerprint) }
 }
 
 internal class ManualBleProtocol(

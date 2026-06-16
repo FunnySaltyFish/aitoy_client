@@ -13,41 +13,23 @@ import com.funny.aitoy.network.api.service.UploadService
 import com.funny.aitoy.network.api.service.UserService
 
 object AiToyServices {
-    val appService: AppService by lazy(LazyThreadSafetyMode.PUBLICATION) {
-        ServiceCreator.create(AppService::class.java)
-    }
+    val appService: AppService get() = ServiceCreator.create(AppService::class.java)
 
-    val protocolShareService: ProtocolShareService by lazy(LazyThreadSafetyMode.PUBLICATION) {
-        ServiceCreator.create(ProtocolShareService::class.java)
-    }
+    val protocolShareService: ProtocolShareService get() = ServiceCreator.create(ProtocolShareService::class.java)
 
-    val diagnosticsService: DiagnosticsService by lazy(LazyThreadSafetyMode.PUBLICATION) {
-        ServiceCreator.create(DiagnosticsService::class.java)
-    }
+    val diagnosticsService: DiagnosticsService get() = ServiceCreator.create(DiagnosticsService::class.java)
 
-    val authService: AuthService by lazy(LazyThreadSafetyMode.PUBLICATION) {
-        ServiceCreator.create(AuthService::class.java)
-    }
+    val authService: AuthService get() = ServiceCreator.create(AuthService::class.java)
 
-    val userService: UserService by lazy(LazyThreadSafetyMode.PUBLICATION) {
-        ServiceCreator.create(UserService::class.java)
-    }
+    val userService: UserService get() = ServiceCreator.create(UserService::class.java)
 
-    val entitlementService: EntitlementService by lazy(LazyThreadSafetyMode.PUBLICATION) {
-        ServiceCreator.create(EntitlementService::class.java)
-    }
+    val entitlementService: EntitlementService get() = ServiceCreator.create(EntitlementService::class.java)
 
-    val payService: PayService by lazy(LazyThreadSafetyMode.PUBLICATION) {
-        ServiceCreator.create(PayService::class.java)
-    }
+    val payService: PayService get() = ServiceCreator.create(PayService::class.java)
 
-    val uploadService: UploadService by lazy(LazyThreadSafetyMode.PUBLICATION) {
-        ServiceCreator.create(UploadService::class.java)
-    }
+    val uploadService: UploadService get() = ServiceCreator.create(UploadService::class.java)
 
-    val syncService: SyncService by lazy(LazyThreadSafetyMode.PUBLICATION) {
-        ServiceCreator.create(SyncService::class.java)
-    }
+    val syncService: SyncService get() = ServiceCreator.create(SyncService::class.java)
 
     fun asrService(baseUrlOverride: String? = null): AsrService {
         return ServiceCreator.create(AsrService::class.java, baseUrlOverride)

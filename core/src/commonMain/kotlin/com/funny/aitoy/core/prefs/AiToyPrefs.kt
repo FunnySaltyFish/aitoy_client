@@ -14,7 +14,7 @@ object AiToyPrefs {
     var serverBaseUrl: String by mutableDataSaverStateOf(
         DataSaverUtils,
         key = "SERVER_BASE_URL",
-        initialValue = "http://192.168.1.118:5002",
+        initialValue = "",
     )
 
     var apiPrefix: String by mutableDataSaverStateOf(

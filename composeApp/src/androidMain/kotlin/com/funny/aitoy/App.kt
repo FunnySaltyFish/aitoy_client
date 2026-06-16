@@ -28,15 +28,18 @@ import androidx.compose.material.icons.outlined.BluetoothSearching
 import androidx.compose.material.icons.outlined.Chat
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Favorite
+import androidx.compose.material.icons.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.SettingsRemote
 import androidx.compose.material.icons.outlined.StopCircle
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.WifiTethering
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -68,12 +71,14 @@ import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.funny.aitoy.ble.BleConnectionState
 import com.funny.aitoy.ble.ScannedBleDevice
 import com.funny.aitoy.chat.ChatScreen
 import com.funny.aitoy.chat.ChatViewModel
+import com.funny.aitoy.network.OkHttpUtils
 import kotlin.math.roundToInt
 
 private val Ink = Color(0xFF110D12)
@@ -145,8 +150,8 @@ private fun DeviceHome(vm: BridgeViewModel) {
             .semantics { testTagsAsResourceId = true }
             .testTag("aitoy_root")
             .statusBarsPadding()
-            .padding(horizontal = 18.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
+            .padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 item { ProductHero(vm) }
                 item { CrashNotice(vm) }
@@ -415,12 +420,19 @@ private fun DeviceRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text(device.name, fontWeight = FontWeight.Bold)
+            Text(
+                device.name,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
             Text(
                 "${device.address}  ${device.rssi} dBm",
                 color = TextSoft,
                 fontFamily = FontFamily.Monospace,
                 style = MaterialTheme.typography.bodySmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
         Button(
@@ -518,11 +530,12 @@ private fun ControlRoom(vm: BridgeViewModel) {
 @Composable
 private fun AiCompanion(vm: BridgeViewModel) {
     val clipboard = LocalClipboardManager.current
+    val mcpUrl = OkHttpUtils.externalUrl("mcp", vm.serverUrl)
     val mcpConfig = """
         {
           "mcpServers": {
             "ai-toy": {
-              "url": "${BridgeViewModel.MCP_URL}",
+              "url": "$mcpUrl",
               "headers": {
                 "X-User-Token": "${vm.userToken}"
               }
@@ -531,10 +544,17 @@ private fun AiCompanion(vm: BridgeViewModel) {
         }
     """.trimIndent()
     Panel(title = "AI 伙伴", icon = Icons.Outlined.WifiTethering) {
-        Text(
-            "让支持 MCP 的 AI 工具安全地控制默认设备。手机上线后，复制配置到 AI 工具即可连接。",
-            color = TextSoft
-        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "让 AI 工具控制已连接的默认设备。",
+                color = TextSoft,
+                modifier = Modifier.weight(1f),
+            )
+            InfoTip(
+                title = "手机上线",
+                text = "手机上线后，复制配置到支持 MCP 的 AI 工具。AI 只能控制当前默认设备，你可以随时在这里下线或立即停止。",
+            )
+        }
         Spacer(Modifier.height(12.dp))
         Row(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -573,7 +593,7 @@ private fun AiCompanion(vm: BridgeViewModel) {
 private fun GuidePanel(vm: BridgeViewModel) {
     val clipboard = LocalClipboardManager.current
     Panel(title = "使用教程", icon = Icons.Outlined.Link) {
-        Text("自动连接不成功时，按教程导出蓝牙数据包，再回到这里导入或分享指令。", color = TextSoft)
+        Text("如果自动连接不成功，可以导入别人分享的指令，或按教程采集连接信息。", color = TextSoft)
         Spacer(Modifier.height(10.dp))
         Row {
             TextButton(onClick = { vm.showGuide = !vm.showGuide }) {
@@ -583,11 +603,11 @@ private fun GuidePanel(vm: BridgeViewModel) {
         AnimatedVisibility(vm.showGuide) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 FlowStep("A", "自动连接", "先寻找设备并连接，应用会优先尝试内置协议。")
-                FlowStep("B", "手动调试", "在高级工具中填入服务、写入特征和两条基础指令。")
+                FlowStep("B", "导入指令", "如果别人已经适配过同款设备，粘贴分享链接后重新连接。")
                 FlowStep(
                     "C",
-                    "导出数据",
-                    "仍失败时，用 nRF Connect 记录服务、特征和写入内容，交给群友或开发者分析。"
+                    "采集信息",
+                    "仍失败时，按群内教程采集设备连接信息，方便补充适配。"
                 )
                 OutlinedButton(
                     onClick = {
@@ -613,7 +633,13 @@ private fun GuidePanel(vm: BridgeViewModel) {
 @Composable
 private fun AdvancedPanel(vm: BridgeViewModel) {
     Panel(title = "高级工具", icon = Icons.Outlined.Tune) {
-        Text("给会调试的人使用。普通连接不需要改这里。", color = TextSoft)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("普通连接不需要改这里。", color = TextSoft, modifier = Modifier.weight(1f))
+            InfoTip(
+                title = "高级工具",
+                text = "这里用于导入同款设备的指令，或在工作人员协助下补充适配信息。看不懂时保持默认即可。",
+            )
+        }
         TextButton(onClick = { vm.showAdvanced = !vm.showAdvanced }) {
             Text(if (vm.showAdvanced) "收起高级工具" else "打开高级工具")
         }
@@ -623,6 +649,7 @@ private fun AdvancedPanel(vm: BridgeViewModel) {
                 TemplateEditor(vm)
                 ShareTools(vm)
                 LogSection(vm)
+                DeveloperSettings(vm)
             }
         }
     }
@@ -633,7 +660,7 @@ private fun TemplateLibrary(vm: BridgeViewModel) {
     Spacer(Modifier.height(18.dp))
     SoftTitle("模板库")
     Text(
-        "已内置 Lovense、Satisfyer、OhMiBod Esca 2、Pink Punch、Lovenuts、Je Joue Nuo、Roselex / DSJM。自动连接失败时，可以先选一个相近模板，再重新连接设备。",
+        "如果自动连接失败，可以先选择同款或相近设备模板，再重新连接。",
         color = TextSoft,
     )
     TextButton(onClick = { vm.showTemplateLibrary = !vm.showTemplateLibrary }) {
@@ -665,10 +692,17 @@ private fun TemplateLibrary(vm: BridgeViewModel) {
 @Composable
 private fun TemplateEditor(vm: BridgeViewModel) {
     Spacer(Modifier.height(18.dp))
-    SoftTitle("手动指令")
-    FormField("Service UUID", vm.serviceUuid) { vm.serviceUuid = it }
-    FormField("Write UUID", vm.writeUuid) { vm.writeUuid = it }
-    FormField("Notify UUID", vm.notifyUuid) { vm.notifyUuid = it }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("手动指令", color = Honey, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+        InfoTip(
+            title = "手动指令",
+            text = "仅在工作人员或群友提供指令时填写。填好后开启“使用这组手动指令”，再重新连接设备。",
+        )
+    }
+    Spacer(Modifier.height(8.dp))
+    FormField("设备服务编号", vm.serviceUuid) { vm.serviceUuid = it }
+    FormField("写入通道编号", vm.writeUuid) { vm.writeUuid = it }
+    FormField("通知通道编号", vm.notifyUuid) { vm.notifyUuid = it }
     FormField("启动指令", vm.commandTemplate) { vm.commandTemplate = it }
     FormField("停止指令", vm.stopTemplate) { vm.stopTemplate = it }
     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -708,13 +742,39 @@ private fun ShareTools(vm: BridgeViewModel) {
 }
 
 @Composable
+private fun DeveloperSettings(vm: BridgeViewModel) {
+    if (!vm.developerMode && vm.baseUrlMessage.isBlank()) return
+    Spacer(Modifier.height(18.dp))
+    if (!vm.developerMode) {
+        Text(vm.baseUrlMessage, color = Honey)
+        return
+    }
+    SoftTitle("开发者设置")
+    Text("服务地址会影响更新检查、分享导入和手机上线。新请求会立即使用新地址；手机已经上线时，请重新上线。", color = TextSoft)
+    Spacer(Modifier.height(10.dp))
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        OutlinedButton(onClick = vm::useProductionBaseUrl) { Text("线上地址") }
+        OutlinedButton(onClick = vm::useLocalBaseUrl) { Text("本地地址") }
+    }
+    Spacer(Modifier.height(10.dp))
+    FormField("服务地址", vm.baseUrlDraft) { vm.baseUrlDraft = it }
+    Button(onClick = vm::saveBaseUrl) { Text("保存地址") }
+    if (vm.baseUrlMessage.isNotBlank()) {
+        Spacer(Modifier.height(8.dp))
+        Text(vm.baseUrlMessage, color = Honey)
+    }
+    Spacer(Modifier.height(6.dp))
+    Text("当前：${vm.serverUrl}", color = TextSoft, fontFamily = FontFamily.Monospace)
+}
+
+@Composable
 private fun LogSection(vm: BridgeViewModel) {
     val listState = rememberLazyListState()
     LaunchedEffect(vm.logs.size) {
         if (vm.logs.isNotEmpty()) listState.scrollToItem(vm.logs.lastIndex)
     }
     Spacer(Modifier.height(18.dp))
-    SoftTitle("调试日志")
+    SoftTitle("调试日志", modifier = Modifier.clickable { vm.onDebugLogTitleClick() })
     Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
         Text("最近 ${vm.logs.size} 条", color = TextSoft)
         TextButton(onClick = vm::clearLogs) { Text("清空") }
@@ -777,9 +837,9 @@ private fun Panel(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Velvet, RoundedCornerShape(24.dp))
-            .border(1.dp, Line, RoundedCornerShape(24.dp))
-            .padding(18.dp),
+            .background(Velvet, RoundedCornerShape(18.dp))
+            .border(1.dp, Line, RoundedCornerShape(18.dp))
+            .padding(16.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(icon, contentDescription = null, tint = Rose)
@@ -797,9 +857,27 @@ private fun Panel(
 }
 
 @Composable
-private fun SoftTitle(text: String) {
-    Text(text, color = Honey, fontWeight = FontWeight.Bold)
+private fun SoftTitle(text: String, modifier: Modifier = Modifier) {
+    Text(text, color = Honey, fontWeight = FontWeight.Bold, modifier = modifier)
     Spacer(Modifier.height(8.dp))
+}
+
+@Composable
+private fun InfoTip(title: String, text: String) {
+    var open by remember { mutableIntStateOf(0) }
+    IconButton(onClick = { open += 1 }) {
+        Icon(Icons.Outlined.HelpOutline, contentDescription = title, tint = Honey)
+    }
+    if (open > 0) {
+        AlertDialog(
+            onDismissRequest = { open = 0 },
+            confirmButton = {
+                TextButton(onClick = { open = 0 }) { Text("知道了") }
+            },
+            title = { Text(title) },
+            text = { Text(text) },
+        )
+    }
 }
 
 @Composable
