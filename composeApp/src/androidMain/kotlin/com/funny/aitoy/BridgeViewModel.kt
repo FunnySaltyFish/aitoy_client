@@ -477,6 +477,7 @@ class BridgeViewModel : ViewModel() {
                 withContext(Dispatchers.Main) {
                     updateDownloading = false
                     updateDownloadProgress = 100
+                    updateState = AppUpdateState(checked = true)
                 }
             }.onFailure {
                 withContext(Dispatchers.Main) {

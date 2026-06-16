@@ -56,6 +56,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -141,6 +142,7 @@ fun App(initialImportLink: String? = null) {
                     ChatScreen(vm = chatVm, bridgeVm = vm)
                 }
             }
+            UpdateDialog(vm)
         }
     }
 }
@@ -164,7 +166,6 @@ private fun DeviceHome(vm: BridgeViewModel) {
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item { CrashNotice(vm) }
-            item { UpdateNotice(vm) }
             if (vm.updateState.forceUpdate) {
                 item { Spacer(Modifier.height(8.dp)) }
             } else {
@@ -195,64 +196,84 @@ private fun CrashNotice(vm: BridgeViewModel) {
 }
 
 @Composable
-private fun UpdateNotice(vm: BridgeViewModel) {
+private fun UpdateDialog(vm: BridgeViewModel) {
     val state = vm.updateState
     if (!state.updateAvailable && !state.forceUpdate) return
-    Panel(
-        title = if (state.forceUpdate) "需要更新" else "发现新版本",
-        icon = Icons.Outlined.AutoAwesome,
-    ) {
-        Text(
-            text = if (state.forceUpdate) {
-                "当前版本需要更新后继续使用。"
-            } else {
-                "有新版本可用，建议更新后获得更稳定的连接体验。"
-            },
-            color = TextMain,
-            fontWeight = FontWeight.Bold,
-        )
-        if (state.latestVersionName.isNotBlank()) {
-            Spacer(Modifier.height(6.dp))
-            Text("最新版本 ${state.latestVersionName}", color = TextSoft)
-        }
-        if (state.fileSizeBytes > 0) {
-            Spacer(Modifier.height(6.dp))
-            Text("安装包 ${formatBytes(state.fileSizeBytes)}", color = TextSoft)
-        }
-        if (state.updateLog.isNotBlank()) {
-            Spacer(Modifier.height(8.dp))
-            Text(state.updateLog, color = TextSoft)
-        }
-        if (state.message.isNotBlank()) {
-            Spacer(Modifier.height(8.dp))
-            Text(state.message, color = Honey)
-        }
-        if (vm.updateDownloading) {
-            Spacer(Modifier.height(12.dp))
-            LinearProgressIndicator(
-                progress = { vm.updateDownloadProgress / 100f },
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(Modifier.height(6.dp))
-            Text("正在下载 ${vm.updateDownloadProgress}%", color = TextSoft)
-        }
-        Spacer(Modifier.height(12.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Button(
-                onClick = vm::downloadAndInstallUpdate,
-                enabled = state.apkUrl.isNotBlank() && !vm.updateDownloading,
-                colors = ButtonDefaults.buttonColors(containerColor = Rose, contentColor = Ink),
-            ) {
-                Text(if (vm.updateDownloading) "下载中" else "下载并安装")
+    var dismissedUpdateKey by remember { mutableStateOf("") }
+    val updateKey = "${state.latestVersionName}|${state.apkUrl}|${state.downloadPageUrl}"
+    if (!state.forceUpdate && !vm.updateDownloading && dismissedUpdateKey == updateKey) return
+    AlertDialog(
+        onDismissRequest = {
+            if (!state.forceUpdate && !vm.updateDownloading) {
+                dismissedUpdateKey = updateKey
             }
-            OutlinedButton(
-                onClick = vm::openUpdateInBrowser,
-                enabled = state.apkUrl.isNotBlank() || state.downloadPageUrl.isNotBlank(),
-            ) {
-                Text("浏览器下载")
+        },
+        title = {
+            Text(if (state.forceUpdate) "需要更新" else "发现新版本")
+        },
+        text = {
+            Column {
+                Text(
+                    text = if (state.forceUpdate) {
+                        "当前版本需要更新后继续使用。"
+                    } else {
+                        "有新版本可用，建议更新后获得更稳定的连接体验。"
+                    },
+                    color = TextMain,
+                    fontWeight = FontWeight.Bold,
+                )
+                if (state.latestVersionName.isNotBlank()) {
+                    Spacer(Modifier.height(6.dp))
+                    Text("最新版本 ${state.latestVersionName}", color = TextSoft)
+                }
+                if (state.fileSizeBytes > 0) {
+                    Spacer(Modifier.height(6.dp))
+                    Text("安装包 ${formatBytes(state.fileSizeBytes)}", color = TextSoft)
+                }
+                if (state.updateLog.isNotBlank()) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(state.updateLog, color = TextSoft)
+                }
+                if (state.message.isNotBlank()) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(state.message, color = Honey)
+                }
+                if (vm.updateDownloading) {
+                    Spacer(Modifier.height(12.dp))
+                    LinearProgressIndicator(
+                        progress = { vm.updateDownloadProgress / 100f },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text("正在下载 ${vm.updateDownloadProgress}%", color = TextSoft)
+                }
             }
-        }
-    }
+        },
+        confirmButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (!state.forceUpdate && !vm.updateDownloading) {
+                    TextButton(onClick = { dismissedUpdateKey = updateKey }) {
+                        Text("稍后")
+                    }
+                }
+                if (!vm.updateDownloading) {
+                    OutlinedButton(
+                        onClick = vm::openUpdateInBrowser,
+                        enabled = state.apkUrl.isNotBlank() || state.downloadPageUrl.isNotBlank(),
+                    ) {
+                        Text("浏览器下载")
+                    }
+                }
+                Button(
+                    onClick = vm::downloadAndInstallUpdate,
+                    enabled = state.apkUrl.isNotBlank() && !vm.updateDownloading,
+                    colors = ButtonDefaults.buttonColors(containerColor = Rose, contentColor = Ink),
+                ) {
+                    Text(if (vm.updateDownloading) "下载中" else "下载并安装")
+                }
+            }
+        },
+    )
 }
 
 private fun formatBytes(bytes: Long): String {
