@@ -8,25 +8,39 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import com.funny.aitoy.ble.AndroidBleController
 import com.funny.aitoy.ble.BleConnectionState
 import com.funny.aitoy.ble.BleProtocolStatus
 import com.funny.aitoy.ble.ProtocolTemplate
 import com.funny.aitoy.ble.ScannedBleDevice
+import com.funny.aitoy.chat.ToyTool
+import com.funny.aitoy.chat.ToyToolResult
+import com.funny.aitoy.core.prefs.AiToyPrefs
 import com.funny.aitoy.core.prefs.DataSaverUtils
+import com.funny.aitoy.core.kmp.appCtx
+import com.funny.aitoy.core.kmp.openUrl
+import com.funny.aitoy.diagnostics.AiToyCrashReporter
+import com.funny.aitoy.network.api.AiToyServices
+import com.funny.aitoy.network.api.apiRequest
+import com.funny.aitoy.network.api.service.CreateProtocolShareRequest
 import com.funny.aitoy.relay.RelayClient
 import com.funny.aitoy.relay.RelayCommand
 import com.funny.aitoy.relay.RelayDevice
+import com.funny.aitoy.update.AppUpdateInstaller
 import com.funny.data_saver.core.mutableDataSaverStateOf
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
 import org.json.JSONArray
 import org.json.JSONObject
 import java.security.MessageDigest
 import java.util.UUID
-import java.util.concurrent.TimeUnit
 import kotlin.math.roundToInt
 
 data class RememberedToy(
@@ -54,6 +68,9 @@ data class AppUpdateState(
     val latestVersionName: String = "",
     val message: String = "",
     val apkUrl: String = "",
+    val downloadPageUrl: String = "",
+    val fileSizeBytes: Long = 0,
+    val updateLog: String = "",
 )
 
 class BridgeViewModel : ViewModel() {
@@ -85,6 +102,12 @@ class BridgeViewModel : ViewModel() {
     var communityMessage by mutableStateOf("")
         private set
     var updateState by mutableStateOf(AppUpdateState())
+        private set
+    var updateDownloadProgress by mutableStateOf(0)
+        private set
+    var updateDownloading by mutableStateOf(false)
+        private set
+    var crashNotice by mutableStateOf(AiToyCrashReporter.consumeLastCrashNotice().orEmpty())
         private set
 
     var serverUrl: String by mutableDataSaverStateOf(
@@ -202,6 +225,29 @@ class BridgeViewModel : ViewModel() {
         ),
     )
 
+    val builtInTools = listOf(
+        ToyTool(
+            name = "get_toy_status",
+            title = "查看设备状态",
+            description = "读取当前连接状态、设备名称、协议、强度和节奏。",
+        ),
+        ToyTool(
+            name = "set_toy_vibration",
+            title = "调节设备",
+            description = "设置强度、节奏和持续时间；到时会自动停止。",
+        ),
+        ToyTool(
+            name = "stop_toy",
+            title = "立即停止",
+            description = "停止当前已连接的设备。",
+        ),
+        ToyTool(
+            name = "stop_all_toys",
+            title = "全部停止",
+            description = "停止当前应用管理的所有设备。",
+        ),
+    )
+
     private val controller = AndroidBleController(
         onDevice = ::onDeviceFound,
         onState = {
@@ -228,15 +274,14 @@ class BridgeViewModel : ViewModel() {
         onLog = ::appendLog,
         onCommand = ::handleRelayCommand,
     )
-    private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(12, TimeUnit.SECONDS)
-        .readTimeout(20, TimeUnit.SECONDS)
-        .build()
-
     init {
         if (serverUrl.contains("127.0.0.1") || serverUrl.contains("192.168.")) {
             serverUrl = PRODUCTION_BASE_URL
         }
+        if (AiToyPrefs.apiPrefix == "aitoy") {
+            AiToyPrefs.apiPrefix = "api"
+        }
+        AiToyPrefs.serverBaseUrl = PRODUCTION_BASE_URL
         checkAppConfig()
     }
 
@@ -300,6 +345,42 @@ class BridgeViewModel : ViewModel() {
         syncRelayDevice()
     }
 
+    fun getToyStatusForChat(): ToyToolResult = ToyToolResult(
+        ok = true,
+        message = buildString {
+            append("设备状态：${connectionState.label}")
+            if (selectedName.isNotBlank()) append("；设备：$selectedName")
+            append("；协议：${protocolStatus.displayName}")
+            append("；当前强度：$intensity")
+            if (protocolStatus.supportsMode) append("；当前节奏：$mode")
+            append("；可控制：${if (protocolStatus.controllable) "是" else "否"}")
+        },
+    )
+
+    fun setToyVibrationForChat(
+        intensityPercent: Int,
+        mode: Int,
+        durationSec: Int,
+    ): ToyToolResult = runCatching {
+        val safeDuration = durationSec.coerceIn(1, 15)
+        applyToyCommand(
+            action = "set",
+            intensityPercent = intensityPercent.coerceIn(0, 100),
+            requestedMode = mode.coerceAtLeast(1),
+            durationSec = safeDuration,
+        )
+        ToyToolResult(true, "已调节设备，$safeDuration 秒后会自动停止。")
+    }.getOrElse {
+        ToyToolResult(false, it.message ?: "操作没有完成。")
+    }
+
+    fun stopToyForChat(all: Boolean = false): ToyToolResult = runCatching {
+        applyToyCommand(action = if (all) "stop_all" else "stop")
+        ToyToolResult(true, if (all) "已全部停止。" else "已停止。")
+    }.getOrElse {
+        ToyToolResult(false, it.message ?: "操作没有完成。")
+    }
+
     fun clearLogs() {
         logs.clear()
     }
@@ -312,53 +393,79 @@ class BridgeViewModel : ViewModel() {
         relay.disconnect()
     }
 
+    fun dismissCrashNotice() {
+        crashNotice = ""
+    }
+
+    fun openUpdateInBrowser() {
+        val url = updateState.downloadPageUrl.ifBlank { updateState.apkUrl }
+        if (url.isBlank()) return
+        appCtx.openUrl(url)
+    }
+
+    fun downloadAndInstallUpdate() {
+        val url = updateState.apkUrl
+        if (url.isBlank() || updateDownloading) return
+        updateDownloading = true
+        updateDownloadProgress = 0
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                AppUpdateInstaller.downloadAndInstall(
+                    url = url,
+                    versionName = updateState.latestVersionName.ifBlank { "latest" },
+                ) { progress ->
+                    mainHandler.post { updateDownloadProgress = progress }
+                }
+            }.onSuccess {
+                mainHandler.post {
+                    updateDownloading = false
+                    updateDownloadProgress = 100
+                }
+            }.onFailure {
+                mainHandler.post {
+                    updateDownloading = false
+                    updateState = updateState.copy(message = it.message ?: "下载失败")
+                }
+            }
+        }
+    }
+
     fun checkAppConfig() {
-        val request = Request.Builder()
-            .url("$PRODUCTION_BASE_URL/api/app/config?versionCode=$APP_VERSION_CODE")
-            .get()
-            .build()
-        httpClient.newCall(request).enqueue(
-            SimpleCallback(
-                onSuccess = { text ->
-                    val json = JSONObject(text)
-                    if (!json.optBoolean("ok")) error(
-                        json.optString("error").ifBlank { "检查更新失败" })
-                    communityCode = json.optString("communityCode")
-                    val update = json.getJSONObject("update")
-                    updateState = AppUpdateState(
-                        checked = true,
-                        updateAvailable = update.optBoolean("updateAvailable"),
-                        forceUpdate = update.optBoolean("forceUpdate"),
-                        latestVersionName = update.optString("latestVersionName"),
-                        message = update.optString("message"),
-                        apkUrl = update.optString("apkUrl"),
-                    )
-                },
-                onFailure = { message ->
-                    updateState = AppUpdateState(checked = true, message = message)
-                },
-            )
-        )
+        viewModelScope.launch {
+            runCatching {
+                apiRequest { AiToyServices.appService.config(APP_VERSION_CODE) }
+            }.onSuccess { config ->
+                communityCode = config.communityCode
+                val update = config.update
+                updateState = AppUpdateState(
+                    checked = true,
+                    updateAvailable = update.updateAvailable,
+                    forceUpdate = update.forceUpdate,
+                    latestVersionName = update.latestVersionName,
+                    message = update.msg,
+                    apkUrl = update.downloadUrl.ifBlank { update.apkUrl },
+                    downloadPageUrl = update.downloadPageUrl,
+                    fileSizeBytes = update.fileSizeBytes,
+                    updateLog = update.updateLog,
+                )
+            }.onFailure {
+                updateState = AppUpdateState(checked = true, message = it.message ?: "检查更新失败")
+            }
+        }
     }
 
     fun fetchCommunityCode() {
-        val request = Request.Builder()
-            .url("$PRODUCTION_BASE_URL/api/app/config?versionCode=$APP_VERSION_CODE")
-            .get()
-            .build()
         communityMessage = "正在获取口令..."
-        httpClient.newCall(request).enqueue(
-            SimpleCallback(
-                onSuccess = { text ->
-                    val json = JSONObject(text)
-                    if (!json.optBoolean("ok")) error(
-                        json.optString("error").ifBlank { "获取失败" })
-                    communityCode = json.optString("communityCode")
-                    communityMessage = "口令已准备好，可以复制到小红书打开"
-                },
-                onFailure = { message -> communityMessage = message },
-            )
-        )
+        viewModelScope.launch {
+            runCatching {
+                apiRequest { AiToyServices.appService.config(APP_VERSION_CODE) }
+            }.onSuccess { config ->
+                communityCode = config.communityCode
+                communityMessage = "口令已准备好，可以复制到小红书打开"
+            }.onFailure {
+                communityMessage = it.message ?: "获取失败"
+            }
+        }
     }
 
     fun applyPreset(preset: ProtocolPreset) {
@@ -389,38 +496,34 @@ class BridgeViewModel : ViewModel() {
 
     fun shareCurrentTemplate() {
         shareMessage = "正在生成分享链接..."
-        val payload = JSONObject()
-            .put("serviceUuid", serviceUuid.trim())
-            .put("writeUuid", writeUuid.trim())
-            .put("notifyUuid", notifyUuid.trim())
-            .put("commandTemplate", commandTemplate.trim())
-            .put("stopTemplate", stopTemplate.trim())
-            .put("writeWithResponse", writeWithResponse)
-            .put("manualControlEnabled", true)
-            .put("sourceDeviceName", selectedName.ifBlank { "我的小玩具" })
-            .put("protocolName", protocolStatus.displayName.ifBlank { "手动指令" })
-        val body = JSONObject()
-            .put("title", selectedName.ifBlank { "设备指令" })
-            .put("baseUrl", publicBaseUrl())
-            .put("payload", payload)
-            .toString()
-            .toRequestBody(JSON)
-        val request = Request.Builder()
-            .url("${serverUrl.trimEnd('/')}/api/protocol-shares")
-            .post(body)
-            .build()
-        httpClient.newCall(request).enqueue(
-            SimpleCallback(
-                onSuccess = { text ->
-                    val json = JSONObject(text)
-                    if (!json.optBoolean("ok")) error(
-                        json.optString("error").ifBlank { "分享失败" })
-                    shareMessage = json.optString("url").ifBlank { json.optString("importCode") }
-                    appendLog("已生成指令分享：$shareMessage")
-                },
-                onFailure = { message -> shareMessage = message },
-            )
-        )
+        viewModelScope.launch {
+            runCatching {
+                apiRequest {
+                    AiToyServices.protocolShareService.create(
+                        CreateProtocolShareRequest(
+                            title = selectedName.ifBlank { "设备指令" },
+                            baseUrl = publicBaseUrl(),
+                            payload = buildJsonObject {
+                                put("serviceUuid", JsonPrimitive(serviceUuid.trim()))
+                                put("writeUuid", JsonPrimitive(writeUuid.trim()))
+                                put("notifyUuid", JsonPrimitive(notifyUuid.trim()))
+                                put("commandTemplate", JsonPrimitive(commandTemplate.trim()))
+                                put("stopTemplate", JsonPrimitive(stopTemplate.trim()))
+                                put("writeWithResponse", JsonPrimitive(writeWithResponse))
+                                put("manualControlEnabled", JsonPrimitive(true))
+                                put("sourceDeviceName", JsonPrimitive(selectedName.ifBlank { "我的小玩具" }))
+                                put("protocolName", JsonPrimitive(protocolStatus.displayName.ifBlank { "手动指令" }))
+                            },
+                        )
+                    )
+                }
+            }.onSuccess { result ->
+                shareMessage = result.url.ifBlank { result.importCode }
+                appendLog("已生成指令分享：$shareMessage")
+            }.onFailure {
+                shareMessage = it.message ?: "分享失败"
+            }
+        }
     }
 
     fun importSharedTemplate() {
@@ -443,30 +546,32 @@ class BridgeViewModel : ViewModel() {
             .substringBefore('?')
             .substringAfterLast('/')
             .substringAfterLast('=')
-        val request = Request.Builder()
-            .url("${(linkBaseUrl ?: serverUrl).trimEnd('/')}/api/protocol-shares/$shareId")
-            .get()
-            .build()
-        httpClient.newCall(request).enqueue(
-            SimpleCallback(
-                onSuccess = { text ->
-                    val json = JSONObject(text)
-                    if (!json.optBoolean("ok")) error(
-                        json.optString("error").ifBlank { "导入失败" })
-                    val payload = json.getJSONObject("payload")
-                    serviceUuid = payload.optString("serviceUuid", serviceUuid)
-                    writeUuid = payload.optString("writeUuid", writeUuid)
-                    notifyUuid = payload.optString("notifyUuid", notifyUuid)
-                    commandTemplate = payload.optString("commandTemplate", commandTemplate)
-                    stopTemplate = payload.optString("stopTemplate", stopTemplate)
-                    writeWithResponse = payload.optBoolean("writeWithResponse", writeWithResponse)
-                    manualControlEnabled = true
-                    importMessage = "已导入，可以重新连接设备试试"
-                    appendLog("已导入分享指令：${json.optString("title")}")
-                },
-                onFailure = { message -> importMessage = message },
-            )
-        )
+        viewModelScope.launch {
+            runCatching {
+                apiRequest { AiToyServices.protocolShareService.get(shareId) }
+            }.onSuccess { result ->
+                val payload = result.payload
+                serviceUuid = payload.stringValue("serviceUuid", serviceUuid)
+                writeUuid = payload.stringValue("writeUuid", writeUuid)
+                notifyUuid = payload.stringValue("notifyUuid", notifyUuid)
+                commandTemplate = payload.stringValue("commandTemplate", commandTemplate)
+                stopTemplate = payload.stringValue("stopTemplate", stopTemplate)
+                writeWithResponse = payload.booleanValue("writeWithResponse", writeWithResponse)
+                manualControlEnabled = true
+                importMessage = "已导入，可以重新连接设备试试"
+                appendLog("已导入分享指令：${result.title}")
+            }.onFailure {
+                importMessage = it.message ?: "导入失败"
+            }
+        }
+    }
+
+    private fun JsonObject.stringValue(key: String, default: String): String {
+        return this[key]?.jsonPrimitive?.contentOrNull ?: default
+    }
+
+    private fun JsonObject.booleanValue(key: String, default: Boolean): Boolean {
+        return this[key]?.jsonPrimitive?.booleanOrNull ?: default
     }
 
     private fun currentTemplate() = ProtocolTemplate(
@@ -512,37 +617,48 @@ class BridgeViewModel : ViewModel() {
 
     private fun handleRelayCommand(command: RelayCommand) {
         runCatching {
-            when (command.action) {
-                "set" -> {
-                    mainHandler.removeCallbacks(autoStop)
-                    val maxIntensity = protocolStatus.intensityMax.coerceAtLeast(1)
-                    val mappedIntensity = (
-                            ((command.intensity ?: 0).coerceIn(0, 100) / 100.0) * maxIntensity
-                            ).roundToInt().coerceIn(0, maxIntensity)
-                    controller.sendCommand(
-                        mode = command.mode?.coerceAtLeast(1) ?: 1,
-                        intensity = mappedIntensity,
-                    )
-                    mode = command.mode?.coerceAtLeast(1) ?: 1
-                    intensity = mappedIntensity
-                    syncRelayDevice()
-                    mainHandler.postDelayed(
-                        autoStop,
-                        (command.durationSec ?: 8).coerceIn(1, 15) * 1_000L,
-                    )
-                }
-                "stop", "stop_all" -> {
-                    mainHandler.removeCallbacks(autoStop)
-                    controller.stopDevice()
-                    intensity = 0
-                    syncRelayDevice()
-                }
-                else -> error("不支持的命令：${command.action}")
-            }
+            applyToyCommand(
+                action = command.action,
+                intensityPercent = command.intensity,
+                requestedMode = command.mode,
+                durationSec = command.durationSec,
+            )
         }.onSuccess {
             relay.commandResult(command.commandId, true, "命令已写入设备")
         }.onFailure {
             relay.commandResult(command.commandId, false, it.message ?: "命令执行失败")
+        }
+    }
+
+    private fun applyToyCommand(
+        action: String,
+        intensityPercent: Int? = null,
+        requestedMode: Int? = null,
+        durationSec: Int? = null,
+    ) {
+        when (action) {
+            "set" -> {
+                mainHandler.removeCallbacks(autoStop)
+                val maxIntensity = protocolStatus.intensityMax.coerceAtLeast(1)
+                val mappedIntensity = (
+                    ((intensityPercent ?: 0).coerceIn(0, 100) / 100.0) * maxIntensity
+                    ).roundToInt().coerceIn(0, maxIntensity)
+                val mappedMode = requestedMode?.coerceAtLeast(1) ?: 1
+                controller.sendCommand(mode = mappedMode, intensity = mappedIntensity)
+                mode = mappedMode
+                intensity = mappedIntensity
+                busyHint = "设备正在运行，稍后会自动停止"
+                syncRelayDevice()
+                mainHandler.postDelayed(autoStop, (durationSec ?: 8).coerceIn(1, 15) * 1_000L)
+            }
+            "stop", "stop_all" -> {
+                mainHandler.removeCallbacks(autoStop)
+                controller.stopDevice()
+                intensity = 0
+                busyHint = if (action == "stop_all") "已全部停止" else "已停止"
+                syncRelayDevice()
+            }
+            else -> error("暂不支持这个操作")
         }
     }
 
@@ -591,29 +707,6 @@ class BridgeViewModel : ViewModel() {
         controller.close()
         mainHandler.removeCallbacks(autoStop)
         relay.close()
-        httpClient.dispatcher.executorService.shutdown()
-        httpClient.connectionPool.evictAll()
-    }
-
-    private inner class SimpleCallback(
-        private val onSuccess: (String) -> Unit,
-        private val onFailure: (String) -> Unit,
-    ) : okhttp3.Callback {
-        override fun onFailure(call: okhttp3.Call, e: java.io.IOException) {
-            mainHandler.post { onFailure(e.message ?: "网络连接失败") }
-        }
-
-        override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) {
-            val text = response.body?.string().orEmpty()
-            mainHandler.post {
-                runCatching {
-                    if (!response.isSuccessful) error("服务器暂时不可用：${response.code}")
-                    onSuccess(text)
-                }.onFailure {
-                    onFailure(it.message ?: "请求失败")
-                }
-            }
-        }
     }
 
     companion object {
@@ -621,6 +714,5 @@ class BridgeViewModel : ViewModel() {
         const val MCP_URL = "https://aitoy.funnysaltyfish.fun/mcp"
         const val APP_VERSION_CODE = 1
         const val APP_VERSION_NAME = "1.0"
-        private val JSON = "application/json; charset=utf-8".toMediaType()
     }
 }

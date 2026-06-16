@@ -25,9 +25,11 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.BluetoothSearching
+import androidx.compose.material.icons.outlined.Chat
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Favorite
 import androidx.compose.material.icons.outlined.Link
+import androidx.compose.material.icons.outlined.SettingsRemote
 import androidx.compose.material.icons.outlined.StopCircle
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.WifiTethering
@@ -36,8 +38,11 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -45,6 +50,10 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -62,6 +71,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.funny.aitoy.ble.BleConnectionState
 import com.funny.aitoy.ble.ScannedBleDevice
+import com.funny.aitoy.chat.ChatScreen
+import com.funny.aitoy.chat.ChatViewModel
 import kotlin.math.roundToInt
 
 private val Ink = Color(0xFF110D12)
@@ -79,6 +90,8 @@ private val Danger = Color(0xFFFF5E76)
 @Composable
 fun App(initialImportLink: String? = null) {
     val vm = viewModel { BridgeViewModel() }
+    val chatVm = viewModel { ChatViewModel(vm) }
+    var selectedTab by remember { mutableIntStateOf(0) }
     LaunchedEffect(initialImportLink) {
         vm.importFromLink(initialImportLink)
     }
@@ -93,32 +106,74 @@ fun App(initialImportLink: String? = null) {
             error = Danger,
         ),
     ) {
-        Surface(color = Ink, modifier = Modifier.fillMaxSize()) {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .semantics { testTagsAsResourceId = true }
-                    .testTag("aitoy_root")
-                    .statusBarsPadding()
-                    .padding(horizontal = 18.dp),
+        Scaffold(
+            containerColor = Ink,
+            bottomBar = {
+                NavigationBar(containerColor = Velvet) {
+                    NavigationBarItem(
+                        selected = selectedTab == 0,
+                        onClick = { selectedTab = 0 },
+                        icon = { Icon(Icons.Outlined.SettingsRemote, null) },
+                        label = { Text("设备") },
+                    )
+                    NavigationBarItem(
+                        selected = selectedTab == 1,
+                        onClick = { selectedTab = 1 },
+                        icon = { Icon(Icons.Outlined.Chat, null) },
+                        label = { Text("对话") },
+                    )
+                }
+            },
+        ) { padding ->
+            Surface(color = Ink, modifier = Modifier.fillMaxSize().padding(padding)) {
+                if (selectedTab == 0) {
+                    DeviceHome(vm)
+                } else {
+                    ChatScreen(vm = chatVm, bridgeVm = vm)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DeviceHome(vm: BridgeViewModel) {
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .semantics { testTagsAsResourceId = true }
+            .testTag("aitoy_root")
+            .statusBarsPadding()
+            .padding(horizontal = 18.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 item { ProductHero(vm) }
+                item { CrashNotice(vm) }
                 item { UpdateNotice(vm) }
                 if (vm.updateState.forceUpdate) {
-                    item { Spacer(Modifier.height(8.dp)) }
-                } else {
-                    if (vm.connectionState != BleConnectionState.Ready) {
-                        item { ConnectFlow(vm) }
-                    } else {
-                        item { ControlRoom(vm) }
-                    }
-                    item { AiCompanion(vm) }
-                    item { GuidePanel(vm) }
-                    item { AdvancedPanel(vm) }
-                }
-                item { Spacer(Modifier.height(28.dp)) }
+            item { Spacer(Modifier.height(8.dp)) }
+        } else {
+            if (vm.connectionState != BleConnectionState.Ready) {
+                item { ConnectFlow(vm) }
+            } else {
+                item { ControlRoom(vm) }
             }
+            item { AiCompanion(vm) }
+            item { GuidePanel(vm) }
+            item { AdvancedPanel(vm) }
+        }
+        item { Spacer(Modifier.height(28.dp)) }
+    }
+}
+
+@Composable
+private fun CrashNotice(vm: BridgeViewModel) {
+    if (vm.crashNotice.isBlank()) return
+    Panel(title = "已恢复", icon = Icons.Outlined.AutoAwesome) {
+        Text(vm.crashNotice, color = TextMain, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(10.dp))
+        OutlinedButton(onClick = vm::dismissCrashNotice) {
+            Text("知道了")
         }
     }
 }

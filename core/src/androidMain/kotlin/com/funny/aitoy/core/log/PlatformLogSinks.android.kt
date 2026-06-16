@@ -2,7 +2,7 @@ package com.funny.aitoy.core.log
 
 import android.util.Log as AndroidLog
 
-internal actual fun createPlatformLogSinks(): List<LogSink> = listOf(AndroidLogSink)
+internal actual fun createPlatformLogSinks(): List<LogSink> = listOf(AndroidLogSink, RecentLogBuffer)
 
 private object AndroidLogSink : LogSink {
     override fun log(event: LogEvent) {
@@ -15,4 +15,3 @@ private object AndroidLogSink : LogSink {
         }
     }
 }
-

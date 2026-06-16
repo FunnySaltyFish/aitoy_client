@@ -3,13 +3,28 @@ package com.funny.aitoy.network.api
 import com.funny.aitoy.network.ServiceCreator
 import com.funny.aitoy.network.api.service.AsrService
 import com.funny.aitoy.network.api.service.AuthService
+import com.funny.aitoy.network.api.service.AppService
+import com.funny.aitoy.network.api.service.DiagnosticsService
 import com.funny.aitoy.network.api.service.EntitlementService
 import com.funny.aitoy.network.api.service.PayService
+import com.funny.aitoy.network.api.service.ProtocolShareService
 import com.funny.aitoy.network.api.service.SyncService
 import com.funny.aitoy.network.api.service.UploadService
 import com.funny.aitoy.network.api.service.UserService
 
 object AiToyServices {
+    val appService: AppService by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        ServiceCreator.create(AppService::class.java)
+    }
+
+    val protocolShareService: ProtocolShareService by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        ServiceCreator.create(ProtocolShareService::class.java)
+    }
+
+    val diagnosticsService: DiagnosticsService by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        ServiceCreator.create(DiagnosticsService::class.java)
+    }
+
     val authService: AuthService by lazy(LazyThreadSafetyMode.PUBLICATION) {
         ServiceCreator.create(AuthService::class.java)
     }

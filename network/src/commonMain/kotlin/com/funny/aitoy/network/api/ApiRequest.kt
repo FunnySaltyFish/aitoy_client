@@ -5,9 +5,18 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class ApiResp<T>(
     val code: Int = 0,
-    val message: String = "ok",
+    val msg: String? = null,
     val data: T? = null,
-)
+) {
+    val isSuccess: Boolean get() = code == CODE_SUCCESS
+    val displayErrorMsg: String get() = msg?.takeIf { it.isNotBlank() } ?: "加载失败"
+
+    fun getOrDefault(default: T): T = if (isSuccess) data ?: default else default
+
+    companion object {
+        const val CODE_SUCCESS = 0
+    }
+}
 
 class ApiException(
     val code: Int,
@@ -28,7 +37,7 @@ suspend inline fun <T> apiRequest(crossinline request: suspend () -> ApiResp<T>)
         )
     }
     if (resp.code != 0) {
-        throw ApiException(resp.code, resp.message.ifBlank { "请求失败" })
+        throw ApiException(resp.code, resp.displayErrorMsg)
     }
     return resp.data ?: throw ApiException(9002, "空响应")
 }
@@ -46,7 +55,7 @@ suspend inline fun apiRequestUnit(crossinline request: suspend () -> ApiResp<*>?
         )
     }
     if (resp != null && resp.code != 0) {
-        throw ApiException(resp.code, resp.message.ifBlank { "请求失败" })
+        throw ApiException(resp.code, resp.displayErrorMsg)
     }
 }
 

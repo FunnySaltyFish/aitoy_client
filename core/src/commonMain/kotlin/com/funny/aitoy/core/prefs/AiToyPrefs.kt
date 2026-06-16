@@ -20,7 +20,7 @@ object AiToyPrefs {
     var apiPrefix: String by mutableDataSaverStateOf(
         DataSaverUtils,
         key = "API_PREFIX",
-        initialValue = "aitoy",
+        initialValue = "api",
     )
 
     var authToken: String by mutableDataSaverStateOf(

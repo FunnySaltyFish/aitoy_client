@@ -18,6 +18,18 @@
 ## 依赖
 - 使用 VersionCatalogs，以 作者名-库名 命名。比如 androidx 的库应该是 androidx-xxx，如果它有子库，才是 androidx-xxx-yyy，引用时 `libs.androidx.xxx.yyy`
 
+## AI / 对话 / 工具调用
+
+- 如果需求明确要求使用 OpenAI SDK、Koog 或其他 AI SDK，必须优先使用该 SDK 的模型调用、流式输出、工具定义和参数反序列化能力；不要手写 OpenAI-compatible HTTP、SSE、function call 聚合或 JSON schema 拼接来替代。
+- 引入 AI SDK 前必须验证 Android/KMP 约束，尤其是 minSdk。Koog Android 依赖如果要求高于当前 minSdk，不要用 `tools:overrideLibrary` 强行绕过，应改用满足工程约束的 SDK。
+- 应用内工具只负责把 SDK 已解析出的类型化参数转成业务调用；工具执行结果要使用面向用户的短文案，不暴露协议、JSON、回调、MCP 等实现细节。
+
+## 协程与网络
+
+- 新增网络接口统一使用 Retrofit + Service 接口；接口调用使用 `apiRequest { service.func(...) }` 等统一封装。
+- JSON 序列化统一使用 KotlinX Serialization 和 `JsonX`；不要新增 `org.json.JSONObject` / `JSONArray` 做业务请求或配置序列化。
+- 新增异步逻辑全部使用协程和 `viewModelScope`；不要新增 `Handler`、回调式 OkHttp 请求或手写线程切换。
+
 ## 持久化
 
 项目统一使用 `DataSaverUtils` + `dataSaverState` 体系：
