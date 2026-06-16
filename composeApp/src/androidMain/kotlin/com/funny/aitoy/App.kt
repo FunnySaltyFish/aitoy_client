@@ -75,6 +75,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.funny.aitoy.ble.BleConnectionState
+import com.funny.aitoy.ble.ProtocolAttemptStatus
 import com.funny.aitoy.ble.ScannedBleDevice
 import com.funny.aitoy.chat.ChatScreen
 import com.funny.aitoy.chat.ChatViewModel
@@ -131,7 +132,9 @@ fun App(initialImportLink: String? = null) {
                 }
             },
         ) { padding ->
-            Surface(color = Ink, modifier = Modifier.fillMaxSize().padding(padding)) {
+            Surface(color = Ink, modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)) {
                 if (selectedTab == 0) {
                     DeviceHome(vm)
                 } else {
@@ -144,31 +147,38 @@ fun App(initialImportLink: String? = null) {
 
 @Composable
 private fun DeviceHome(vm: BridgeViewModel) {
-    LazyColumn(
+    Column(
         modifier = Modifier
             .fillMaxSize()
             .semantics { testTagsAsResourceId = true }
             .testTag("aitoy_root")
-            .statusBarsPadding()
-            .padding(horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                item { ProductHero(vm) }
-                item { CrashNotice(vm) }
-                item { UpdateNotice(vm) }
-                if (vm.updateState.forceUpdate) {
-            item { Spacer(Modifier.height(8.dp)) }
-        } else {
-            if (vm.connectionState != BleConnectionState.Ready) {
-                item { ConnectFlow(vm) }
-            } else {
-                item { ControlRoom(vm) }
-            }
-            item { AiCompanion(vm) }
-            item { GuidePanel(vm) }
-            item { AdvancedPanel(vm) }
+            .statusBarsPadding(),
+    ) {
+        Box(Modifier.padding(horizontal = 16.dp)) {
+            DeviceHeader(vm)
         }
-        item { Spacer(Modifier.height(28.dp)) }
+        LazyColumn(
+            modifier = Modifier
+                .weight(1f)
+                .padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            item { CrashNotice(vm) }
+            item { UpdateNotice(vm) }
+            if (vm.updateState.forceUpdate) {
+                item { Spacer(Modifier.height(8.dp)) }
+            } else {
+                if (vm.connectionState != BleConnectionState.Ready) {
+                    item { ConnectFlow(vm) }
+                } else {
+                    item { ControlRoom(vm) }
+                }
+                item { AiCompanion(vm) }
+                item { GuidePanel(vm) }
+                item { AdvancedPanel(vm) }
+            }
+            item { Spacer(Modifier.height(24.dp)) }
+        }
     }
 }
 
@@ -251,20 +261,19 @@ private fun formatBytes(bytes: Long): String {
 }
 
 @Composable
-private fun ProductHero(vm: BridgeViewModel) {
+private fun DeviceHeader(vm: BridgeViewModel) {
     val ready = vm.connectionState == BleConnectionState.Ready
     Column(
         modifier = Modifier
-            .padding(top = 18.dp)
             .fillMaxWidth()
             .background(
                 Brush.verticalGradient(
-                    listOf(Color(0xFF352331), Color(0xFF1B131C)),
+                    listOf(Color(0xFF2D1E29), Color(0xFF1A131A)),
                 ),
-                RoundedCornerShape(28.dp),
+                RoundedCornerShape(20.dp),
             )
-            .border(1.dp, Color(0xFF5E4053), RoundedCornerShape(28.dp))
-            .padding(22.dp),
+            .border(1.dp, Color(0xFF543949), RoundedCornerShape(20.dp))
+            .padding(horizontal = 16.dp, vertical = 12.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(
@@ -273,32 +282,57 @@ private fun ProductHero(vm: BridgeViewModel) {
                 tint = if (ready) Mint else Rose,
                 modifier = Modifier
                     .background(Color(0x332A0F1A), CircleShape)
-                    .padding(10.dp),
+                    .padding(8.dp),
             )
-            Spacer(Modifier.width(12.dp))
+            Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Text(
                     "AI Toy",
-                    style = MaterialTheme.typography.headlineLarge,
-                    fontWeight = FontWeight.Black
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Black,
                 )
-                Text("把小玩具交给你的 AI 伙伴", color = TextSoft)
+                Text(
+                    "把小玩具交给你的 AI 伙伴",
+                    color = TextSoft,
+                    style = MaterialTheme.typography.bodySmall
+                )
             }
             StatusPill(vm.connectionState)
         }
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(10.dp))
         Text(
             text = if (ready) {
-                "${vm.selectedName.ifBlank { "设备" }} 已准备好。先轻轻试一下，任何时候都可以立即停止。"
+                "${vm.selectedName.ifBlank { "设备" }} 已准备好。"
             } else {
-                "先连接设备。识别成功后，下一次打开就能更快回到熟悉的状态。"
+                "先连接设备，下面会显示当前尝试到哪一步。"
             },
             color = TextMain,
-            style = MaterialTheme.typography.titleMedium,
+            style = MaterialTheme.typography.bodyMedium,
         )
         if (vm.busyHint.isNotBlank()) {
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(5.dp))
             Text(vm.busyHint, color = Honey)
+        }
+        if (vm.protocolAttemptStatus.title.isNotBlank()) {
+            Spacer(Modifier.height(8.dp))
+            ProtocolAttemptInline(vm.protocolAttemptStatus)
+        }
+        Spacer(Modifier.height(10.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Button(
+                modifier = Modifier.testTag("scan_toggle"),
+                onClick = vm::toggleScan,
+                colors = ButtonDefaults.buttonColors(containerColor = Rose, contentColor = Ink),
+            ) {
+                Icon(Icons.Outlined.BluetoothSearching, null)
+                Spacer(Modifier.width(8.dp))
+                Text(if (vm.scanning) "停止寻找" else "寻找设备")
+            }
+            if (vm.connectionState != BleConnectionState.Idle) {
+                OutlinedButton(onClick = vm::disconnect) {
+                    Text("断开")
+                }
+            }
         }
     }
 }
@@ -330,29 +364,99 @@ private fun ConnectFlow(vm: BridgeViewModel) {
             title = "优先自动识别",
             text = "能识别的设备会直接进入控制页；识别不了，再进入高级工具。",
         )
-        Spacer(Modifier.height(12.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Button(
-                modifier = Modifier.testTag("scan_toggle"),
-                onClick = vm::toggleScan,
-                colors = ButtonDefaults.buttonColors(containerColor = Rose, contentColor = Ink),
-            ) {
-                Icon(Icons.Outlined.BluetoothSearching, null)
-                Spacer(Modifier.width(8.dp))
-                Text(if (vm.scanning) "停止寻找" else "寻找设备")
-            }
-            if (vm.connectionState != BleConnectionState.Idle) {
-                OutlinedButton(onClick = vm::disconnect) {
-                    Text("断开")
-                }
-            }
-        }
+        Spacer(Modifier.height(8.dp))
         vm.errorMessage?.let {
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(8.dp))
             Text(it, color = Danger)
         }
         RecentDevices(vm)
         DeviceList(vm.devices, vm.selectedAddress, vm::connect)
+    }
+}
+
+@Composable
+private fun ProtocolAttemptInline(status: ProtocolAttemptStatus) {
+    val accent = when {
+        status.success -> Mint
+        status.active -> Honey
+        else -> Danger
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(Color(0xFF221922))
+            .border(1.dp, Color(0x3341323D), RoundedCornerShape(14.dp))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+    ) {
+        Text(status.title, color = accent, fontWeight = FontWeight.SemiBold)
+        if (status.message.isNotBlank()) {
+            Spacer(Modifier.height(3.dp))
+            Text(
+                status.message,
+                color = TextSoft,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (status.active && status.total > 1) {
+            Spacer(Modifier.height(8.dp))
+            LinearProgressIndicator(
+                progress = { status.currentIndex.toFloat() / status.total.toFloat() },
+                modifier = Modifier.fillMaxWidth(),
+                color = Honey,
+                trackColor = Color(0x33FFFFFF),
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProtocolAttemptCard(status: ProtocolAttemptStatus) {
+    if (status.title.isBlank() && status.message.isBlank() && status.failedNames.isEmpty()) return
+    val accent = when {
+        status.success -> Mint
+        status.active -> Honey
+        else -> Danger
+    }
+    Spacer(Modifier.height(12.dp))
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color(0xFF241B24))
+            .border(1.dp, Color(0x3341323D), RoundedCornerShape(16.dp))
+            .padding(14.dp),
+    ) {
+        Text(
+            text = status.title,
+            color = accent,
+            fontWeight = FontWeight.Bold,
+        )
+        if (status.message.isNotBlank()) {
+            Spacer(Modifier.height(5.dp))
+            Text(status.message, color = TextSoft, style = MaterialTheme.typography.bodySmall)
+        }
+        if (status.active && status.total > 1) {
+            Spacer(Modifier.height(10.dp))
+            LinearProgressIndicator(
+                progress = { status.currentIndex.toFloat() / status.total.toFloat() },
+                modifier = Modifier.fillMaxWidth(),
+                color = Honey,
+                trackColor = Color(0x33FFFFFF),
+            )
+        }
+        if (status.failedNames.isNotEmpty()) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = "未通过：" + status.failedNames.joinToString("、"),
+                color = TextSoft,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 
@@ -452,6 +556,10 @@ private fun DeviceRow(
 @Composable
 private fun ControlRoom(vm: BridgeViewModel) {
     Panel(title = "轻柔控制", icon = Icons.Outlined.AutoAwesome) {
+        ProtocolAttemptCard(vm.protocolAttemptStatus)
+        if (vm.protocolAttemptStatus.title.isNotBlank()) {
+            Spacer(Modifier.height(14.dp))
+        }
         Text(
             text = "已识别：${vm.protocolStatus.displayName}",
             color = if (vm.protocolStatus.controllable) Mint else TextSoft,

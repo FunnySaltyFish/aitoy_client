@@ -24,6 +24,7 @@ class AndroidBleController(
     private val onDevice: (ScannedBleDevice) -> Unit,
     private val onState: (BleConnectionState) -> Unit,
     private val onProtocol: (BleProtocolStatus) -> Unit,
+    private val onProtocolAttempt: (ProtocolAttemptStatus) -> Unit,
     private val onLog: (String) -> Unit,
 ) {
     private val context: Context = AndroidPlatformInit.appContext
@@ -36,6 +37,8 @@ class AndroidBleController(
     private var protocolReady = false
     private var protocolCandidates = emptyList<BleDeviceProtocol>()
     private var protocolCandidateIndex = -1
+    private val failedProtocolNames = mutableListOf<String>()
+    private var disconnectingAfterProtocolFailure = false
     private var resolvedWriteCharacteristic: BluetoothGattCharacteristic? = null
     private val operationQueue = ArrayDeque<BleProtocolOperation>()
     private var operationInProgress = false
@@ -97,7 +100,15 @@ class AndroidBleController(
                 BluetoothProfile.STATE_DISCONNECTED -> {
                     trace("设备已断开 status=$status")
                     closeGatt(gatt)
-                    updateState(if (status == BluetoothGatt.GATT_SUCCESS) BleConnectionState.Idle else BleConnectionState.Error)
+                    val finalState = if (disconnectingAfterProtocolFailure) {
+                        BleConnectionState.Error
+                    } else if (status == BluetoothGatt.GATT_SUCCESS) {
+                        BleConnectionState.Idle
+                    } else {
+                        BleConnectionState.Error
+                    }
+                    disconnectingAfterProtocolFailure = false
+                    updateState(finalState)
                 }
             }
         }
@@ -127,6 +138,7 @@ class AndroidBleController(
             )
             protocolCandidates = BleProtocolRegistry.resolveAll(fingerprint)
             protocolCandidateIndex = -1
+            failedProtocolNames.clear()
             if (protocolCandidates.isNotEmpty()) {
                 trace("找到 ${protocolCandidates.size} 个候选协议，开始依次确认")
                 tryNextProtocol(fingerprint, gatt, config)
@@ -213,10 +225,13 @@ class AndroidBleController(
         protocolReady = false
         protocolCandidates = emptyList()
         protocolCandidateIndex = -1
+        failedProtocolNames.clear()
+        disconnectingAfterProtocolFailure = false
         resolvedWriteCharacteristic = null
         operationQueue.clear()
         operationInProgress = false
         onProtocol(BleProtocolStatus())
+        updateProtocolAttempt(ProtocolAttemptStatus())
         operationId++
         trace(
             "连接请求 op=$operationId name=${device.name} address=${device.address} service=${protocolTemplate.serviceUuid} " +
@@ -346,7 +361,8 @@ class AndroidBleController(
         protocolCandidateIndex += 1
         val protocol = protocolCandidates.getOrNull(protocolCandidateIndex)
         if (protocol == null) {
-            finishWithManualOrUnsupported(gatt, config)
+            val allFailed = failedProtocolNames.isNotEmpty() && !config.manualControlEnabled
+            finishWithManualOrUnsupported(gatt, config, allCandidatesFailed = allFailed)
             return
         }
         activeProtocol = protocol
@@ -354,15 +370,63 @@ class AndroidBleController(
         operationQueue.clear()
         operationInProgress = false
         trace("确认协议 ${protocolCandidateIndex + 1}/${protocolCandidates.size}：${protocol.status.displayName}")
+        updateProtocolAttempt(
+            ProtocolAttemptStatus(
+                active = true,
+                title = "正在尝试 ${protocol.status.displayName}",
+                message = "正在确认第 ${protocolCandidateIndex + 1} 个协议，共 ${protocolCandidates.size} 个",
+                protocolName = protocol.status.displayName,
+                currentIndex = protocolCandidateIndex + 1,
+                total = protocolCandidates.size,
+                failedNames = failedProtocolNames.toList(),
+            ),
+        )
         onProtocol(protocol.status)
         enqueue(protocol.initialize(fingerprint))
         if (operationQueue.isEmpty()) {
             protocolReady = true
+            updateProtocolAttempt(
+                ProtocolAttemptStatus(
+                    success = true,
+                    title = "${protocol.status.displayName} 连接成功",
+                    message = "已完成协议确认，可以开始测试",
+                    protocolName = protocol.status.displayName,
+                    currentIndex = protocolCandidateIndex + 1,
+                    total = protocolCandidates.size,
+                    failedNames = failedProtocolNames.toList(),
+                ),
+            )
             updateState(BleConnectionState.Ready)
         }
     }
 
-    private fun finishWithManualOrUnsupported(gatt: BluetoothGatt, config: ProtocolTemplate) {
+    private fun finishWithManualOrUnsupported(
+        gatt: BluetoothGatt,
+        config: ProtocolTemplate,
+        allCandidatesFailed: Boolean = false,
+    ) {
+        if (allCandidatesFailed) {
+            val names = failedProtocolNames.joinToString("、").ifBlank { "已知协议" }
+            val message = "这些协议都没有连上：$names"
+            updateProtocolAttempt(
+                ProtocolAttemptStatus(
+                    title = "自动识别失败",
+                    message = "已断开连接，可以换一个设备或打开高级工具导入指令",
+                    currentIndex = protocolCandidates.size,
+                    total = protocolCandidates.size,
+                    failedNames = failedProtocolNames.toList(),
+                ),
+            )
+            trace(message, error = true)
+            activeProtocol = null
+            protocolReady = false
+            operationQueue.clear()
+            operationInProgress = false
+            disconnectingAfterProtocolFailure = true
+            updateState(BleConnectionState.Error)
+            gatt.disconnect()
+            return
+        }
         val configuredService = gatt.getService(config.serviceUuid.toUuidOrNull())
         val configuredWrite = configuredService?.getCharacteristic(config.writeUuid.toUuidOrNull())
         trace("协议匹配 service=${configuredService != null} write=${configuredWrite != null}")
@@ -382,6 +446,17 @@ class AndroidBleController(
         if (resolvedWriteCharacteristic == null) {
             updateState(BleConnectionState.Error)
             trace("设备没有可写特征", error = true)
+            updateProtocolAttempt(
+                ProtocolAttemptStatus(
+                    title = "连接失败",
+                    message = "没有找到可用的写入通道，已停止本次连接",
+                    currentIndex = protocolCandidates.size.coerceAtLeast(0),
+                    total = protocolCandidates.size,
+                    failedNames = failedProtocolNames.toList(),
+                ),
+            )
+            disconnectingAfterProtocolFailure = true
+            gatt.disconnect()
             return
         }
         subscribeNotify(gatt, config)
@@ -389,19 +464,34 @@ class AndroidBleController(
             activeProtocol = ManualBleProtocol(resolvedWriteCharacteristic!!.uuid, config)
             protocolReady = true
             onProtocol(activeProtocol!!.status)
+            updateProtocolAttempt(
+                ProtocolAttemptStatus(
+                    success = true,
+                    title = "已使用高级模板连接",
+                    message = "可以先轻柔测试，再根据反馈调整指令",
+                    protocolName = activeProtocol!!.status.displayName,
+                    failedNames = failedProtocolNames.toList(),
+                ),
+            )
             trace("未找到可用内置协议，已启用用户确认的高级手动模板")
         } else {
             activeProtocol = null
             protocolReady = false
             onProtocol(
-                BleProtocolStatus(
-                    id = "manual",
-                    displayName = "尚未适配",
-                    controllable = false,
-                    automatic = false,
+                BleProtocolStatus(),
+            )
+            updateProtocolAttempt(
+                ProtocolAttemptStatus(
+                    title = "暂不支持这个设备",
+                    message = "已断开连接。可以打开高级工具导入同款设备指令后再试",
+                    failedNames = failedProtocolNames.toList(),
                 ),
             )
             trace("未找到可用内置协议；可导入同款设备指令或按教程补充适配信息")
+            disconnectingAfterProtocolFailure = true
+            updateState(BleConnectionState.Error)
+            gatt.disconnect()
+            return
         }
         updateState(BleConnectionState.Ready)
     }
@@ -421,8 +511,21 @@ class AndroidBleController(
         if (operationInProgress) return
         val operation = if (operationQueue.isEmpty()) null else operationQueue.removeFirst()
         if (operation == null) {
-            if (connectionStateNeedsReady()) {
+            if (!protocolReady && connectionStateNeedsReady()) {
                 protocolReady = true
+                activeProtocol?.status?.let { status ->
+                    updateProtocolAttempt(
+                        ProtocolAttemptStatus(
+                            success = true,
+                            title = "${status.displayName} 连接成功",
+                            message = "已完成协议确认，可以开始测试",
+                            protocolName = status.displayName,
+                            currentIndex = protocolCandidateIndex + 1,
+                            total = protocolCandidates.size,
+                            failedNames = failedProtocolNames.toList(),
+                        ),
+                    )
+                }
                 updateState(BleConnectionState.Ready)
             }
             return
@@ -467,6 +570,22 @@ class AndroidBleController(
     private fun handleProtocolOperationFailed(reason: String) {
         operationQueue.clear()
         if (!protocolReady && protocolCandidates.isNotEmpty()) {
+            activeProtocol?.status?.displayName
+                ?.takeIf { it.isNotBlank() && it !in failedProtocolNames }
+                ?.let(failedProtocolNames::add)
+            activeProtocol?.status?.displayName?.let { name ->
+                updateProtocolAttempt(
+                    ProtocolAttemptStatus(
+                        active = true,
+                        title = "$name 尝试失败",
+                        message = "正在切换下一个可用协议",
+                        protocolName = name,
+                        currentIndex = protocolCandidateIndex + 1,
+                        total = protocolCandidates.size,
+                        failedNames = failedProtocolNames.toList(),
+                    ),
+                )
+            }
             val currentGatt = gatt
             val currentTemplate = template
             if (currentGatt != null && currentTemplate != null) {
@@ -496,6 +615,10 @@ class AndroidBleController(
 
     private fun updateState(state: BleConnectionState) {
         mainHandler.post { onState(state) }
+    }
+
+    private fun updateProtocolAttempt(status: ProtocolAttemptStatus) {
+        mainHandler.post { onProtocolAttempt(status) }
     }
 
     private fun trace(message: String, error: Boolean = false) {

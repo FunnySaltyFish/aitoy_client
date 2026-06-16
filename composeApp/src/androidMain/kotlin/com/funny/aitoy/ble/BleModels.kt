@@ -40,6 +40,17 @@ data class BleProtocolStatus(
     val automatic: Boolean = false,
 )
 
+data class ProtocolAttemptStatus(
+    val active: Boolean = false,
+    val success: Boolean = false,
+    val title: String = "",
+    val message: String = "",
+    val protocolName: String = "",
+    val currentIndex: Int = 0,
+    val total: Int = 0,
+    val failedNames: List<String> = emptyList(),
+)
+
 fun parseHexTemplate(template: String, mode: Int, intensity: Int): ByteArray {
     val resolved = template
         .replace("{mode}", mode.toString(16).padStart(2, '0'), ignoreCase = true)

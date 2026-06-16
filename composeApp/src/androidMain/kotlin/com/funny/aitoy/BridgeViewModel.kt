@@ -12,14 +12,15 @@ import androidx.lifecycle.viewModelScope
 import com.funny.aitoy.ble.AndroidBleController
 import com.funny.aitoy.ble.BleConnectionState
 import com.funny.aitoy.ble.BleProtocolStatus
+import com.funny.aitoy.ble.ProtocolAttemptStatus
 import com.funny.aitoy.ble.ProtocolTemplate
 import com.funny.aitoy.ble.ScannedBleDevice
 import com.funny.aitoy.chat.ToyTool
 import com.funny.aitoy.chat.ToyToolResult
-import com.funny.aitoy.core.prefs.AiToyPrefs
-import com.funny.aitoy.core.prefs.DataSaverUtils
 import com.funny.aitoy.core.kmp.appCtx
 import com.funny.aitoy.core.kmp.openUrl
+import com.funny.aitoy.core.prefs.AiToyPrefs
+import com.funny.aitoy.core.prefs.DataSaverUtils
 import com.funny.aitoy.diagnostics.AiToyCrashReporter
 import com.funny.aitoy.network.OkHttpUtils
 import com.funny.aitoy.network.api.AiToyServices
@@ -90,6 +91,8 @@ class BridgeViewModel : ViewModel() {
     var relayState by mutableStateOf("未连接")
         private set
     var protocolStatus by mutableStateOf(BleProtocolStatus())
+        private set
+    var protocolAttemptStatus by mutableStateOf(ProtocolAttemptStatus())
         private set
     var showAdvanced by mutableStateOf(false)
     var showGuide by mutableStateOf(false)
@@ -265,6 +268,7 @@ class BridgeViewModel : ViewModel() {
             }
         },
         onProtocol = { protocolStatus = it },
+        onProtocolAttempt = { protocolAttemptStatus = it },
         onLog = ::appendLog,
     )
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -309,6 +313,7 @@ class BridgeViewModel : ViewModel() {
     fun connect(device: ScannedBleDevice) = runAction {
         selectedAddress = device.address
         selectedName = device.name
+        protocolAttemptStatus = ProtocolAttemptStatus()
         scanning = false
         busyHint = "正在为你连接 ${device.name}"
         controller.connect(device, currentTemplate())
@@ -327,6 +332,7 @@ class BridgeViewModel : ViewModel() {
 
     fun disconnect() {
         busyHint = ""
+        protocolAttemptStatus = ProtocolAttemptStatus()
         controller.disconnect()
     }
 
