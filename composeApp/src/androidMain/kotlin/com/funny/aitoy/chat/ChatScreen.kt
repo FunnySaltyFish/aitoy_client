@@ -1,6 +1,7 @@
 package com.funny.aitoy.chat
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -19,6 +20,8 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.KeyboardArrowDown
+import androidx.compose.material.icons.outlined.KeyboardArrowUp
 import androidx.compose.material.icons.outlined.Send
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.StopCircle
@@ -29,9 +32,12 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -60,8 +66,8 @@ fun ChatScreen(
     bridgeVm: BridgeViewModel,
 ) {
     val listState = rememberLazyListState()
-    LaunchedEffect(vm.messages.size, vm.messages.lastOrNull()?.content) {
-        if (vm.messages.isNotEmpty()) listState.animateScrollToItem(vm.messages.lastIndex)
+    LaunchedEffect(vm.messages.size) {
+        if (vm.messages.isNotEmpty()) listState.scrollToItem(vm.messages.lastIndex)
     }
     Column(
         modifier = Modifier
@@ -182,25 +188,61 @@ private fun ChatSettings(vm: ChatViewModel) {
 
 @Composable
 private fun ToolList(bridgeVm: BridgeViewModel) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(bottom = 10.dp)
+            .animateContentSize()
             .background(Color(0xFF211A22), RoundedCornerShape(18.dp))
             .border(1.dp, Line, RoundedCornerShape(18.dp))
             .padding(14.dp),
     ) {
-        Text("可用工具", color = Honey, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(8.dp))
-        bridgeVm.builtInTools.forEach { tool ->
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(tool.title, color = TextMain, modifier = Modifier.width(92.dp), fontWeight = FontWeight.SemiBold)
-                Text(tool.description, color = TextSoft, style = MaterialTheme.typography.bodySmall)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("可用工具", color = Honey, fontWeight = FontWeight.Bold)
+                if (!expanded) {
+                    Text(
+                        "${bridgeVm.builtInTools.size} 个工具",
+                        color = TextSoft,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+            IconButton(onClick = { expanded = !expanded }) {
+                Icon(
+                    imageVector = if (expanded) Icons.Outlined.KeyboardArrowUp else Icons.Outlined.KeyboardArrowDown,
+                    contentDescription = if (expanded) "收起工具" else "展开工具",
+                    tint = Rose,
+                )
+            }
+        }
+        AnimatedVisibility(expanded) {
+            Column {
+                Spacer(Modifier.height(8.dp))
+                bridgeVm.builtInTools.forEach { tool ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            tool.title,
+                            color = TextMain,
+                            modifier = Modifier.width(92.dp),
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            tool.description,
+                            color = TextSoft,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
             }
         }
     }
@@ -222,7 +264,11 @@ private fun MessageBubble(message: ChatMessage) {
             modifier = Modifier
                 .fillMaxWidth(if (isUser) 0.86f else 0.94f)
                 .background(background, RoundedCornerShape(18.dp))
-                .border(1.dp, if (message.role == ChatRole.Tool) Color(0xFF356852) else Line, RoundedCornerShape(18.dp))
+                .border(
+                    1.dp,
+                    if (message.role == ChatRole.Tool) Color(0xFF356852) else Line,
+                    RoundedCornerShape(18.dp)
+                )
                 .padding(14.dp),
         ) {
             Text(

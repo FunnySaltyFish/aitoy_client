@@ -1,5 +1,6 @@
 package com.funny.aitoy.chat
 
+import android.os.SystemClock
 import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -17,15 +18,14 @@ import com.openai.client.okhttp.OpenAIOkHttpClient
 import com.openai.core.JsonValue
 import com.openai.models.chat.completions.ChatCompletionAssistantMessageParam
 import com.openai.models.chat.completions.ChatCompletionCreateParams
-import com.openai.models.chat.completions.ChatCompletionMessageParam
 import com.openai.models.chat.completions.ChatCompletionMessageFunctionToolCall
+import com.openai.models.chat.completions.ChatCompletionMessageParam
 import com.openai.models.chat.completions.ChatCompletionSystemMessageParam
 import com.openai.models.chat.completions.ChatCompletionToolMessageParam
 import com.openai.models.chat.completions.ChatCompletionUserMessageParam
-import com.openai.models.chat.completions.ChatCompletionChunk
-import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -91,10 +91,9 @@ class ChatViewModel(
         runningJob = viewModelScope.launch {
             streaming = true
             runCatching {
-                val answer = withContext(Dispatchers.IO) {
+                withContext(Dispatchers.IO) {
                     runChatLoop(assistantId)
                 }
-                replaceAssistantText(assistantId, answer)
                 statusText = ""
             }.onFailure { e ->
                 Log.e(TAG, "Chat request failed: ${e::class.simpleName} — ${e.message}", e)
@@ -127,20 +126,27 @@ class ChatViewModel(
         statusText = ""
     }
 
-    private suspend fun runChatLoop(assistantId: String): String {
+    private suspend fun runChatLoop(firstAssistantId: String) {
         val client = OpenAIOkHttpClient.builder()
             .apiKey(apiKey.trim())
             .baseUrl(normalizeBaseUrl())
             .build()
         activeClient = client
         val paramsBuilder = baseParamsBuilder()
-        val output = StringBuilder()
+        var assistantId = firstAssistantId
         repeat(MAX_TOOL_ROUNDS) { round ->
+            if (round > 0) {
+                assistantId = nextId()
+                withContext(Dispatchers.Main) {
+                    messages += ChatMessage(assistantId, ChatRole.Assistant, "")
+                }
+            }
             withContext(Dispatchers.Main) { statusText = if (round == 0) "正在思考..." else "正在整理结果..." }
+            val output = StringBuilder()
             val result = streamOnce(client, paramsBuilder, assistantId, output)
             if (result.toolCalls.isEmpty()) {
                 history += assistantMessage(output.toString())
-                return output.toString()
+                return
             }
             Log.d(TAG, "round=$round toolCalls=${result.toolCalls.map { "${it.name}(${it.arguments})" }}")
             // Build assistant history entry with tool calls so the model has context.
@@ -197,7 +203,10 @@ class ChatViewModel(
             }
             currentCoroutineContext().ensureActive()
         }
-        return output.toString().ifBlank { "已完成。" }
+        withContext(Dispatchers.Main) {
+            messages += ChatMessage(nextId(), ChatRole.Assistant, "工具已完成。")
+        }
+        history += assistantMessage("工具已完成。")
     }
 
     /** Manually accumulates tool-call deltas from chunks, bypassing ChatCompletionAccumulator
@@ -213,6 +222,8 @@ class ChatViewModel(
         val coroutineContext = currentCoroutineContext()
         var chunkIndex = 0
         var finishReason: String? = null
+        var lastRenderedText = ""
+        var lastRenderMs = 0L
         Log.d(TAG, "streamOnce: start streaming")
         client.chat().completions().createStreaming(paramsBuilder.build()).use { streamResponse ->
             val iter = streamResponse.stream().iterator()
@@ -240,12 +251,26 @@ class ChatViewModel(
                     }
                 }
                 // Update UI on main thread after each chunk.
-                if (output.isNotEmpty()) {
+                val nextText = output.toString()
+                val nowMs = SystemClock.elapsedRealtime()
+                if (
+                    nextText.isNotEmpty() &&
+                    nextText != lastRenderedText &&
+                    nowMs - lastRenderMs >= STREAM_RENDER_INTERVAL_MS
+                ) {
+                    lastRenderedText = nextText
+                    lastRenderMs = nowMs
                     withContext(Dispatchers.Main) {
-                        replaceAssistantText(assistantId, output.toString())
+                        replaceAssistantText(assistantId, nextText)
                     }
                 }
                 chunkIndex++
+            }
+        }
+        val finalText = output.toString()
+        if (finalText.isNotEmpty() && finalText != lastRenderedText) {
+            withContext(Dispatchers.Main) {
+                replaceAssistantText(assistantId, finalText)
             }
         }
         val toolCalls = toolBuilders.entries
@@ -394,6 +419,7 @@ class ChatViewModel(
     companion object {
         private const val TAG = "ChatViewModel"
         private const val MAX_TOOL_ROUNDS = 4
+        private const val STREAM_RENDER_INTERVAL_MS = 80L
         private val KNOWN_EXTRA_KEYS = setOf(
             "maxTokens",
             "max_tokens",
