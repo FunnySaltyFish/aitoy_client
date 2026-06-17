@@ -14,6 +14,7 @@ internal sealed interface BleProtocolOperation {
 
 internal data class BleGattFingerprint(
     val name: String,
+    val serviceUuids: Set<UUID>,
     val characteristicUuids: Set<UUID>,
 )
 
@@ -39,6 +40,8 @@ internal interface BleDeviceProtocol {
 internal object BleProtocolRegistry {
     private val protocols = listOf(
         AnkniProtocol,
+        AnkniYwtdProtocol,
+        KissToyProtocol,
         LovenseProtocol,
         SatisfyerProtocol,
         OhMiBodEsca2Protocol,
@@ -52,6 +55,123 @@ internal object BleProtocolRegistry {
 
     fun resolveAll(fingerprint: BleGattFingerprint): List<BleDeviceProtocol> =
         protocols.filter { it.matches(fingerprint) }
+}
+
+private object KissToyProtocol : BleDeviceProtocol {
+    private val serviceUuid = uuid("00001000-0000-1000-8000-00805f9b34fb")
+    private val writeUuid = uuid("00001001-0000-1000-8000-00805f9b34fb")
+    private val notifyUuid = uuid("00001002-0000-1000-8000-00805f9b34fb")
+    private val knownNames = setOf(
+        "JY11",
+        "SYQ1",
+        "PJ01",
+        "KX01",
+        "KX02",
+        "PLY1",
+        "QCKH",
+        "PLMX",
+        "QCPJ",
+        "QCPW",
+        "QCSW",
+        "QCVW",
+        "QCTT",
+        "HMML",
+        "Dual-SPP",
+    )
+
+    override val status = BleProtocolStatus(
+        id = "kisstoy_gatt",
+        displayName = "KissToy",
+        controllable = true,
+        intensityMax = 100,
+        supportsMode = true,
+        modeMax = 4,
+        automatic = true,
+    )
+
+    override fun matches(fingerprint: BleGattFingerprint): Boolean {
+        val hasKissToyGatt = fingerprint.serviceUuids.contains(serviceUuid) &&
+                fingerprint.characteristicUuids.contains(writeUuid)
+        if (!hasKissToyGatt) return false
+        val knownName = knownNames.any { it.equals(fingerprint.name, ignoreCase = true) }
+        val hasNotify = fingerprint.characteristicUuids.contains(notifyUuid)
+        return knownName || hasNotify
+    }
+
+    override fun setCommand(mode: Int, intensity: Int): BleProtocolOperation.Write =
+        command(commandForMode(mode.coerceIn(1, status.modeMax), intensity.coerceIn(0, 100)))
+
+    override fun setCommands(mode: Int, intensity: Int): List<BleProtocolOperation> =
+        listOf(setCommand(mode, intensity))
+
+    override fun stopCommand(): BleProtocolOperation.Write = command(kissToyPayload(0x40, 0, 0))
+
+    override fun stopCommands(): List<BleProtocolOperation> =
+        listOf(
+            command(kissToyPayload(0x40, 0, 0)),
+            command(kissToyPayload(0x31, 0)),
+            command(kissToyPayload(0x32, 0)),
+            command(kissToyPayload(0x71, 0)),
+        )
+
+    private fun command(payload: ByteArray) = BleProtocolOperation.Write(
+        characteristicUuid = writeUuid,
+        bytes = kissToyEncrypt(payload),
+        withResponse = true,
+    )
+
+    private fun commandForMode(mode: Int, intensity: Int): ByteArray =
+        when (mode) {
+            1 -> kissToyPayload(0x31, intensity)
+            2 -> kissToyPayload(0x32, intensity)
+            3 -> kissToyPayload(0x71, intensity)
+            else -> kissToyPayload(0x40, intensity, intensity)
+        }
+
+    private fun kissToyPayload(command: Int, first: Int, second: Int = 0): ByteArray =
+        byteArrayOf(
+            0x5A,
+            0x00,
+            0x00,
+            0x01,
+            command.toByte(),
+            if (command == 0x40) 0x03 else first.toByte(),
+            if (command == 0x40) first.toByte() else second.toByte(),
+            if (command == 0x40) second.toByte() else 0x00,
+            0x00,
+            0x00,
+        )
+
+    private fun kissToyEncrypt(payload: ByteArray): ByteArray {
+        val plain = ByteArray(12)
+        plain[0] = 0x23
+        payload.copyInto(
+            plain,
+            destinationOffset = 1,
+            startIndex = 0,
+            endIndex = payload.size.coerceAtMost(10)
+        )
+        plain[11] = plain.take(11).sumOf { it.toInt() }.toByte()
+        val encrypted = ByteArray(12)
+        val seed = plain[0]
+        encrypted[0] = seed
+        for (index in 1 until encrypted.size) {
+            val key = kissToyKey(encrypted[index - 1], index)
+            encrypted[index] =
+                (((key.toInt() xor seed.toInt()) xor plain[index].toInt()) + key).toByte()
+        }
+        return encrypted
+    }
+
+    private fun kissToyKey(previous: Byte, index: Int): Byte =
+        keyTab[previous.toInt() and 0x03][index]
+
+    private val keyTab = arrayOf(
+        byteArrayOf(0, 24, -104, -9, -91, 61, 13, 41, 37, 80, 68, 70),
+        byteArrayOf(0, 69, 110, 106, 111, 120, 32, 83, 45, 49, 46, 55),
+        byteArrayOf(0, 101, 120, 32, 84, 111, 121, 115, 10, -114, -99, -93),
+        byteArrayOf(0, -59, -42, -25, -8, 10, 50, 32, 111, 98, 13, 10),
+    )
 }
 
 internal class ManualBleProtocol(
@@ -307,6 +427,7 @@ private object AnkniProtocol : BleDeviceProtocol {
         id = "ankni",
         displayName = "Roselex / DSJM",
         controllable = true,
+        verifiedControl = true,
         intensityMax = 3,
         supportsMode = false,
         automatic = true,
@@ -314,9 +435,7 @@ private object AnkniProtocol : BleDeviceProtocol {
 
     override fun matches(fingerprint: BleGattFingerprint): Boolean {
         val hasWrite = writeCandidates.any(fingerprint.characteristicUuids::contains)
-        return fingerprint.name.equals("DSJM", ignoreCase = true) &&
-            fingerprint.characteristicUuids.contains(deviceInfoUuid) &&
-            hasWrite
+        return fingerprint.characteristicUuids.contains(deviceInfoUuid) && hasWrite
     }
 
     override fun initialize(fingerprint: BleGattFingerprint): List<BleProtocolOperation> {
@@ -378,6 +497,49 @@ private object AnkniProtocol : BleDeviceProtocol {
         }
         return remain
     }
+}
+
+private object AnkniYwtdProtocol : BleDeviceProtocol {
+    private val serviceUuid = uuid("0000dddd-0000-1000-8000-00805f9b34fb")
+    private val writeUuid = uuid("0000ddd1-0000-1000-8000-00805f9b34fb")
+    private val notifyUuid = uuid("0000ddd2-0000-1000-8000-00805f9b34fb")
+
+    override val status = BleProtocolStatus(
+        id = "ankni_ywtd",
+        displayName = "ANKNI YWTD",
+        controllable = true,
+        intensityMax = 100,
+        supportsMode = true,
+        modeMax = 8,
+        automatic = true,
+    )
+
+    override fun matches(fingerprint: BleGattFingerprint): Boolean =
+        fingerprint.serviceUuids.contains(serviceUuid) &&
+                fingerprint.characteristicUuids.contains(writeUuid) &&
+                fingerprint.characteristicUuids.contains(notifyUuid)
+
+    override fun setCommand(mode: Int, intensity: Int): BleProtocolOperation.Write =
+        BleProtocolOperation.Write(
+            characteristicUuid = writeUuid,
+            bytes = byteArrayOf(
+                0x55,
+                0x09,
+                0x00,
+                0x00,
+                mode.coerceIn(1, status.modeMax).toByte(),
+                intensity.coerceIn(0, status.intensityMax).toByte(),
+                0x00,
+            ),
+            withResponse = false,
+        )
+
+    override fun stopCommand(): BleProtocolOperation.Write =
+        BleProtocolOperation.Write(
+            characteristicUuid = writeUuid,
+            bytes = byteArrayOf(0x55, 0xFE.toByte(), 0x09, 0x00, 0x00, 0x00, 0x00),
+            withResponse = false,
+        )
 }
 
 private fun uuid(value: String): UUID = UUID.fromString(value)

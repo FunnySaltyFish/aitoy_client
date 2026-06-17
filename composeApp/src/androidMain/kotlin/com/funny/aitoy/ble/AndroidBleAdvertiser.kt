@@ -27,11 +27,13 @@ internal class AndroidBleAdvertiser(
     private var advertisingSet: AdvertisingSet? = null
 
     fun start(operation: BleAdvertiseOperation) {
-        val uuid = runCatching { ParcelUuid.fromString(operation.serviceUuid) }
-            .getOrElse {
-                onLog("广播指令格式不正确：${operation.serviceUuid}")
-                return
-            }
+        val uuid = operation.serviceUuid.takeIf { it.isNotBlank() }?.let { serviceUuid ->
+            runCatching { ParcelUuid.fromString(serviceUuid) }
+                .getOrElse {
+                    onLog("广播指令格式不正确：$serviceUuid")
+                    return
+                }
+        }
         val currentAdvertiser = advertiser
         if (currentAdvertiser == null) {
             onLog("当前手机不支持 BLE 广播发送")
@@ -39,10 +41,15 @@ internal class AndroidBleAdvertiser(
         }
         stop()
         handler.postDelayed({
-            val data = AdvertiseData.Builder()
-                .addServiceUuid(uuid)
-                .setIncludeDeviceName(false)
-                .build()
+            val dataBuilder = AdvertiseData.Builder().setIncludeDeviceName(false)
+            uuid?.let(dataBuilder::addServiceUuid)
+            operation.manufacturerId?.let { id ->
+                dataBuilder.addManufacturerData(id, operation.manufacturerData)
+            }
+            val data = dataBuilder.build()
+            val summary = uuid?.uuid?.toString()
+                ?: operation.manufacturerId?.let { "manufacturer=0x${it.toString(16)}" }
+                ?: "<empty>"
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 val callback = object : AdvertisingSetCallback() {
                     override fun onAdvertisingSetStarted(
@@ -52,7 +59,7 @@ internal class AndroidBleAdvertiser(
                     ) {
                         this@AndroidBleAdvertiser.advertisingSet = advertisingSet
                         if (status == AdvertisingSetCallback.ADVERTISE_SUCCESS) {
-                            onLog("广播已发送 uuid=${operation.serviceUuid}")
+                            onLog("广播已发送 $summary")
                         } else {
                             onLog("广播发送失败 status=$status")
                         }
@@ -76,7 +83,7 @@ internal class AndroidBleAdvertiser(
             } else {
                 val callback = object : AdvertiseCallback() {
                     override fun onStartSuccess(settingsInEffect: AdvertiseSettings) {
-                        onLog("广播已发送 uuid=${operation.serviceUuid}")
+                        onLog("广播已发送 $summary")
                     }
 
                     override fun onStartFailure(errorCode: Int) {

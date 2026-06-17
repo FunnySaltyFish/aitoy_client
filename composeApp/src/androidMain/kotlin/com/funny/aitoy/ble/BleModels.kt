@@ -8,7 +8,10 @@ data class ScannedBleDevice(
     val serviceUuids: List<String> = emptyList(),
     val manufacturerData: String = "",
     val scanRecordHex: String = "",
-)
+    val broadcastProtocolName: String = "",
+) {
+    val controllable: Boolean get() = connectable || broadcastProtocolName.isNotBlank()
+}
 
 enum class BleConnectionState(val label: String) {
     Idle("未连接"),
@@ -38,6 +41,7 @@ data class BleProtocolStatus(
     val id: String = "",
     val displayName: String = "尚未识别",
     val controllable: Boolean = false,
+    val verifiedControl: Boolean = false,
     val intensityMax: Int = 0,
     val supportsMode: Boolean = false,
     val modeMax: Int = 8,

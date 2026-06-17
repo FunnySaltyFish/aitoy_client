@@ -180,6 +180,7 @@ private fun DeviceHome(vm: BridgeViewModel) {
             }
             item { Spacer(Modifier.height(24.dp)) }
         }
+        DeviceRemarkDialog(vm)
     }
 }
 
@@ -323,7 +324,11 @@ private fun DeviceHeader(vm: BridgeViewModel) {
         Spacer(Modifier.height(10.dp))
         Text(
             text = if (ready) {
-                "${vm.selectedName.ifBlank { "设备" }} 已准备好。"
+                if (vm.protocolStatus.verifiedControl) {
+                    "已连接，可以开始使用。"
+                } else {
+                    "已连接。控制效果还需要试一下。"
+                }
             } else {
                 "先连接设备，下面会显示当前尝试到哪一步。"
             },
@@ -334,7 +339,7 @@ private fun DeviceHeader(vm: BridgeViewModel) {
             Spacer(Modifier.height(5.dp))
             Text(vm.busyHint, color = Honey)
         }
-        if (vm.protocolAttemptStatus.title.isNotBlank()) {
+        if (!ready && vm.protocolAttemptStatus.title.isNotBlank()) {
             Spacer(Modifier.height(8.dp))
             ProtocolAttemptInline(vm.protocolAttemptStatus)
         }
@@ -492,16 +497,24 @@ private fun RecentDevices(vm: BridgeViewModel) {
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(16.dp))
-                .clickable { vm.connectRemembered(toy) }
                 .background(Color(0xFF241B24))
                 .padding(13.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Column(Modifier.weight(1f)) {
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable { vm.connectRemembered(toy) },
+            ) {
                 Text(toy.name, fontWeight = FontWeight.SemiBold)
                 Text(toy.protocolName, color = TextSoft, style = MaterialTheme.typography.bodySmall)
             }
-            Text("快速连接", color = Rose)
+            TextButton(onClick = { vm.editRememberedDevice(toy) }) {
+                Text("备注")
+            }
+            TextButton(onClick = { vm.connectRemembered(toy) }) {
+                Text("连接")
+            }
         }
         Spacer(Modifier.height(8.dp))
     }
@@ -559,16 +572,35 @@ private fun DeviceRow(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            val hint = when {
+                device.broadcastProtocolName.isNotBlank() -> "已识别：${device.broadcastProtocolName}"
+                device.connectable -> "可连接"
+                else -> "未识别广播"
+            }
+            Text(
+                hint,
+                color = TextSoft,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
         Button(
             modifier = Modifier.testTag("device_connect_${device.address.replace(":", "_")}"),
             onClick = onConnect,
+            enabled = device.controllable,
             colors = ButtonDefaults.buttonColors(
                 containerColor = RoseDeep,
                 contentColor = Color.White
             ),
         ) {
-            Text(if (device.connectable) "连接" else "广播测试")
+            Text(
+                when {
+                    device.broadcastProtocolName.isNotBlank() -> "广播测试"
+                    device.connectable -> "连接"
+                    else -> "不可连接"
+                }
+            )
         }
     }
 }
@@ -576,58 +608,69 @@ private fun DeviceRow(
 @Composable
 private fun ControlRoom(vm: BridgeViewModel) {
     Panel(title = "轻柔控制", icon = Icons.Outlined.AutoAwesome) {
-        ProtocolAttemptCard(vm.protocolAttemptStatus)
-        if (vm.protocolAttemptStatus.title.isNotBlank()) {
-            Spacer(Modifier.height(14.dp))
-        }
         Text(
-            text = "已识别：${vm.protocolStatus.displayName}",
-            color = if (vm.protocolStatus.controllable) Mint else TextSoft,
-            fontWeight = FontWeight.Bold,
+            text = when {
+                !vm.protocolStatus.controllable ->
+                    "这个设备还需要补充指令。可以打开高级工具，导入别人分享的指令，或按教程采集数据。"
+
+                !vm.protocolStatus.verifiedControl ->
+                    "已连上设备，但控制效果还没确认。请从低强度开始试一下；如果没反应，可以在高级工具里调整或导入指令。"
+
+                else ->
+                    "从低强度开始测试，确认有反应后再慢慢调整。"
+            },
+            color = if (vm.protocolStatus.controllable) TextSoft else Danger,
+            style = MaterialTheme.typography.bodyMedium,
         )
-        if (!vm.protocolStatus.controllable) {
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "这个设备还需要补充指令。可以打开高级工具，导入别人分享的指令，或按教程采集数据。",
-                color = TextSoft
-            )
-        }
-        Spacer(Modifier.height(18.dp))
+        Spacer(Modifier.height(16.dp))
         if (vm.protocolStatus.supportsMode) {
             Text(vm.currentModeLabel(), color = TextSoft)
             Slider(
                 value = vm.mode.toFloat(),
-                onValueChange = { vm.mode = it.roundToInt() },
+                onValueChange = { vm.updateMode(it.roundToInt()) },
                 modifier = Modifier.testTag("mode_slider"),
                 valueRange = 1f..maxOf(1, vm.protocolStatus.modeMax).toFloat(),
                 steps = (vm.protocolStatus.modeMax - 2).coerceAtLeast(0),
+                enabled = vm.protocolStatus.controllable,
             )
         }
         Text("强度 ${vm.intensity}", color = TextSoft)
         Slider(
             value = vm.intensity.toFloat(),
-            onValueChange = { vm.intensity = it.roundToInt() },
+            onValueChange = { vm.updateIntensity(it.roundToInt()) },
             modifier = Modifier.testTag("intensity_slider"),
             valueRange = 1f..maxOf(1, vm.protocolStatus.intensityMax).toFloat(),
             steps = (vm.protocolStatus.intensityMax - 2).coerceAtLeast(0),
             enabled = vm.protocolStatus.controllable,
         )
+        if (vm.controlTrialStarted && !vm.currentDeviceSaved) {
+            Spacer(Modifier.height(8.dp))
+            Text("刚才的控制是否正常？", color = TextMain, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Button(
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("control_confirm_works"),
+                    onClick = vm::confirmCurrentDeviceWorks,
+                    enabled = vm.protocolStatus.controllable,
+                    colors = ButtonDefaults.buttonColors(containerColor = Mint, contentColor = Ink),
+                ) {
+                    Text("正常")
+                }
+                OutlinedButton(
+                    modifier = Modifier.weight(1f),
+                    onClick = vm::reportCurrentDeviceNotWorking,
+                ) {
+                    Text("没反应")
+                }
+            }
+        }
+        Spacer(Modifier.height(10.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Button(
                 modifier = Modifier
-                    .weight(1f)
-                    .testTag("control_test"),
-                onClick = vm::sendTest,
-                enabled = vm.protocolStatus.controllable,
-                colors = ButtonDefaults.buttonColors(containerColor = Rose, contentColor = Ink),
-            ) {
-                Icon(Icons.Outlined.Favorite, null)
-                Spacer(Modifier.width(8.dp))
-                Text("轻轻试一下")
-            }
-            Button(
-                modifier = Modifier
-                    .weight(1f)
+                    .fillMaxWidth()
                     .testTag("control_stop"),
                 onClick = vm::stopDevice,
                 enabled = vm.protocolStatus.controllable,
@@ -641,18 +684,39 @@ private fun ControlRoom(vm: BridgeViewModel) {
                 Text("立即停止")
             }
         }
-        Spacer(Modifier.height(10.dp))
-        OutlinedButton(onClick = vm::disconnect, modifier = Modifier.fillMaxWidth()) {
-            Text("暂时断开")
-        }
-        TextButton(
-            modifier = Modifier.fillMaxWidth(),
-            onClick = vm::stopAllDevices,
-            enabled = vm.protocolStatus.controllable,
-        ) {
-            Text("全部停止")
-        }
     }
+}
+
+@Composable
+private fun DeviceRemarkDialog(vm: BridgeViewModel) {
+    if (!vm.showDeviceRemarkDialog) return
+    AlertDialog(
+        onDismissRequest = vm::dismissDeviceRemarkDialog,
+        title = { Text("保存到我的设备") },
+        text = {
+            Column {
+                Text("给这个设备起个容易认的名字。")
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = vm.deviceRemarkDraft,
+                    onValueChange = { vm.deviceRemarkDraft = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("设备备注") },
+                    singleLine = true,
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = vm::saveDeviceRemark) {
+                Text("保存")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = vm::dismissDeviceRemarkDialog) {
+                Text("取消")
+            }
+        },
+    )
 }
 
 @Composable
@@ -887,12 +951,16 @@ private fun DeveloperSettings(vm: BridgeViewModel) {
     Spacer(Modifier.height(10.dp))
     FormField("服务地址", vm.baseUrlDraft) { vm.baseUrlDraft = it }
     Button(onClick = vm::saveBaseUrl) { Text("保存地址") }
+    Spacer(Modifier.height(14.dp))
+    FormField("用户 Token", vm.userTokenDraft) { vm.userTokenDraft = it }
+    Button(onClick = vm::saveUserToken) { Text("保存 Token") }
     if (vm.baseUrlMessage.isNotBlank()) {
         Spacer(Modifier.height(8.dp))
         Text(vm.baseUrlMessage, color = Honey)
     }
     Spacer(Modifier.height(6.dp))
     Text("当前：${vm.serverUrl}", color = TextSoft, fontFamily = FontFamily.Monospace)
+    Text("当前 Token：${vm.userToken}", color = TextSoft, fontFamily = FontFamily.Monospace)
 }
 
 @Composable

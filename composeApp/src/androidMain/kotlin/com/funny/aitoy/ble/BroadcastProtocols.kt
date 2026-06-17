@@ -3,7 +3,9 @@ package com.funny.aitoy.ble
 import kotlin.random.Random
 
 internal data class BleAdvertiseOperation(
-    val serviceUuid: String,
+    val serviceUuid: String = "",
+    val manufacturerId: Int? = null,
+    val manufacturerData: ByteArray = byteArrayOf(),
 )
 
 internal interface BleBroadcastProtocol {
@@ -21,6 +23,9 @@ internal object BleBroadcastProtocolRegistry {
 
     fun resolveAll(device: ScannedBleDevice): List<BleBroadcastProtocol> =
         protocols.filter { it.matches(device) }
+
+    fun resolveFirstName(device: ScannedBleDevice): String =
+        resolveAll(device).firstOrNull()?.status?.displayName.orEmpty()
 }
 
 /**
@@ -75,7 +80,7 @@ internal object CachitoBroadcastProtocol : BleBroadcastProtocol {
         }
         val knownHint = text.contains("cachito", ignoreCase = true) ||
             text.contains("7100", ignoreCase = true)
-        return knownHint || !device.connectable
+        return knownHint
     }
 
     override fun setCommands(mode: Int, intensity: Int): List<BleAdvertiseOperation> {

@@ -61,18 +61,17 @@ class AndroidBleController(
             } else {
                 true
             }
+            val scannedDevice = ScannedBleDevice(
+                name = name,
+                address = device.address,
+                rssi = result.rssi,
+                connectable = connectable,
+                serviceUuids = record?.serviceUuids?.map { it.uuid.toString() }.orEmpty(),
+                manufacturerData = record.manufacturerDataText(),
+                scanRecordHex = record?.bytes?.toHexString().orEmpty(),
+            ).let { it.copy(broadcastProtocolName = BleBroadcastProtocolRegistry.resolveFirstName(it)) }
             mainHandler.post {
-                onDevice(
-                    ScannedBleDevice(
-                        name = name,
-                        address = device.address,
-                        rssi = result.rssi,
-                        connectable = connectable,
-                        serviceUuids = record?.serviceUuids?.map { it.uuid.toString() }.orEmpty(),
-                        manufacturerData = record.manufacturerDataText(),
-                        scanRecordHex = record?.bytes?.toHexString().orEmpty(),
-                    ),
-                )
+                onDevice(scannedDevice)
             }
             val signature = buildString {
                 append("name=$name address=${device.address} connectable=$connectable")
@@ -140,6 +139,7 @@ class AndroidBleController(
             val config = template ?: return
             val fingerprint = BleGattFingerprint(
                 name = connectedName,
+                serviceUuids = gatt.services.map { it.uuid }.toSet(),
                 characteristicUuids = gatt.services
                     .flatMap { it.characteristics }
                     .map { it.uuid }
@@ -249,7 +249,7 @@ class AndroidBleController(
                 "write=${protocolTemplate.writeUuid} notify=${protocolTemplate.notifyUuid.ifBlank { "<none>" }}",
         )
         broadcastProtocolCandidates = BleBroadcastProtocolRegistry.resolveAll(device)
-        if (!device.connectable && broadcastProtocolCandidates.isNotEmpty()) {
+        if (broadcastProtocolCandidates.isNotEmpty()) {
             activeBroadcastProtocol = broadcastProtocolCandidates.first()
             protocolReady = true
             activeBroadcastProtocol?.status?.let(onProtocol)
@@ -265,6 +265,17 @@ class AndroidBleController(
             )
             trace("已启用广播协议：${activeBroadcastProtocol!!.status.displayName}")
             updateState(BleConnectionState.Ready)
+            return
+        }
+        if (!device.connectable) {
+            trace("跳过不可连接且未识别的广播设备 address=${device.address}", error = true)
+            updateProtocolAttempt(
+                ProtocolAttemptStatus(
+                    title = "这个广播暂时无法控制",
+                    message = "没有识别到可用的广播协议",
+                ),
+            )
+            updateState(BleConnectionState.Error)
             return
         }
         updateState(BleConnectionState.Connecting)
@@ -637,6 +648,7 @@ class AndroidBleController(
             if (currentGatt != null && currentTemplate != null) {
                 val fingerprint = BleGattFingerprint(
                     name = connectedName,
+                    serviceUuids = currentGatt.services.map { it.uuid }.toSet(),
                     characteristicUuids = currentGatt.services
                         .flatMap { it.characteristics }
                         .map { it.uuid }

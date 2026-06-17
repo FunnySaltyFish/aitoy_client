@@ -45,7 +45,6 @@ import kotlinx.serialization.json.jsonPrimitive
 import org.json.JSONArray
 import org.json.JSONObject
 import java.security.MessageDigest
-import java.util.UUID
 import kotlin.math.roundToInt
 
 data class RememberedToy(
@@ -120,6 +119,7 @@ class BridgeViewModel : ViewModel() {
     var serverUrl by mutableStateOf(OkHttpUtils.currentBaseUrl)
         private set
     var baseUrlDraft by mutableStateOf(OkHttpUtils.currentBaseUrl)
+    var userTokenDraft by mutableStateOf("")
     var baseUrlMessage by mutableStateOf("")
         private set
     var developerMode: Boolean by mutableDataSaverStateOf(
@@ -130,7 +130,7 @@ class BridgeViewModel : ViewModel() {
     var userToken: String by mutableDataSaverStateOf(
         DataSaverUtils,
         "AITOY_USER_TOKEN",
-        "ut_${UUID.randomUUID().toString().replace("-", "")}",
+        "ut_fishfish",
     )
 
     var serviceUuid: String by mutableDataSaverStateOf(
@@ -175,6 +175,15 @@ class BridgeViewModel : ViewModel() {
     )
     var mode by mutableStateOf(1)
     var intensity by mutableStateOf(1)
+    var controlTrialStarted by mutableStateOf(false)
+        private set
+    var currentDeviceSaved by mutableStateOf(false)
+        private set
+    var showDeviceRemarkDialog by mutableStateOf(false)
+        private set
+    var deviceRemarkDraft by mutableStateOf("")
+    private var editingRemarkAddress = ""
+    private var editingRemarkProtocolName = ""
     var errorMessage by mutableStateOf<String?>(null)
         private set
     var busyHint by mutableStateOf("")
@@ -265,7 +274,7 @@ class BridgeViewModel : ViewModel() {
         onState = {
             connectionState = it
             if (it == BleConnectionState.Ready) {
-                rememberConnectedDevice()
+                currentDeviceSaved = rememberedDevices.any { toy -> toy.address == selectedAddress }
                 syncRelayDevice()
             }
         },
@@ -278,6 +287,16 @@ class BridgeViewModel : ViewModel() {
         runCatching { controller.stopDevice(mode) }
             .onSuccess { appendLog("安全计时结束，已自动发送停止指令") }
             .onFailure { appendLog("自动停止失败：${it.message}") }
+    }
+    private val controlTrial = Runnable {
+        runCatching {
+            controller.sendCommand(mode, intensity)
+            syncRelayDevice()
+            mainHandler.removeCallbacks(autoStop)
+            mainHandler.postDelayed(autoStop, 5_000L)
+        }.onFailure {
+            busyHint = it.message ?: "控制失败"
+        }
     }
     private val relay = RelayClient(
         onState = {
@@ -297,6 +316,7 @@ class BridgeViewModel : ViewModel() {
             OkHttpUtils.useProductionBaseUrl()
         }
         refreshBaseUrlState()
+        userTokenDraft = userToken
         checkAppConfig()
     }
 
@@ -313,9 +333,20 @@ class BridgeViewModel : ViewModel() {
     }
 
     fun connect(device: ScannedBleDevice) = runAction {
+        if (!device.controllable) {
+            errorMessage = "这个广播暂时无法控制"
+            appendLog("跳过不可连接且未识别的广播设备：name=${device.name} address=${device.address}")
+            return@runAction
+        }
         selectedAddress = device.address
         selectedName = device.name
         protocolAttemptStatus = ProtocolAttemptStatus()
+        protocolStatus = BleProtocolStatus()
+        controlTrialStarted = false
+        currentDeviceSaved = rememberedDevices.any { it.address == device.address }
+        showDeviceRemarkDialog = false
+        deviceRemarkDraft =
+            rememberedDevices.firstOrNull { it.address == device.address }?.name.orEmpty()
         scanning = false
         busyHint = "正在为你连接 ${device.name}"
         controller.connect(device, currentTemplate())
@@ -335,20 +366,30 @@ class BridgeViewModel : ViewModel() {
     fun disconnect() {
         busyHint = ""
         protocolAttemptStatus = ProtocolAttemptStatus()
+        controlTrialStarted = false
+        showDeviceRemarkDialog = false
+        mainHandler.removeCallbacks(controlTrial)
         controller.disconnect()
     }
 
-    fun sendTest() = runAction {
-        busyHint = "已发送轻柔测试，稍后会自动停止"
-        controller.sendCommand(mode, intensity)
-        syncRelayDevice()
-        mainHandler.removeCallbacks(autoStop)
-        mainHandler.postDelayed(autoStop, 5_000L)
+    fun updateMode(value: Int) {
+        val next = value.coerceIn(1, protocolStatus.modeMax.coerceAtLeast(1))
+        if (mode == next) return
+        mode = next
+        scheduleControlTrial()
+    }
+
+    fun updateIntensity(value: Int) {
+        val next = value.coerceIn(1, protocolStatus.intensityMax.coerceAtLeast(1))
+        if (intensity == next) return
+        intensity = next
+        scheduleControlTrial()
     }
 
     fun stopDevice() = runAction {
         busyHint = "已停止"
         mainHandler.removeCallbacks(autoStop)
+        mainHandler.removeCallbacks(controlTrial)
         controller.stopDevice(mode)
         intensity = 0
         syncRelayDevice()
@@ -357,9 +398,55 @@ class BridgeViewModel : ViewModel() {
     fun stopAllDevices() = runAction {
         busyHint = "已全部停止"
         mainHandler.removeCallbacks(autoStop)
+        mainHandler.removeCallbacks(controlTrial)
         controller.stopDevice(mode)
         intensity = 0
         syncRelayDevice()
+    }
+
+    fun confirmCurrentDeviceWorks() {
+        if (selectedAddress.isBlank()) return
+        deviceRemarkDraft = rememberedDevices.firstOrNull { it.address == selectedAddress }?.name
+            ?: selectedName.ifBlank { "我的小玩具" }
+        editingRemarkAddress = selectedAddress
+        editingRemarkProtocolName = protocolStatus.displayName.ifBlank { "已保存" }
+        showDeviceRemarkDialog = true
+    }
+
+    fun reportCurrentDeviceNotWorking() {
+        busyHint = "可以继续调整，或到高级工具导入指令"
+    }
+
+    fun editRememberedDevice(toy: RememberedToy) {
+        deviceRemarkDraft = toy.name
+        editingRemarkAddress = toy.address
+        editingRemarkProtocolName = toy.protocolName
+        showDeviceRemarkDialog = true
+    }
+
+    fun dismissDeviceRemarkDialog() {
+        showDeviceRemarkDialog = false
+        editingRemarkAddress = ""
+        editingRemarkProtocolName = ""
+    }
+
+    fun saveDeviceRemark() {
+        val address = editingRemarkAddress.ifBlank { selectedAddress }
+        if (address.isBlank()) return
+        val fallbackName = if (address == selectedAddress) selectedName else "我的小玩具"
+        rememberDevice(
+            address = address,
+            remark = deviceRemarkDraft.trim().ifBlank { fallbackName.ifBlank { "我的小玩具" } },
+            protocolName = editingRemarkProtocolName.ifBlank { protocolStatus.displayName.ifBlank { "已保存" } },
+        )
+        if (address == selectedAddress) {
+            currentDeviceSaved = true
+            controlTrialStarted = false
+        }
+        showDeviceRemarkDialog = false
+        editingRemarkAddress = ""
+        editingRemarkProtocolName = ""
+        busyHint = "已保存到我的设备"
     }
 
     fun getToyStatusForChat(): ToyToolResult = ToyToolResult(
@@ -460,6 +547,18 @@ class BridgeViewModel : ViewModel() {
         } else {
             baseUrlMessage = "地址格式不正确，请输入 http 或 https 地址。"
         }
+    }
+
+    fun saveUserToken() {
+        if (!developerMode) return
+        val token = userTokenDraft.trim()
+        if (token.isBlank()) {
+            baseUrlMessage = "Token 不能为空。"
+            return
+        }
+        userToken = token
+        userTokenDraft = token
+        baseUrlMessage = "Token 已保存；手机已经上线时，请重新上线。"
     }
 
     fun downloadAndInstallUpdate() {
@@ -738,22 +837,40 @@ class BridgeViewModel : ViewModel() {
     }
 
     fun currentModeLabel(): String {
-        if (protocolStatus.id != "cachito_advertise") return "节奏 ${mode}"
-        val name = CachitoBroadcastProtocol.modeNames().getOrNull(mode - 1)
-        return if (name.isNullOrBlank()) "模板 ${mode}" else "模板 ${mode}：$name"
+        if (protocolStatus.id == "cachito_advertise") {
+            val name = CachitoBroadcastProtocol.modeNames().getOrNull(mode - 1)
+            return if (name.isNullOrBlank()) "模板 ${mode}" else "模板 ${mode}：$name"
+        }
+        if (protocolStatus.id == "kisstoy_gatt") {
+            val name = listOf("主电机", "第二电机", "抽插", "双通道").getOrNull(mode - 1)
+            return if (name.isNullOrBlank()) "节奏 ${mode}" else "节奏 ${mode}：$name"
+        }
+        return "节奏 ${mode}"
     }
 
-    private fun rememberConnectedDevice() {
-        if (selectedAddress.isBlank()) return
+    private fun scheduleControlTrial() {
+        if (!protocolStatus.controllable || connectionState != BleConnectionState.Ready) return
+        controlTrialStarted = true
+        busyHint = "正在尝试，稍后会自动停止"
+        mainHandler.removeCallbacks(controlTrial)
+        mainHandler.postDelayed(controlTrial, 250L)
+    }
+
+    private fun rememberDevice(
+        address: String,
+        remark: String,
+        protocolName: String,
+    ) {
+        if (address.isBlank()) return
         val current = JSONObject()
-            .put("name", selectedName.ifBlank { "我的小玩具" })
-            .put("address", selectedAddress)
-            .put("protocolName", protocolStatus.displayName.ifBlank { "已保存" })
+            .put("name", remark)
+            .put("address", address)
+            .put("protocolName", protocolName)
             .put("lastSeenAt", System.currentTimeMillis())
         val merged = JSONArray()
         merged.put(current)
         rememberedDevices
-            .filterNot { it.address == selectedAddress }
+            .filterNot { it.address == address }
             .take(7)
             .forEach {
                 merged.put(
