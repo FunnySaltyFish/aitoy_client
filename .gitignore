@@ -20,3 +20,5 @@ captures
 node_modules/
 
 __pycache__/
+
+/composeApp/release/*
