@@ -20,6 +20,9 @@ data class RelayCommand(
     val intensity: Int?,
     val mode: Int?,
     val durationSec: Int?,
+    val defaultDurationSec: Int?,
+    val script: String?,
+    val createdAt: Long?,
 )
 
 data class RelayDevice(
@@ -99,6 +102,9 @@ class RelayClient(
                                 intensity = json.optIntOrNull("intensity"),
                                 mode = json.optIntOrNull("mode"),
                                 durationSec = json.optIntOrNull("durationSec"),
+                                defaultDurationSec = json.optIntOrNull("defaultDurationSec"),
+                                script = json.optString("script").ifBlank { null },
+                                createdAt = json.optLongOrNull("createdAt"),
                             )
                         )
                     }
@@ -165,7 +171,7 @@ class RelayClient(
                                 .put("mode", device.mode)
                                 .put("intensityMax", device.intensityMax)
                                 .put("adapterType", "template_ble")
-                                .put("capabilities", JSONArray(listOf("vibrate", "stop"))),
+                                .put("capabilities", JSONArray(listOf("sequence"))),
                         )
                     }
                 },
@@ -236,6 +242,9 @@ class RelayClient(
 
     private fun JSONObject.optIntOrNull(name: String): Int? =
         if (has(name) && !isNull(name)) getInt(name) else null
+
+    private fun JSONObject.optLongOrNull(name: String): Long? =
+        if (has(name) && !isNull(name)) getLong(name) else null
 
     companion object {
         private const val TAG = "AiToyRelay"

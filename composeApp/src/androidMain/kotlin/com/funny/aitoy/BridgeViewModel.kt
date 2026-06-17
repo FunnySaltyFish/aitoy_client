@@ -36,7 +36,11 @@ import com.funny.aitoy.relay.RelayCommand
 import com.funny.aitoy.relay.RelayDevice
 import com.funny.aitoy.update.AppUpdateInstaller
 import com.funny.data_saver.core.mutableDataSaverStateOf
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
@@ -79,6 +83,20 @@ data class AppUpdateState(
     val fileSizeBytes: Long = 0,
     val updateLog: String = "",
 )
+
+private sealed interface RelaySequenceStep {
+    data class Set(
+        val mode: Int,
+        val intensity: Int,
+        val durationSec: Int?,
+    ) : RelaySequenceStep
+
+    data class Sleep(val durationSec: Int) : RelaySequenceStep
+
+    data object Stop : RelaySequenceStep
+}
+
+private class SequenceScriptFormatException : IllegalArgumentException("序列脚本格式错误")
 
 class BridgeViewModel : ViewModel() {
     val devices = mutableStateListOf<ScannedBleDevice>()
@@ -309,6 +327,7 @@ class BridgeViewModel : ViewModel() {
         onLog = ::appendLog,
         onCommand = ::handleRelayCommand,
     )
+    private var relaySequenceJob: Job? = null
     private var debugLogTapCount = 0
 
     init {
@@ -486,11 +505,10 @@ class BridgeViewModel : ViewModel() {
         durationSec: Int,
     ): ToyToolResult = runCatching {
         val safeDuration = durationSec.coerceIn(1, 15)
-        applyToyCommand(
-            action = "set",
+        sendToySet(
             intensityPercent = intensityPercent.coerceIn(0, 100),
             requestedMode = mode.coerceAtLeast(1),
-            durationSec = safeDuration,
+            autoStopSec = safeDuration,
         )
         ToyToolResult(true, "已调节设备，$safeDuration 秒后会自动停止。")
     }.getOrElse {
@@ -498,7 +516,7 @@ class BridgeViewModel : ViewModel() {
     }
 
     fun stopToyForChat(all: Boolean = false): ToyToolResult = runCatching {
-        applyToyCommand(action = if (all) "stop_all" else "stop")
+        sendToyStop(all = all)
         ToyToolResult(true, if (all) "已全部停止。" else "已停止。")
     }.getOrElse {
         ToyToolResult(false, it.message ?: "操作没有完成。")
@@ -833,49 +851,131 @@ class BridgeViewModel : ViewModel() {
     }
 
     private fun handleRelayCommand(command: RelayCommand) {
-        runCatching {
-            applyToyCommand(
-                action = command.action,
-                intensityPercent = command.intensity,
-                requestedMode = command.mode,
-                durationSec = command.durationSec,
-            )
-        }.onSuccess {
-            relay.commandResult(command.commandId, true, "命令已写入设备")
-        }.onFailure {
-            relay.commandResult(command.commandId, false, it.message ?: "命令执行失败")
+        if (command.action != "sequence") {
+            relay.commandResult(command.commandId, false, "暂不支持这个操作")
+            return
+        }
+        val steps = runCatching {
+            parseRelaySequenceScript(command.script.orEmpty(), command.defaultDurationSec)
+        }.getOrElse {
+            relay.commandResult(command.commandId, false, "序列脚本格式错误")
+            return
+        }
+        val previousJob = relaySequenceJob
+        relaySequenceJob = viewModelScope.launch {
+            previousJob?.cancelAndJoin()
+            relay.commandResult(command.commandId, true, "序列已执行")
+            runCatching {
+                executeRelaySequence(steps, command.defaultDurationSec)
+            }.onFailure {
+                if (it is CancellationException) return@launch
+                appendLog("序列执行失败：${it.message ?: "命令执行失败"}")
+            }
         }
     }
 
-    private fun applyToyCommand(
-        action: String,
-        intensityPercent: Int? = null,
-        requestedMode: Int? = null,
-        durationSec: Int? = null,
+    private suspend fun executeRelaySequence(
+        steps: List<RelaySequenceStep>,
+        defaultDurationSec: Int?,
     ) {
-        when (action) {
-            "set" -> {
-                mainHandler.removeCallbacks(autoStop)
-                val maxIntensity = protocolStatus.intensityMax.coerceAtLeast(1)
-                val mappedIntensity = (
-                    ((intensityPercent ?: 0).coerceIn(0, 100) / 100.0) * maxIntensity
-                    ).roundToInt().coerceIn(0, maxIntensity)
-                val mappedMode = requestedMode?.coerceAtLeast(1) ?: 1
-                controller.sendCommand(mode = mappedMode, intensity = mappedIntensity)
-                mode = mappedMode
-                intensity = mappedIntensity
-                busyHint = "设备正在运行，稍后会自动停止"
-                syncRelayDevice()
-                mainHandler.postDelayed(autoStop, (durationSec ?: 8).coerceIn(1, 15) * 1_000L)
+        val safeDefaultDuration = (defaultDurationSec ?: 30).coerceIn(1, 30)
+        var stopped = false
+        try {
+            steps.forEach { step ->
+                when (step) {
+                    is RelaySequenceStep.Set -> {
+                        sendToySet(
+                            intensityPercent = step.intensity,
+                            requestedMode = step.mode,
+                            autoStopSec = step.durationSec ?: safeDefaultDuration,
+                        )
+                        stopped = false
+                        step.durationSec?.let {
+                            delay(it.coerceIn(1, 30) * 1_000L)
+                            sendToyStop()
+                            stopped = true
+                        }
+                    }
+                    is RelaySequenceStep.Sleep -> {
+                        sendToyStop()
+                        stopped = true
+                        delay(step.durationSec.coerceIn(0, 300) * 1_000L)
+                    }
+                    RelaySequenceStep.Stop -> {
+                        sendToyStop()
+                        stopped = true
+                    }
+                }
             }
-            "stop", "stop_all" -> {
-                mainHandler.removeCallbacks(autoStop)
-                controller.stopDevice(mode)
-                busyHint = if (action == "stop_all") "已全部停止" else "已停止"
-                syncRelayDevice()
-            }
-            else -> error("暂不支持这个操作")
+        } finally {
+            if (!stopped) sendToyStop()
         }
+    }
+
+    private fun parseRelaySequenceScript(
+        script: String,
+        defaultDurationSec: Int?,
+    ): List<RelaySequenceStep> {
+        val parts = script.split(';').map { it.trim() }.filter { it.isNotBlank() }
+        if (parts.isEmpty()) throw SequenceScriptFormatException()
+        return parts.map { part ->
+            when {
+                part == "stop()" -> RelaySequenceStep.Stop
+                part.startsWith("sleep(") && part.endsWith(")") -> {
+                    val seconds = part.removePrefix("sleep(")
+                        .removeSuffix(")")
+                        .trim()
+                        .toIntOrNull()
+                        ?: throw SequenceScriptFormatException()
+                    RelaySequenceStep.Sleep(seconds.coerceIn(0, 300))
+                }
+                part.startsWith("set(") && part.endsWith(")") -> {
+                    val args = parseSequenceArguments(part.removePrefix("set(").removeSuffix(")"))
+                    val mode = args["mode"]?.coerceAtLeast(1) ?: throw SequenceScriptFormatException()
+                    val intensity = args["intensity"]?.coerceIn(0, 40) ?: throw SequenceScriptFormatException()
+                    val duration = args["duration"]?.coerceIn(1, 30)
+                    RelaySequenceStep.Set(mode = mode, intensity = intensity, durationSec = duration)
+                }
+                else -> throw SequenceScriptFormatException()
+            }
+        }
+    }
+
+    private fun parseSequenceArguments(text: String): Map<String, Int> {
+        if (text.isBlank()) throw SequenceScriptFormatException()
+        return text.split(',')
+            .associate { entry ->
+                val key = entry.substringBefore('=', missingDelimiterValue = "").trim()
+                val value = entry.substringAfter('=', missingDelimiterValue = "").trim().toIntOrNull()
+                if (key.isBlank() || value == null) throw SequenceScriptFormatException()
+                key to value
+            }
+    }
+
+    private fun sendToySet(
+        intensityPercent: Int,
+        requestedMode: Int,
+        autoStopSec: Int,
+    ) {
+        mainHandler.removeCallbacks(autoStop)
+        val maxIntensity = protocolStatus.intensityMax.coerceAtLeast(1)
+        val mappedIntensity = (
+            (intensityPercent.coerceIn(0, 100) / 100.0) * maxIntensity
+            ).roundToInt().coerceIn(0, maxIntensity)
+        val mappedMode = requestedMode.coerceAtLeast(1)
+        controller.sendCommand(mode = mappedMode, intensity = mappedIntensity)
+        mode = mappedMode
+        intensity = mappedIntensity
+        busyHint = "设备正在运行，稍后会自动停止"
+        syncRelayDevice()
+        mainHandler.postDelayed(autoStop, autoStopSec.coerceIn(1, 30) * 1_000L)
+    }
+
+    private fun sendToyStop(all: Boolean = false) {
+        mainHandler.removeCallbacks(autoStop)
+        controller.stopDevice(mode)
+        busyHint = if (all) "已全部停止" else "已停止"
+        syncRelayDevice()
     }
 
     private fun currentDeviceId(): String {
