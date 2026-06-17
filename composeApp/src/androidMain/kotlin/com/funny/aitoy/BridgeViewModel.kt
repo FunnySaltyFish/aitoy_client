@@ -1,9 +1,12 @@
 package com.funny.aitoy
 
+import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
+import android.provider.Settings
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -391,7 +394,6 @@ class BridgeViewModel : ViewModel() {
         mainHandler.removeCallbacks(autoStop)
         mainHandler.removeCallbacks(controlTrial)
         controller.stopDevice(mode)
-        intensity = 0
         syncRelayDevice()
     }
 
@@ -400,7 +402,6 @@ class BridgeViewModel : ViewModel() {
         mainHandler.removeCallbacks(autoStop)
         mainHandler.removeCallbacks(controlTrial)
         controller.stopDevice(mode)
-        intensity = 0
         syncRelayDevice()
     }
 
@@ -422,6 +423,24 @@ class BridgeViewModel : ViewModel() {
         editingRemarkAddress = toy.address
         editingRemarkProtocolName = toy.protocolName
         showDeviceRemarkDialog = true
+    }
+
+    fun deleteRememberedDevice(toy: RememberedToy) {
+        val merged = JSONArray()
+        rememberedDevices
+            .filterNot { it.address == toy.address }
+            .forEach {
+                merged.put(
+                    JSONObject()
+                        .put("name", it.name)
+                        .put("address", it.address)
+                        .put("protocolName", it.protocolName)
+                        .put("lastSeenAt", it.lastSeenAt),
+                )
+            }
+        rememberedDevicesJson = merged.toString()
+        if (toy.address == selectedAddress) currentDeviceSaved = false
+        busyHint = "已从我的设备移除"
     }
 
     fun dismissDeviceRemarkDialog() {
@@ -493,8 +512,38 @@ class BridgeViewModel : ViewModel() {
         relay.connect(OkHttpUtils.currentBaseUrl, userToken)
     }
 
+    fun resumeRelay() {
+        relay.reconnectNow()
+    }
+
     fun disconnectRelay() {
         relay.disconnect()
+    }
+
+    fun openBatteryConnectionSettings() {
+        val packageName = appCtx.packageName
+        val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val powerManager = appCtx.getSystemService(PowerManager::class.java)
+            if (powerManager?.isIgnoringBatteryOptimizations(packageName) == false) {
+                Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                    .setData(Uri.parse("package:$packageName"))
+            } else {
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                    .setData(Uri.parse("package:$packageName"))
+            }
+        } else {
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                .setData(Uri.parse("package:$packageName"))
+        }
+        runCatching {
+            appCtx.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }.onFailure {
+            appCtx.startActivity(
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                    .setData(Uri.parse("package:$packageName"))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        }
     }
 
     fun dismissCrashNotice() {
@@ -820,7 +869,6 @@ class BridgeViewModel : ViewModel() {
             "stop", "stop_all" -> {
                 mainHandler.removeCallbacks(autoStop)
                 controller.stopDevice(mode)
-                intensity = 0
                 busyHint = if (action == "stop_all") "已全部停止" else "已停止"
                 syncRelayDevice()
             }

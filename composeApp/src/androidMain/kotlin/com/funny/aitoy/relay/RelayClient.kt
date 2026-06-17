@@ -1,5 +1,7 @@
 package com.funny.aitoy.relay
 
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -9,6 +11,7 @@ import okhttp3.WebSocketListener
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
+import kotlin.math.min
 
 data class RelayCommand(
     val commandId: String,
@@ -37,29 +40,58 @@ class RelayClient(
 ) {
     private val client = OkHttpClient.Builder()
         .pingInterval(20, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(true)
         .build()
+    private val mainHandler = Handler(Looper.getMainLooper())
     private var socket: WebSocket? = null
+    private var lastServerUrl = ""
+    private var lastUserToken = ""
+    private var userRequestedOnline = false
+    private var connecting = false
+    private var retryCount = 0
+    private var connectionGeneration = 0
+    private val reconnect = Runnable {
+        if (userRequestedOnline && socket == null && lastServerUrl.isNotBlank()) {
+            connect(lastServerUrl, lastUserToken, resetRetry = false)
+        }
+    }
 
     fun connect(serverUrl: String, userToken: String) {
-        disconnect()
+        connect(serverUrl, userToken, resetRetry = true)
+    }
+
+    private fun connect(serverUrl: String, userToken: String, resetRetry: Boolean) {
+        userRequestedOnline = true
+        lastServerUrl = serverUrl
+        lastUserToken = userToken
+        mainHandler.removeCallbacks(reconnect)
+        socket?.close(1000, "Reconnect")
+        socket = null
+        if (resetRetry) retryCount = 0
+        connecting = true
+        val generation = ++connectionGeneration
         val wsUrl = serverUrl.trimEnd('/')
             .replaceFirst("https://", "wss://")
             .replaceFirst("http://", "ws://") + "/ws/app?token=$userToken"
-        trace("连接 Relay：$wsUrl")
-        onState("正在连接")
-        socket = client.newWebSocket(
+        trace("连接 AI 伙伴：${safeWsUrl(wsUrl)}")
+        emitState("正在连接")
+        val nextSocket = client.newWebSocket(
             Request.Builder().url(wsUrl).build(),
             object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {
-                    trace("Relay WebSocket 已连接 code=${response.code}")
-                    onState("已在线")
+                    if (generation != connectionGeneration) return
+                    connecting = false
+                    retryCount = 0
+                    trace("AI 伙伴已在线")
+                    emitState("已在线")
                 }
 
                 override fun onMessage(webSocket: WebSocket, text: String) {
-                    trace("Relay 收到：$text")
+                    if (generation != connectionGeneration) return
+                    trace("AI 伙伴收到指令：$text")
                     val json = JSONObject(text)
                     if (json.optString("type") == "command") {
-                        onCommand(
+                        emitCommand(
                             RelayCommand(
                                 commandId = json.getString("commandId"),
                                 action = json.getString("action"),
@@ -73,21 +105,46 @@ class RelayClient(
                 }
 
                 override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
-                    trace("Relay 正在关闭 code=$code reason=$reason")
-                    onState("正在断开")
+                    if (generation != connectionGeneration) return
+                    trace("AI 伙伴正在断开")
+                    emitState("正在断开")
                 }
 
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                    trace("Relay 已断开 code=$code reason=$reason")
-                    onState("未连接")
+                    if (generation != connectionGeneration) return
+                    socket = null
+                    connecting = false
+                    if (userRequestedOnline) {
+                        trace("AI 伙伴连接已断开，正在准备重连")
+                        emitState("等待重连")
+                        scheduleReconnect()
+                    } else {
+                        trace("AI 伙伴已下线")
+                        emitState("未连接")
+                    }
                 }
 
-                override fun onFailure(webSocket: WebSocket, throwable: Throwable, response: Response?) {
-                    trace("Relay 连接失败：${throwable.message}", error = true)
-                    onState("连接失败")
+                override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                    if (generation != connectionGeneration) return
+                    socket = null
+                    connecting = false
+                    trace("AI 伙伴连接中断：${t.message ?: "网络不可用"}", error = true)
+                    if (userRequestedOnline) {
+                        emitState("等待重连")
+                        scheduleReconnect()
+                    } else {
+                        emitState("连接失败")
+                    }
                 }
             },
         )
+        socket = nextSocket
+    }
+
+    fun reconnectNow() {
+        if (userRequestedOnline && socket == null && !connecting && lastServerUrl.isNotBlank()) {
+            connect(lastServerUrl, lastUserToken, resetRetry = false)
+        }
     }
 
     fun syncDevices(devices: List<RelayDevice>) {
@@ -127,8 +184,14 @@ class RelayClient(
     }
 
     fun disconnect() {
+        userRequestedOnline = false
+        connecting = false
+        retryCount = 0
+        connectionGeneration += 1
+        mainHandler.removeCallbacks(reconnect)
         socket?.close(1000, "App disconnect")
         socket = null
+        emitState("未连接")
     }
 
     fun close() {
@@ -140,13 +203,36 @@ class RelayClient(
     private fun send(json: JSONObject) {
         val text = json.toString()
         val accepted = socket?.send(text) == true
-        trace("Relay 发送 accepted=$accepted payload=$text")
+        trace("AI 伙伴同步状态 accepted=$accepted payload=$text")
+        if (!accepted && userRequestedOnline) scheduleReconnect()
+    }
+
+    private fun scheduleReconnect() {
+        mainHandler.removeCallbacks(reconnect)
+        val delayMs = min(30_000L, 1_000L shl retryCount.coerceAtMost(5))
+        retryCount += 1
+        trace("AI 伙伴将在 ${delayMs / 1_000} 秒后重连")
+        mainHandler.postDelayed(reconnect, delayMs)
     }
 
     private fun trace(message: String, error: Boolean = false) {
         if (error) Log.e(TAG, message) else Log.d(TAG, message)
-        onLog(message)
+        mainHandler.post { onLog(message) }
     }
+
+    private fun emitState(state: String) {
+        mainHandler.post { onState(state) }
+    }
+
+    private fun emitCommand(command: RelayCommand) {
+        mainHandler.post { onCommand(command) }
+    }
+
+    private fun safeWsUrl(wsUrl: String): String =
+        wsUrl.replace(Regex("token=[^&]+")) { match ->
+            val token = match.value.removePrefix("token=")
+            "token=${token.take(6)}..."
+        }
 
     private fun JSONObject.optIntOrNull(name: String): Int? =
         if (has(name) && !isNull(name)) getInt(name) else null

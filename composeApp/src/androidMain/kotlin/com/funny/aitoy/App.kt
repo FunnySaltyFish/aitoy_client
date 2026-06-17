@@ -30,6 +30,7 @@ import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Favorite
 import androidx.compose.material.icons.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.Link
+import androidx.compose.material.icons.outlined.PowerSettingsNew
 import androidx.compose.material.icons.outlined.SettingsRemote
 import androidx.compose.material.icons.outlined.StopCircle
 import androidx.compose.material.icons.outlined.Tune
@@ -74,6 +75,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.funny.aitoy.ble.BleConnectionState
 import com.funny.aitoy.ble.ProtocolAttemptStatus
@@ -102,6 +105,9 @@ fun App(initialImportLink: String? = null) {
     var selectedTab by remember { mutableIntStateOf(0) }
     LaunchedEffect(initialImportLink) {
         vm.importFromLink(initialImportLink)
+    }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        vm.resumeRelay()
     }
     MaterialTheme(
         colorScheme = darkColorScheme(
@@ -512,6 +518,9 @@ private fun RecentDevices(vm: BridgeViewModel) {
             TextButton(onClick = { vm.editRememberedDevice(toy) }) {
                 Text("备注")
             }
+            TextButton(onClick = { vm.deleteRememberedDevice(toy) }) {
+                Text("删除")
+            }
             TextButton(onClick = { vm.connectRemembered(toy) }) {
                 Text("连接")
             }
@@ -773,8 +782,14 @@ private fun AiCompanion(vm: BridgeViewModel) {
             Spacer(Modifier.width(8.dp))
             Text("分享应用下载页")
         }
+        Spacer(Modifier.height(8.dp))
+        OutlinedButton(onClick = vm::openBatteryConnectionSettings) {
+            Icon(Icons.Outlined.PowerSettingsNew, null)
+            Spacer(Modifier.width(8.dp))
+            Text("保持后台连接")
+        }
         Text(
-            text = "即使手机暂时不在线，AI 也可以通过状态工具看到“手机还没有上线”。",
+            text = "如果切到后台后经常掉线，请在系统设置里将本应用的电池使用方式设为不限制。",
             color = TextSoft,
             style = MaterialTheme.typography.bodySmall,
         )

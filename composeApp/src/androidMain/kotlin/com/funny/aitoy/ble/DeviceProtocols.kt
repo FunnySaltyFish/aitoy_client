@@ -101,8 +101,17 @@ private object KissToyProtocol : BleDeviceProtocol {
     override fun setCommand(mode: Int, intensity: Int): BleProtocolOperation.Write =
         command(commandForMode(mode.coerceIn(1, status.modeMax), intensity.coerceIn(0, 100)))
 
-    override fun setCommands(mode: Int, intensity: Int): List<BleProtocolOperation> =
-        listOf(setCommand(mode, intensity))
+    override fun setCommands(mode: Int, intensity: Int): List<BleProtocolOperation> {
+        val normalizedMode = mode.coerceIn(1, status.modeMax)
+        val normalizedIntensity = intensity.coerceIn(0, 100)
+        val clearCommands = when (normalizedMode) {
+            1 -> listOf(command(kissToyPayload(0x32, 0)), command(kissToyPayload(0x71, 0)))
+            2 -> listOf(command(kissToyPayload(0x31, 0)), command(kissToyPayload(0x71, 0)))
+            3 -> listOf(command(kissToyPayload(0x31, 0)), command(kissToyPayload(0x32, 0)))
+            else -> listOf(command(kissToyPayload(0x31, 0)), command(kissToyPayload(0x32, 0)), command(kissToyPayload(0x71, 0)))
+        }
+        return clearCommands + command(commandForMode(normalizedMode, normalizedIntensity))
+    }
 
     override fun stopCommand(): BleProtocolOperation.Write = command(kissToyPayload(0x40, 0, 0))
 
