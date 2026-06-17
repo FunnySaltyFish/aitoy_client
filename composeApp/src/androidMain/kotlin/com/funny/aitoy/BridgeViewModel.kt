@@ -509,6 +509,7 @@ class BridgeViewModel : ViewModel() {
     }
 
     fun connectRelay() {
+        AiToyForegroundService.start(appCtx)
         relay.connect(OkHttpUtils.currentBaseUrl, userToken)
     }
 
@@ -518,6 +519,7 @@ class BridgeViewModel : ViewModel() {
 
     fun disconnectRelay() {
         relay.disconnect()
+        AiToyForegroundService.stop(appCtx)
     }
 
     fun openBatteryConnectionSettings() {
