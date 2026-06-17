@@ -196,22 +196,21 @@ private object LovenutsProtocol : BleDeviceProtocol {
                 fingerprint.characteristicUuids.contains(writeUuid)
 
     override fun setCommand(mode: Int, intensity: Int): BleProtocolOperation.Write =
-        patternCommand(intensity.coerceIn(0, status.intensityMax), intervalMs = 250)
+        patternCommand(intensity.coerceIn(0, status.intensityMax))
 
     override fun stopCommand(): BleProtocolOperation.Write =
-        patternCommand(speed = 0, intervalMs = 0)
+        patternCommand(speed = 0)
 
-    private fun patternCommand(speed: Int, intervalMs: Int): BleProtocolOperation.Write {
+    private fun patternCommand(speed: Int): BleProtocolOperation.Write {
         val packed = ((speed and 0x0f) shl 4) or (speed and 0x0f)
-        val bytes = ByteArray(17)
+        val bytes = ByteArray(16)
         bytes[0] = 0x45
         bytes[1] = 0x56
-        bytes[2] = 0x04
-        bytes[3] = 0x0f
-        bytes[4] = 0x4c
-        for (index in 5..14) bytes[index] = packed.toByte()
-        bytes[15] = ((intervalMs ushr 8) and 0xff).toByte()
-        bytes[16] = (intervalMs and 0xff).toByte()
+        bytes[2] = 0x4f
+        bytes[3] = 0x4c
+        for (index in 4..13) bytes[index] = packed.toByte()
+        bytes[14] = 0x00
+        bytes[15] = 0xff.toByte()
         return BleProtocolOperation.Write(writeUuid, bytes, withResponse = false)
     }
 }
@@ -225,6 +224,7 @@ private object JeJoueNuoProtocol : BleDeviceProtocol {
         controllable = true,
         intensityMax = 5,
         supportsMode = true,
+        modeMax = 3,
         automatic = true,
     )
 
@@ -235,13 +235,13 @@ private object JeJoueNuoProtocol : BleDeviceProtocol {
     }
 
     override fun setCommand(mode: Int, intensity: Int): BleProtocolOperation.Write =
-        command("${mode.coerceIn(1, 8)}${intensity.coerceIn(0, status.intensityMax)}")
+        command(mode.coerceIn(1, status.modeMax), intensity.coerceIn(0, status.intensityMax))
 
-    override fun stopCommand(): BleProtocolOperation.Write = command("80")
+    override fun stopCommand(): BleProtocolOperation.Write = command(pattern = 1, speed = 0)
 
-    private fun command(value: String) = BleProtocolOperation.Write(
+    private fun command(pattern: Int, speed: Int) = BleProtocolOperation.Write(
         characteristicUuid = writeUuid,
-        bytes = value.encodeToByteArray(),
+        bytes = byteArrayOf(pattern.toByte(), speed.toByte()),
         withResponse = false,
     )
 }

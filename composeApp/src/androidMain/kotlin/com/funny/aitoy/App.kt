@@ -563,13 +563,12 @@ private fun DeviceRow(
         Button(
             modifier = Modifier.testTag("device_connect_${device.address.replace(":", "_")}"),
             onClick = onConnect,
-            enabled = device.connectable,
             colors = ButtonDefaults.buttonColors(
                 containerColor = RoseDeep,
                 contentColor = Color.White
             ),
         ) {
-            Text(if (device.connectable) "连接" else "不可连接")
+            Text(if (device.connectable) "连接" else "广播测试")
         }
     }
 }
@@ -595,13 +594,13 @@ private fun ControlRoom(vm: BridgeViewModel) {
         }
         Spacer(Modifier.height(18.dp))
         if (vm.protocolStatus.supportsMode) {
-            Text("节奏 ${vm.mode}", color = TextSoft)
+            Text(vm.currentModeLabel(), color = TextSoft)
             Slider(
                 value = vm.mode.toFloat(),
                 onValueChange = { vm.mode = it.roundToInt() },
                 modifier = Modifier.testTag("mode_slider"),
-                valueRange = 1f..8f,
-                steps = 6,
+                valueRange = 1f..maxOf(1, vm.protocolStatus.modeMax).toFloat(),
+                steps = (vm.protocolStatus.modeMax - 2).coerceAtLeast(0),
             )
         }
         Text("强度 ${vm.intensity}", color = TextSoft)

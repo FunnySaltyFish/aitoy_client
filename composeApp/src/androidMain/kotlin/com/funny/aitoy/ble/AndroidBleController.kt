@@ -9,6 +9,7 @@ import android.bluetooth.BluetoothGattDescriptor
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothProfile
 import android.bluetooth.le.ScanCallback
+import android.bluetooth.le.ScanRecord
 import android.bluetooth.le.ScanResult
 import android.content.Context
 import android.os.Build
@@ -34,8 +35,10 @@ class AndroidBleController(
     private var template: ProtocolTemplate? = null
     private var connectedName = ""
     private var activeProtocol: BleDeviceProtocol? = null
+    private var activeBroadcastProtocol: BleBroadcastProtocol? = null
     private var protocolReady = false
     private var protocolCandidates = emptyList<BleDeviceProtocol>()
+    private var broadcastProtocolCandidates = emptyList<BleBroadcastProtocol>()
     private var protocolCandidateIndex = -1
     private val failedProtocolNames = mutableListOf<String>()
     private var disconnectingAfterProtocolFailure = false
@@ -44,6 +47,7 @@ class AndroidBleController(
     private var operationInProgress = false
     private var operationId = 0L
     private val scanSignatures = mutableMapOf<String, String>()
+    private val advertiser = AndroidBleAdvertiser(::trace)
 
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
@@ -51,15 +55,25 @@ class AndroidBleController(
             val name = runCatching { device.name }.getOrNull()
                 ?: result.scanRecord?.deviceName
                 ?: "未命名设备"
+            val record = result.scanRecord
             val connectable = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 result.isConnectable
             } else {
                 true
             }
             mainHandler.post {
-                onDevice(ScannedBleDevice(name, device.address, result.rssi, connectable))
+                onDevice(
+                    ScannedBleDevice(
+                        name = name,
+                        address = device.address,
+                        rssi = result.rssi,
+                        connectable = connectable,
+                        serviceUuids = record?.serviceUuids?.map { it.uuid.toString() }.orEmpty(),
+                        manufacturerData = record.manufacturerDataText(),
+                        scanRecordHex = record?.bytes?.toHexString().orEmpty(),
+                    ),
+                )
             }
-            val record = result.scanRecord
             val signature = buildString {
                 append("name=$name address=${device.address} connectable=$connectable")
                 append(" services=${record?.serviceUuids?.joinToString { it.uuid.toString() } ?: "<none>"}")
@@ -68,12 +82,7 @@ class AndroidBleController(
                 if (manufacturerData == null || manufacturerData.size() == 0) {
                     append("<none>")
                 } else {
-                    append(
-                        (0 until manufacturerData.size()).joinToString {
-                            val id = manufacturerData.keyAt(it)
-                            "0x${id.toString(16)}:${manufacturerData.valueAt(it).toHexString()}"
-                        },
-                    )
+                    append(record.manufacturerDataText())
                 }
                 append(" record=${record?.bytes?.toHexString() ?: "<none>"}")
             }
@@ -222,8 +231,10 @@ class AndroidBleController(
         connectedName = device.name
         template = protocolTemplate
         activeProtocol = null
+        activeBroadcastProtocol = null
         protocolReady = false
         protocolCandidates = emptyList()
+        broadcastProtocolCandidates = emptyList()
         protocolCandidateIndex = -1
         failedProtocolNames.clear()
         disconnectingAfterProtocolFailure = false
@@ -237,6 +248,25 @@ class AndroidBleController(
             "连接请求 op=$operationId name=${device.name} address=${device.address} service=${protocolTemplate.serviceUuid} " +
                 "write=${protocolTemplate.writeUuid} notify=${protocolTemplate.notifyUuid.ifBlank { "<none>" }}",
         )
+        broadcastProtocolCandidates = BleBroadcastProtocolRegistry.resolveAll(device)
+        if (!device.connectable && broadcastProtocolCandidates.isNotEmpty()) {
+            activeBroadcastProtocol = broadcastProtocolCandidates.first()
+            protocolReady = true
+            activeBroadcastProtocol?.status?.let(onProtocol)
+            updateProtocolAttempt(
+                ProtocolAttemptStatus(
+                    success = true,
+                    title = "${activeBroadcastProtocol!!.status.displayName} 已准备好",
+                    message = "这个设备使用广播控制，可以直接发送轻柔测试",
+                    protocolName = activeBroadcastProtocol!!.status.displayName,
+                    currentIndex = 1,
+                    total = broadcastProtocolCandidates.size,
+                ),
+            )
+            trace("已启用广播协议：${activeBroadcastProtocol!!.status.displayName}")
+            updateState(BleConnectionState.Ready)
+            return
+        }
         updateState(BleConnectionState.Connecting)
         val remoteDevice = adapter?.getRemoteDevice(device.address)
         gatt = remoteDevice?.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
@@ -247,11 +277,19 @@ class AndroidBleController(
     }
 
     fun sendCommand(mode: Int, intensity: Int) {
+        activeBroadcastProtocol?.let { protocol ->
+            protocol.setCommands(mode, intensity).forEach(advertiser::start)
+            return
+        }
         val protocol = activeProtocol ?: error("当前设备尚无可用的内置协议")
         enqueue(protocol.setCommands(mode, intensity))
     }
 
-    fun stopDevice() {
+    fun stopDevice(mode: Int = 1) {
+        activeBroadcastProtocol?.let { protocol ->
+            protocol.stopCommands(mode).forEach(advertiser::start)
+            return
+        }
         val protocol = activeProtocol ?: error("当前设备尚无可用的内置协议")
         enqueue(protocol.stopCommands())
     }
@@ -302,15 +340,23 @@ class AndroidBleController(
     }
 
     fun disconnect() {
+        advertiser.stop()
         gatt?.let {
             updateState(BleConnectionState.Disconnecting)
             trace("主动断开 address=${it.device.address}")
             it.disconnect()
+        } ?: run {
+            if (activeBroadcastProtocol != null) {
+                activeBroadcastProtocol = null
+                updateState(BleConnectionState.Idle)
+                trace("已停止广播控制")
+            }
         }
     }
 
     fun close() {
         stopScan()
+        advertiser.stop()
         gatt?.let(::closeGatt)
     }
 
@@ -628,6 +674,15 @@ class AndroidBleController(
 
     private fun String.toUuidOrNull(): UUID? = trim().takeIf { it.isNotEmpty() }?.let {
         runCatching { UUID.fromString(it) }.getOrNull()
+    }
+
+    private fun ScanRecord?.manufacturerDataText(): String {
+        val manufacturerData = this?.manufacturerSpecificData
+        if (manufacturerData == null || manufacturerData.size() == 0) return ""
+        return (0 until manufacturerData.size()).joinToString {
+            val id = manufacturerData.keyAt(it)
+            "0x${id.toString(16)}:${manufacturerData.valueAt(it).toHexString()}"
+        }
     }
 
     companion object {

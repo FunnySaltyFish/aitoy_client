@@ -5,6 +5,9 @@ data class ScannedBleDevice(
     val address: String,
     val rssi: Int,
     val connectable: Boolean,
+    val serviceUuids: List<String> = emptyList(),
+    val manufacturerData: String = "",
+    val scanRecordHex: String = "",
 )
 
 enum class BleConnectionState(val label: String) {
@@ -37,6 +40,7 @@ data class BleProtocolStatus(
     val controllable: Boolean = false,
     val intensityMax: Int = 0,
     val supportsMode: Boolean = false,
+    val modeMax: Int = 8,
     val automatic: Boolean = false,
 )
 

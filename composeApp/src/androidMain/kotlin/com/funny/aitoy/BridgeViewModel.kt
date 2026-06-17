@@ -13,6 +13,7 @@ import androidx.lifecycle.viewModelScope
 import com.funny.aitoy.ble.AndroidBleController
 import com.funny.aitoy.ble.BleConnectionState
 import com.funny.aitoy.ble.BleProtocolStatus
+import com.funny.aitoy.ble.CachitoBroadcastProtocol
 import com.funny.aitoy.ble.ProtocolAttemptStatus
 import com.funny.aitoy.ble.ProtocolTemplate
 import com.funny.aitoy.ble.ScannedBleDevice
@@ -197,12 +198,12 @@ class BridgeViewModel : ViewModel() {
         ProtocolPreset(
             name = "Roselex / DSJM",
             description = "已验证的 DSJM/Roselex 系列模板，适合无法自动识别时手动尝试。",
-            serviceUuid = "0000dddd-0000-1000-8000-00805f9b34fb",
-            writeUuid = "0000ddd1-0000-1000-8000-00805f9b34fb",
-            notifyUuid = "0000ddd2-0000-1000-8000-00805f9b34fb",
-            commandTemplate = "55 09 00 00 {mode} {intensity} 00",
-            stopTemplate = "55 FE 09 00 00 00 00",
-            writeWithResponse = false,
+            serviceUuid = "0000fffe-0000-1000-8000-00805f9b34fb",
+            writeUuid = "0000fe02-0000-1000-8000-00805f9b34fb",
+            notifyUuid = "",
+            commandTemplate = "03 12 {intensity} 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+            stopTemplate = "03 12 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
+            writeWithResponse = true,
         ),
         ProtocolPreset(
             name = "OhMiBod Esca 2",
@@ -274,7 +275,7 @@ class BridgeViewModel : ViewModel() {
     )
     private val mainHandler = Handler(Looper.getMainLooper())
     private val autoStop = Runnable {
-        runCatching { controller.stopDevice() }
+        runCatching { controller.stopDevice(mode) }
             .onSuccess { appendLog("安全计时结束，已自动发送停止指令") }
             .onFailure { appendLog("自动停止失败：${it.message}") }
     }
@@ -348,7 +349,7 @@ class BridgeViewModel : ViewModel() {
     fun stopDevice() = runAction {
         busyHint = "已停止"
         mainHandler.removeCallbacks(autoStop)
-        controller.stopDevice()
+        controller.stopDevice(mode)
         intensity = 0
         syncRelayDevice()
     }
@@ -356,7 +357,7 @@ class BridgeViewModel : ViewModel() {
     fun stopAllDevices() = runAction {
         busyHint = "已全部停止"
         mainHandler.removeCallbacks(autoStop)
-        controller.stopDevice()
+        controller.stopDevice(mode)
         intensity = 0
         syncRelayDevice()
     }
@@ -719,7 +720,7 @@ class BridgeViewModel : ViewModel() {
             }
             "stop", "stop_all" -> {
                 mainHandler.removeCallbacks(autoStop)
-                controller.stopDevice()
+                controller.stopDevice(mode)
                 intensity = 0
                 busyHint = if (action == "stop_all") "已全部停止" else "已停止"
                 syncRelayDevice()
@@ -734,6 +735,12 @@ class BridgeViewModel : ViewModel() {
             .take(8)
             .joinToString("") { "%02x".format(it) }
         return "dev_$digest"
+    }
+
+    fun currentModeLabel(): String {
+        if (protocolStatus.id != "cachito_advertise") return "节奏 ${mode}"
+        val name = CachitoBroadcastProtocol.modeNames().getOrNull(mode - 1)
+        return if (name.isNullOrBlank()) "模板 ${mode}" else "模板 ${mode}：$name"
     }
 
     private fun rememberConnectedDevice() {

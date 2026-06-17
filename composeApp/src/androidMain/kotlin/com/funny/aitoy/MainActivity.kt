@@ -42,6 +42,7 @@ class MainActivity : ComponentActivity() {
             arrayOf(
                 Manifest.permission.BLUETOOTH_SCAN,
                 Manifest.permission.BLUETOOTH_CONNECT,
+                Manifest.permission.BLUETOOTH_ADVERTISE,
             )
         } else {
             arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
