@@ -93,3 +93,5 @@ fun CacheManager.fileSubDir(name: String) = fileDir.resolve(name).ensureDirector
 ## 诊断
 
 - 获取线上崩溃日志：`python scripts/fetch_diagnostics.py --size 10`
+- 获取线上普通日志（需 Header 带有 MagicKey: FunnyAIToy）： GET https://aitoy.funnysaltyfish.fun/api/diagnostics/logs?limit=100
+  - 过滤 WS：GET https://aitoy.funnysaltyfish.fun/api/diagnostics/logs?category=ws&limit=200
