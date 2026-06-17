@@ -1,6 +1,7 @@
 package com.funny.aitoy
 
 import android.net.Uri
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import androidx.compose.runtime.getValue
@@ -495,10 +496,13 @@ class BridgeViewModel : ViewModel() {
             }.onSuccess { config ->
                 communityCode = config.communityCode
                 val update = config.update
+                val updateAvailable = update.latestVersionCode > APP_VERSION_CODE
+                val forceUpdate = update.forceUpdate &&
+                    (update.minSupportedVersionCode > APP_VERSION_CODE || updateAvailable)
                 updateState = AppUpdateState(
                     checked = true,
-                    updateAvailable = update.updateAvailable,
-                    forceUpdate = update.forceUpdate,
+                    updateAvailable = update.updateAvailable && updateAvailable,
+                    forceUpdate = forceUpdate,
                     latestVersionName = update.latestVersionName,
                     message = update.msg,
                     apkUrl = update.downloadUrl.ifBlank { update.apkUrl },
@@ -777,7 +781,27 @@ class BridgeViewModel : ViewModel() {
     }
 
     companion object {
-        const val APP_VERSION_CODE = 1
-        const val APP_VERSION_NAME = "1.0"
+        val APP_VERSION_CODE: Int
+            get() = currentPackageVersionCode()
+        val APP_VERSION_NAME: String
+            get() = currentPackageVersionName()
+
+        private fun currentPackageVersionCode(): Int {
+            return runCatching {
+                val info = appCtx.packageManager.getPackageInfo(appCtx.packageName, 0)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    info.longVersionCode.toInt()
+                } else {
+                    @Suppress("DEPRECATION")
+                    info.versionCode
+                }
+            }.getOrDefault(100)
+        }
+
+        private fun currentPackageVersionName(): String {
+            return runCatching {
+                appCtx.packageManager.getPackageInfo(appCtx.packageName, 0).versionName.orEmpty()
+            }.getOrDefault("0.1.0")
+        }
     }
 }
