@@ -18,7 +18,8 @@ interface AppService {
 data class AppConfigPayload(
     val baseUrl: String = "",
     val mcpUrl: String = "",
-    val communityCode: String = "",
+    val communityUrl: String = "",
+    val tutorialUrl: String = "",
     val update: AppUpdatePayload = AppUpdatePayload(),
 )
 

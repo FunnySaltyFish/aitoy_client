@@ -22,8 +22,10 @@ import com.funny.aitoy.ble.ProtocolTemplate
 import com.funny.aitoy.ble.ScannedBleDevice
 import com.funny.aitoy.chat.ToyTool
 import com.funny.aitoy.chat.ToyToolResult
+import com.funny.aitoy.core.kmp.ToastType
 import com.funny.aitoy.core.kmp.appCtx
 import com.funny.aitoy.core.kmp.openUrl
+import com.funny.aitoy.core.kmp.toast
 import com.funny.aitoy.core.prefs.AiToyPrefs
 import com.funny.aitoy.core.prefs.DataSaverUtils
 import com.funny.aitoy.diagnostics.AiToyCrashReporter
@@ -52,6 +54,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import org.json.JSONArray
 import org.json.JSONObject
 import java.security.MessageDigest
+import java.util.UUID
 import kotlin.math.roundToInt
 
 data class RememberedToy(
@@ -98,6 +101,12 @@ private sealed interface RelaySequenceStep {
 
 private class SequenceScriptFormatException : IllegalArgumentException("序列脚本格式错误")
 
+private const val LegacyDefaultUserToken = "ut_fishfish"
+private const val DefaultCommunityUrl = "https://qm.qq.com/q/ytRVIe6O7m"
+private const val DefaultTutorialUrl = "https://docs.qq.com/s/4dhBqBSu1u5900Qh7qvYHW/folder/YFZTdLuzaIxv"
+
+private fun generateDefaultUserToken(): String = "ut_${UUID.randomUUID().toString().replace("-", "")}"
+
 class BridgeViewModel : ViewModel() {
     val devices = mutableStateListOf<ScannedBleDevice>()
     val logs = mutableStateListOf<String>()
@@ -124,9 +133,9 @@ class BridgeViewModel : ViewModel() {
     var importCode by mutableStateOf("")
     var importMessage by mutableStateOf("")
         private set
-    var communityCode by mutableStateOf("")
+    var communityUrl by mutableStateOf(DefaultCommunityUrl)
         private set
-    var communityMessage by mutableStateOf("")
+    var tutorialUrl by mutableStateOf(DefaultTutorialUrl)
         private set
     var updateState by mutableStateOf(AppUpdateState())
         private set
@@ -151,7 +160,7 @@ class BridgeViewModel : ViewModel() {
     var userToken: String by mutableDataSaverStateOf(
         DataSaverUtils,
         "AITOY_USER_TOKEN",
-        "ut_fishfish",
+        "",
     )
 
     var serviceUuid: String by mutableDataSaverStateOf(
@@ -297,6 +306,7 @@ class BridgeViewModel : ViewModel() {
             if (it == BleConnectionState.Ready) {
                 currentDeviceSaved = rememberedDevices.any { toy -> toy.address == selectedAddress }
                 syncRelayDevice()
+                autoOnlineSavedDevice()
             }
         },
         onProtocol = { protocolStatus = it },
@@ -322,13 +332,17 @@ class BridgeViewModel : ViewModel() {
     private val relay = RelayClient(
         onState = {
             relayState = it
-            if (it == "已在线") syncRelayDevice()
+            if (it == "已在线") {
+                syncRelayDevice()
+                toast("手机已上线", ToastType.Success)
+            }
         },
         onLog = ::appendLog,
         onCommand = ::handleRelayCommand,
     )
     private var relaySequenceJob: Job? = null
     private var debugLogTapCount = 0
+    private var autoOnlineAddress = ""
 
     init {
         if (AiToyPrefs.apiPrefix == "aitoy") {
@@ -338,8 +352,15 @@ class BridgeViewModel : ViewModel() {
             OkHttpUtils.useProductionBaseUrl()
         }
         refreshBaseUrlState()
+        ensureDefaultUserToken()
         userTokenDraft = userToken
         checkAppConfig()
+    }
+
+    private fun ensureDefaultUserToken() {
+        if (userToken.isBlank() || userToken == LegacyDefaultUserToken) {
+            userToken = generateDefaultUserToken()
+        }
     }
 
     fun toggleScan() {
@@ -480,11 +501,14 @@ class BridgeViewModel : ViewModel() {
         if (address == selectedAddress) {
             currentDeviceSaved = true
             controlTrialStarted = false
+            autoOnlineAddress = ""
+            autoOnlineSavedDevice()
         }
         showDeviceRemarkDialog = false
         editingRemarkAddress = ""
         editingRemarkProtocolName = ""
         busyHint = "已保存到我的设备"
+        toast("已保存，手机正在上线", ToastType.Success)
     }
 
     fun getToyStatusForChat(): ToyToolResult = ToyToolResult(
@@ -580,6 +604,14 @@ class BridgeViewModel : ViewModel() {
         appCtx.openUrl(OkHttpUtils.externalUrl("download"))
     }
 
+    fun openTutorialDocument() {
+        appCtx.openUrl(tutorialUrl.ifBlank { DefaultTutorialUrl })
+    }
+
+    fun openCommunityGroup() {
+        appCtx.openUrl(communityUrl.ifBlank { DefaultCommunityUrl })
+    }
+
     fun onDebugLogTitleClick() {
         if (developerMode) return
         debugLogTapCount += 1
@@ -663,7 +695,8 @@ class BridgeViewModel : ViewModel() {
             runCatching {
                 apiRequest { AiToyServices.appService.config(APP_VERSION_CODE) }
             }.onSuccess { config ->
-                communityCode = config.communityCode
+                communityUrl = config.communityUrl.ifBlank { DefaultCommunityUrl }
+                tutorialUrl = config.tutorialUrl.ifBlank { DefaultTutorialUrl }
                 val update = config.update
                 val updateAvailable = update.latestVersionCode > APP_VERSION_CODE
                 val forceUpdate = update.forceUpdate &&
@@ -685,20 +718,6 @@ class BridgeViewModel : ViewModel() {
         }
     }
 
-    fun fetchCommunityCode() {
-        communityMessage = "正在获取口令..."
-        viewModelScope.launch {
-            runCatching {
-                apiRequest { AiToyServices.appService.config(APP_VERSION_CODE) }
-            }.onSuccess { config ->
-                communityCode = config.communityCode
-                communityMessage = "口令已准备好，可以复制到小红书打开"
-            }.onFailure {
-                communityMessage = it.message ?: "获取失败"
-            }
-        }
-    }
-
     fun applyPreset(preset: ProtocolPreset) {
         serviceUuid = preset.serviceUuid
         writeUuid = preset.writeUuid
@@ -707,7 +726,10 @@ class BridgeViewModel : ViewModel() {
         stopTemplate = preset.stopTemplate
         writeWithResponse = preset.writeWithResponse
         manualControlEnabled = true
-        importMessage = "已选择 ${preset.name}，请重新连接设备测试"
+        showAdvanced = true
+        showTemplateLibrary = false
+        importMessage = "已选择 ${preset.name}，下一步重新连接设备测试"
+        busyHint = "手动指令已准备好，请重新连接测试"
         appendLog("已应用模板：${preset.name}")
     }
 
@@ -793,12 +815,32 @@ class BridgeViewModel : ViewModel() {
                 stopTemplate = payload.stringValue("stopTemplate", stopTemplate)
                 writeWithResponse = payload.booleanValue("writeWithResponse", writeWithResponse)
                 manualControlEnabled = true
-                importMessage = "已导入，可以重新连接设备试试"
+                showAdvanced = true
+                showTemplateLibrary = false
+                importMessage = "已导入，下一步重新连接设备测试"
+                busyHint = "手动指令已准备好，请重新连接测试"
                 appendLog("已导入分享指令：${result.title}")
             }.onFailure {
                 importMessage = it.message ?: "导入失败"
             }
         }
+    }
+
+    fun reconnectWithCurrentTemplate() {
+        if (selectedAddress.isBlank()) {
+            if (!scanning) toggleScan()
+            busyHint = "请选择要测试的设备"
+            return
+        }
+        val device = devices.firstOrNull { it.address == selectedAddress }
+            ?: ScannedBleDevice(
+                name = selectedName.ifBlank { "蓝牙设备" },
+                address = selectedAddress,
+                rssi = 0,
+                connectable = true,
+            )
+        disconnect()
+        connect(device)
     }
 
     private fun JsonObject.stringValue(key: String, default: String): String {
@@ -881,26 +923,25 @@ class BridgeViewModel : ViewModel() {
         val safeDefaultDuration = (defaultDurationSec ?: 30).coerceIn(1, 30)
         var stopped = false
         try {
-            steps.forEach { step ->
+            steps.forEachIndexed { index, step ->
                 when (step) {
                     is RelaySequenceStep.Set -> {
+                        val durationSec = step.durationSec
                         sendToySet(
                             intensityPercent = step.intensity,
                             requestedMode = step.mode,
-                            autoStopSec = step.durationSec ?: safeDefaultDuration,
+                            autoStopSec = durationSec ?: safeDefaultDuration,
                         )
                         stopped = false
-                        step.durationSec?.let {
-                            delay(it.coerceIn(1, 30) * 1_000L)
+                        if (durationSec != null) {
+                            delay(durationSec.coerceIn(1, 30) * 1_000L)
                             sendToyStop()
                             stopped = true
+                        } else if (index == steps.lastIndex) {
+                            delay(safeDefaultDuration * 1_000L)
                         }
                     }
-                    is RelaySequenceStep.Sleep -> {
-                        sendToyStop()
-                        stopped = true
-                        delay(step.durationSec.coerceIn(0, 300) * 1_000L)
-                    }
+                    is RelaySequenceStep.Sleep -> delay(step.durationSec.coerceIn(0, 300) * 1_000L)
                     RelaySequenceStep.Stop -> {
                         sendToyStop()
                         stopped = true
@@ -1032,6 +1073,20 @@ class BridgeViewModel : ViewModel() {
                 )
             }
         rememberedDevicesJson = merged.toString()
+    }
+
+    private fun autoOnlineSavedDevice() {
+        if (connectionState != BleConnectionState.Ready) return
+        if (!currentDeviceSaved || selectedAddress.isBlank()) return
+        if (relayState == "已在线") {
+            syncRelayDevice()
+            return
+        }
+        if (autoOnlineAddress == selectedAddress) return
+        autoOnlineAddress = selectedAddress
+        busyHint = "设备已就绪，手机正在上线"
+        toast("设备已就绪，正在上线", ToastType.Info)
+        connectRelay()
     }
 
     private fun publicBaseUrl(): String {
