@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -16,11 +17,15 @@ import requests
 # 直接编辑这里，然后运行：
 #   python scripts/update_app_version.py
 BASE_URL = "https://aitoy.funnysaltyfish.fun"
-ADMIN_KEY = "FunnyTrans"
+ADMIN_KEY = os.environ.get("AITOY_ADMIN_KEY", "FunnyAIToy")
 PLATFORM = "android"
 CHANNEL = "common"
 PACKAGE_NAME = "com.funny.aitoy"
-UPDATE_LOG = """AI Toy Bridge 0.2.0
+UPDATE_LOG = """AI Toy Bridge 0.2.1
+
+第三个版本：
+- 修复了 MCP token 错误的问题，之前都是 fishfish，如果之前填过配置的，现在需要重新填自己的新配置
+- 优化页面的显示逻辑，以及初次连接时的权限弹窗
 
 第二个版本：
 - 修改之前部分模式中错误编写的字段，现在应该支持更多设备了。
@@ -170,6 +175,23 @@ def archive_release(root: Path, apk_path: Path, package_info: AndroidPackageInfo
     return archive_dir
 
 
+def response_error_message(resp: requests.Response) -> str:
+    try:
+        payload = resp.json()
+    except ValueError:
+        payload = None
+
+    if isinstance(payload, dict):
+        message = payload.get("msg") or payload.get("message") or payload
+    else:
+        message = resp.text.strip()
+
+    detail = str(message).strip()
+    if detail:
+        return f"{resp.status_code} {resp.reason}: {detail}"
+    return f"{resp.status_code} {resp.reason}"
+
+
 def main() -> int:
     args = parse_args()
     root = Path(__file__).resolve().parents[1]
@@ -206,7 +228,8 @@ def main() -> int:
             files={"apk": (apk_path.name, file, "application/vnd.android.package-archive")},
             timeout=(15, 600),
         )
-    resp.raise_for_status()
+    if not resp.ok:
+        raise RuntimeError(response_error_message(resp))
     payload = resp.json()
     if payload.get("code") != 0:
         raise RuntimeError(payload.get("msg") or payload)

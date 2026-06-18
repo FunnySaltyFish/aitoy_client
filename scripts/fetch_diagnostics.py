@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import os
 import argparse
 import json
 import urllib.parse
@@ -8,7 +9,7 @@ import urllib.request
 
 
 BASE_URL = "https://aitoy.funnysaltyfish.fun"
-ADMIN_KEY = "FunnyTrans"
+ADMIN_KEY = os.environ.get("AITOY_ADMIN_KEY", "FunnyAIToy")
 
 
 def parse_args() -> argparse.Namespace:
