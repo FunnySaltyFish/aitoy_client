@@ -358,7 +358,7 @@ class BridgeViewModel : ViewModel() {
     }
 
     private fun ensureDefaultUserToken() {
-        if (userToken.isBlank() || userToken == LegacyDefaultUserToken) {
+        if (userToken.isBlank() || (!developerMode && userToken == LegacyDefaultUserToken)) {
             userToken = generateDefaultUserToken()
         }
     }
@@ -923,23 +923,19 @@ class BridgeViewModel : ViewModel() {
         val safeDefaultDuration = (defaultDurationSec ?: 30).coerceIn(1, 30)
         var stopped = false
         try {
-            steps.forEachIndexed { index, step ->
+            steps.forEach { step ->
                 when (step) {
                     is RelaySequenceStep.Set -> {
-                        val durationSec = step.durationSec
+                        val durationSec = step.durationSec ?: safeDefaultDuration
                         sendToySet(
                             intensityPercent = step.intensity,
                             requestedMode = step.mode,
-                            autoStopSec = durationSec ?: safeDefaultDuration,
+                            autoStopSec = durationSec,
                         )
                         stopped = false
-                        if (durationSec != null) {
-                            delay(durationSec.coerceIn(1, 30) * 1_000L)
-                            sendToyStop()
-                            stopped = true
-                        } else if (index == steps.lastIndex) {
-                            delay(safeDefaultDuration * 1_000L)
-                        }
+                        delay(durationSec.coerceIn(1, 30) * 1_000L)
+                        sendToyStop()
+                        stopped = true
                     }
                     is RelaySequenceStep.Sleep -> delay(step.durationSec.coerceIn(0, 300) * 1_000L)
                     RelaySequenceStep.Stop -> {
