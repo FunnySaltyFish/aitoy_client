@@ -21,4 +21,5 @@ node_modules/
 
 __pycache__/
 
-/composeApp/release/*
+/archive/
+/composeApp/release/

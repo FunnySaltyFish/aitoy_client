@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -19,13 +20,13 @@ ADMIN_KEY = "FunnyTrans"
 PLATFORM = "android"
 CHANNEL = "common"
 PACKAGE_NAME = "com.funny.aitoy"
-UPDATE_LOG = """AI Toy Bridge 0.1.0
+UPDATE_LOG = """AI Toy Bridge 0.2.0
 
-首个版本：
-- 可以寻找并连接附近的蓝牙小玩具。
-- 支持调节强度、立即停止和自动停止。
-- 可以把手机作为桥接端，让 AI 伙伴控制已连接设备。
-- 提供高级指令导入和调试日志，便于适配更多设备。
+第二个版本：
+- 修改之前部分模式中错误编写的字段，现在应该支持更多设备了。
+- 新增广播能力控制，理论上目前适配 Kisstoy 和 Cachito，欢迎再次尝试
+- 优化控制体验：现在不需要额外点击按钮，直接拖动即可快速尝试，并可以保存设备并修改备注
+- 使用手上的某个设备完成了实际验证，可用！
 """
 
 
@@ -139,6 +140,36 @@ def resolve_package_info(args: argparse.Namespace, apk_path: Path) -> AndroidPac
         return read_package_info(args)
 
 
+def sanitize_archive_part(value: str) -> str:
+    safe_value = re.sub(r"[^0-9A-Za-z._-]+", "-", value.strip())
+    return safe_value.strip(".-") or "unknown"
+
+
+def archive_release(root: Path, apk_path: Path, package_info: AndroidPackageInfo, channel: str) -> Path:
+    archive_dir_name = (
+        f"{sanitize_archive_part(package_info.version_name)}-"
+        f"{sanitize_archive_part(channel)}"
+    )
+    archive_dir = root / "archive" / archive_dir_name
+    archive_dir.mkdir(parents=True, exist_ok=True)
+
+    shutil.copy2(apk_path, archive_dir / apk_path.name)
+
+    metadata_path = apk_path.parent / "output-metadata.json"
+    if metadata_path.is_file():
+        shutil.copy2(metadata_path, archive_dir / metadata_path.name)
+
+    baseline_profiles_dir = apk_path.parent / "baselineProfiles"
+    if baseline_profiles_dir.is_dir():
+        shutil.copytree(
+            baseline_profiles_dir,
+            archive_dir / baseline_profiles_dir.name,
+            dirs_exist_ok=True,
+        )
+
+    return archive_dir
+
+
 def main() -> int:
     args = parse_args()
     root = Path(__file__).resolve().parents[1]
@@ -183,6 +214,8 @@ def main() -> int:
     print("上传完成")
     print(f"下载地址: {version.get('downloadUrl')}")
     print(f"下载页: {version.get('downloadPageUrl')}")
+    archive_dir = archive_release(root, apk_path, package_info, args.channel)
+    print(f"本地归档: {archive_dir}")
     return 0
 
 
