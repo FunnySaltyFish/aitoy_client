@@ -287,23 +287,21 @@ class AndroidBleController(
         }
     }
 
-    fun sendCommand(mode: Int, intensity: Int) {
+    fun sendAction(action: ToyControlAction) {
         activeBroadcastProtocol?.let { protocol ->
-            protocol.setCommands(mode, intensity).forEach(advertiser::start)
+            when (action) {
+                is ToyControlAction.Pattern -> protocol.setCommands(action.mode, 1)
+                is ToyControlAction.Intensity -> protocol.setCommands(1, action.value)
+                is ToyControlAction.Combined -> protocol.setCommands(action.mode, action.intensity)
+                ToyControlAction.Stop -> protocol.stopCommands(1)
+            }.forEach(advertiser::start)
             return
         }
         val protocol = activeProtocol ?: error("当前设备尚无可用的内置协议")
-        enqueue(protocol.setCommands(mode, intensity))
+        enqueue(protocol.commandsFor(action))
     }
 
-    fun stopDevice(mode: Int = 1) {
-        activeBroadcastProtocol?.let { protocol ->
-            protocol.stopCommands(mode).forEach(advertiser::start)
-            return
-        }
-        val protocol = activeProtocol ?: error("当前设备尚无可用的内置协议")
-        enqueue(protocol.stopCommands())
-    }
+    fun stopDevice() = sendAction(ToyControlAction.Stop)
 
     private fun write(operation: BleProtocolOperation.Write) {
         val currentGatt = gatt ?: run {

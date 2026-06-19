@@ -37,6 +37,20 @@ data class ProtocolTemplate(
     fun stopBytes(): ByteArray = parseHexTemplate(stopTemplate, mode = 0, intensity = 0)
 }
 
+enum class ToyControlStyle {
+    IntensityOnly,
+    PatternOnly,
+    ExclusivePatternOrIntensity,
+    CombinedPatternAndIntensity,
+}
+
+sealed interface ToyControlAction {
+    data class Pattern(val mode: Int) : ToyControlAction
+    data class Intensity(val value: Int) : ToyControlAction
+    data class Combined(val mode: Int, val intensity: Int) : ToyControlAction
+    data object Stop : ToyControlAction
+}
+
 data class BleProtocolStatus(
     val id: String = "",
     val displayName: String = "尚未识别",
@@ -45,6 +59,9 @@ data class BleProtocolStatus(
     val intensityMax: Int = 0,
     val supportsMode: Boolean = false,
     val modeMax: Int = 8,
+    val controlStyle: ToyControlStyle = ToyControlStyle.IntensityOnly,
+    val modeLabel: String = "节奏",
+    val intensityLabel: String = "强度",
     val automatic: Boolean = false,
     val repeatIntervalMs: Int = 0,
 )
@@ -66,12 +83,21 @@ fun parseHexTemplate(template: String, mode: Int, intensity: Int): ByteArray {
         .replace("{intensity}", intensity.toString(16).padStart(2, '0'), ignoreCase = true)
         .trim()
     require(resolved.isNotEmpty()) { "指令不能为空" }
-    return resolved.split(Regex("[\\s,]+")).map { token ->
+    val tokens = resolved.split(Regex("[\\s,]+"))
+    val checksumIndex = tokens.indexOfFirst { it.equals("{checksum}", ignoreCase = true) }
+    require(checksumIndex == -1 || checksumIndex == tokens.lastIndex) { "校验位只能放在最后" }
+    val bytes = tokens.filterNot { it.equals("{checksum}", ignoreCase = true) }.map { token ->
         require(token.length in 1..2 && token.all { it.isDigit() || it.lowercaseChar() in 'a'..'f' }) {
             "无法识别的字节：$token"
         }
         token.toInt(16).also { require(it in 0..255) }.toByte()
-    }.toByteArray()
+    }
+    return if (checksumIndex == -1) {
+        bytes.toByteArray()
+    } else {
+        val checksum = bytes.sumOf { it.toInt() and 0xff } and 0xff
+        (bytes + checksum.toByte()).toByteArray()
+    }
 }
 
 fun ByteArray.toHexString(): String = joinToString(" ") { byte ->

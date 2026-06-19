@@ -27,14 +27,7 @@ internal interface BleDeviceProtocol {
 
     fun onRead(characteristicUuid: UUID, bytes: ByteArray): List<BleProtocolOperation> = emptyList()
 
-    fun setCommand(mode: Int, intensity: Int): BleProtocolOperation.Write
-
-    fun stopCommand(): BleProtocolOperation.Write
-
-    fun setCommands(mode: Int, intensity: Int): List<BleProtocolOperation> =
-        listOf(setCommand(mode, intensity))
-
-    fun stopCommands(): List<BleProtocolOperation> = listOf(stopCommand())
+    fun commandsFor(action: ToyControlAction): List<BleProtocolOperation>
 }
 
 internal object BleProtocolRegistry {
@@ -112,6 +105,7 @@ private object SistalkMonsterPubProtocol : BleDeviceProtocol {
         controllable = true,
         intensityMax = 20,
         supportsMode = false,
+        controlStyle = ToyControlStyle.IntensityOnly,
         automatic = true,
     )
 
@@ -123,21 +117,21 @@ private object SistalkMonsterPubProtocol : BleDeviceProtocol {
         return knownNames.any { it.equals(fingerprint.name, ignoreCase = true) }
     }
 
-    override fun setCommand(mode: Int, intensity: Int): BleProtocolOperation.Write {
+    override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
+        when (action) {
+            is ToyControlAction.Intensity -> listOf(run(action.value))
+            is ToyControlAction.Combined -> listOf(run(action.intensity))
+            is ToyControlAction.Pattern -> emptyList()
+            ToyControlAction.Stop -> listOf(stop())
+        }
+
+    private fun run(intensity: Int): BleProtocolOperation.Write {
         val level = levelMap[intensity.coerceIn(0, status.intensityMax)]
-        return BleProtocolOperation.Write(
-            characteristicUuid = runUuid,
-            bytes = byteArrayOf(level.toByte()),
-            withResponse = false,
-        )
+        return BleProtocolOperation.Write(runUuid, byteArrayOf(level.toByte()), withResponse = false)
     }
 
-    override fun stopCommand(): BleProtocolOperation.Write =
-        BleProtocolOperation.Write(
-            characteristicUuid = stopUuid,
-            bytes = byteArrayOf(0x00),
-            withResponse = true,
-        )
+    private fun stop(): BleProtocolOperation.Write =
+        BleProtocolOperation.Write(stopUuid, byteArrayOf(0x00), withResponse = true)
 }
 
 private object SvakomQhSx045Protocol : BleDeviceProtocol {
@@ -150,6 +144,7 @@ private object SvakomQhSx045Protocol : BleDeviceProtocol {
         controllable = true,
         intensityMax = 10,
         supportsMode = false,
+        controlStyle = ToyControlStyle.IntensityOnly,
         automatic = true,
     )
 
@@ -160,10 +155,13 @@ private object SvakomQhSx045Protocol : BleDeviceProtocol {
         return knownName && hasSvakomGatt
     }
 
-    override fun setCommand(mode: Int, intensity: Int): BleProtocolOperation.Write =
-        command(0x01, intensity.coerceIn(0, status.intensityMax))
-
-    override fun stopCommand(): BleProtocolOperation.Write = command(0x00, 0x00)
+    override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
+        when (action) {
+            is ToyControlAction.Intensity -> listOf(command(0x01, action.value.coerceIn(0, status.intensityMax)))
+            is ToyControlAction.Combined -> listOf(command(0x01, action.intensity.coerceIn(0, status.intensityMax)))
+            is ToyControlAction.Pattern -> emptyList()
+            ToyControlAction.Stop -> listOf(command(0x00, 0x00))
+        }
 
     private fun command(mode: Int, speed: Int) = BleProtocolOperation.Write(
         characteristicUuid = writeUuid,
@@ -190,6 +188,7 @@ private object MizzzeeXhtkjProtocol : BleDeviceProtocol {
         controllable = true,
         intensityMax = 100,
         supportsMode = false,
+        controlStyle = ToyControlStyle.IntensityOnly,
         automatic = true,
         repeatIntervalMs = 200,
     )
@@ -201,10 +200,13 @@ private object MizzzeeXhtkjProtocol : BleDeviceProtocol {
         return knownName && hasMizzzeeGatt
     }
 
-    override fun setCommand(mode: Int, intensity: Int): BleProtocolOperation.Write =
-        command(intensity.coerceIn(0, status.intensityMax))
-
-    override fun stopCommand(): BleProtocolOperation.Write = command(0)
+    override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
+        when (action) {
+            is ToyControlAction.Intensity -> listOf(command(action.value.coerceIn(0, status.intensityMax)))
+            is ToyControlAction.Combined -> listOf(command(action.intensity.coerceIn(0, status.intensityMax)))
+            is ToyControlAction.Pattern -> emptyList()
+            ToyControlAction.Stop -> listOf(command(0))
+        }
 
     private fun command(intensity: Int): BleProtocolOperation.Write {
         val encoded = encodeStrength(intensity)
@@ -269,6 +271,8 @@ private object SenseeCcpa10S2Protocol : BleDeviceProtocol {
         intensityMax = 3,
         supportsMode = true,
         modeMax = 2,
+        controlStyle = ToyControlStyle.CombinedPatternAndIntensity,
+        modeLabel = "功能",
         automatic = true,
     )
 
@@ -279,7 +283,15 @@ private object SenseeCcpa10S2Protocol : BleDeviceProtocol {
         return knownName && hasSenseeGatt
     }
 
-    override fun setCommand(mode: Int, intensity: Int): BleProtocolOperation.Write {
+    override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
+        when (action) {
+            is ToyControlAction.Combined -> listOf(command(action.mode, action.intensity))
+            is ToyControlAction.Intensity -> listOf(command(2, action.value))
+            is ToyControlAction.Pattern -> listOf(command(action.mode, status.intensityMax.coerceAtLeast(1)))
+            ToyControlAction.Stop -> listOf(write(suctionOff), write(vibrationOff))
+        }
+
+    private fun command(mode: Int, intensity: Int): BleProtocolOperation.Write {
         val normalizedMode = mode.coerceIn(1, status.modeMax)
         val level = intensity.coerceIn(0, status.intensityMax)
         val payload = when {
@@ -290,11 +302,6 @@ private object SenseeCcpa10S2Protocol : BleDeviceProtocol {
         }
         return write(payload)
     }
-
-    override fun stopCommand(): BleProtocolOperation.Write = write(suctionOff)
-
-    override fun stopCommands(): List<BleProtocolOperation> =
-        listOf(write(suctionOff), write(vibrationOff))
 
     private fun write(payload: ByteArray) = BleProtocolOperation.Write(
         characteristicUuid = writeUuid,
@@ -332,6 +339,7 @@ private object KissToyProtocol : BleDeviceProtocol {
         intensityMax = 100,
         supportsMode = true,
         modeMax = 4,
+        controlStyle = ToyControlStyle.CombinedPatternAndIntensity,
         automatic = true,
     )
 
@@ -344,10 +352,15 @@ private object KissToyProtocol : BleDeviceProtocol {
         return knownName || hasNotify
     }
 
-    override fun setCommand(mode: Int, intensity: Int): BleProtocolOperation.Write =
-        command(commandForMode(mode.coerceIn(1, status.modeMax), intensity.coerceIn(0, 100)))
+    override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
+        when (action) {
+            is ToyControlAction.Combined -> run(action.mode, action.intensity)
+            is ToyControlAction.Intensity -> run(4, action.value)
+            is ToyControlAction.Pattern -> run(action.mode, 30)
+            ToyControlAction.Stop -> stop()
+        }
 
-    override fun setCommands(mode: Int, intensity: Int): List<BleProtocolOperation> {
+    private fun run(mode: Int, intensity: Int): List<BleProtocolOperation> {
         val normalizedMode = mode.coerceIn(1, status.modeMax)
         val normalizedIntensity = intensity.coerceIn(0, 100)
         val clearCommands = when (normalizedMode) {
@@ -359,9 +372,7 @@ private object KissToyProtocol : BleDeviceProtocol {
         return clearCommands + command(commandForMode(normalizedMode, normalizedIntensity))
     }
 
-    override fun stopCommand(): BleProtocolOperation.Write = command(kissToyPayload(0x40, 0, 0))
-
-    override fun stopCommands(): List<BleProtocolOperation> =
+    private fun stop(): List<BleProtocolOperation> =
         listOf(
             command(kissToyPayload(0x40, 0, 0)),
             command(kissToyPayload(0x31, 0)),
@@ -439,22 +450,21 @@ internal class ManualBleProtocol(
         controllable = true,
         intensityMax = 5,
         supportsMode = true,
+        controlStyle = ToyControlStyle.CombinedPatternAndIntensity,
         automatic = false,
     )
 
     override fun matches(fingerprint: BleGattFingerprint): Boolean = false
 
-    override fun setCommand(mode: Int, intensity: Int) = BleProtocolOperation.Write(
-        characteristicUuid = writeUuid,
-        bytes = template.commandBytes(mode, intensity),
-        withResponse = template.writeWithResponse,
-    )
-
-    override fun stopCommand() = BleProtocolOperation.Write(
-        characteristicUuid = writeUuid,
-        bytes = template.stopBytes(),
-        withResponse = template.writeWithResponse,
-    )
+    override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> {
+        val bytes = when (action) {
+            is ToyControlAction.Pattern -> template.commandBytes(action.mode, 1)
+            is ToyControlAction.Intensity -> template.commandBytes(1, action.value)
+            is ToyControlAction.Combined -> template.commandBytes(action.mode, action.intensity)
+            ToyControlAction.Stop -> template.stopBytes()
+        }
+        return listOf(BleProtocolOperation.Write(writeUuid, bytes, template.writeWithResponse))
+    }
 }
 
 private object SatisfyerProtocol : BleDeviceProtocol {
@@ -467,6 +477,7 @@ private object SatisfyerProtocol : BleDeviceProtocol {
         controllable = true,
         intensityMax = 100,
         supportsMode = false,
+        controlStyle = ToyControlStyle.IntensityOnly,
         automatic = true,
     )
 
@@ -474,20 +485,19 @@ private object SatisfyerProtocol : BleDeviceProtocol {
         fingerprint.characteristicUuids.contains(controlUuid) &&
                 fingerprint.characteristicUuids.contains(speedUuid)
 
-    override fun setCommand(mode: Int, intensity: Int): BleProtocolOperation.Write =
-        speedCommand(intensity)
+    override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
+        when (action) {
+            is ToyControlAction.Intensity -> run(action.value)
+            is ToyControlAction.Combined -> run(action.intensity)
+            is ToyControlAction.Pattern -> emptyList()
+            ToyControlAction.Stop -> listOf(speedCommand(0), BleProtocolOperation.Write(controlUuid, byteArrayOf(0x07), withResponse = true))
+        }
 
-    override fun setCommands(mode: Int, intensity: Int): List<BleProtocolOperation> =
+    private fun run(intensity: Int): List<BleProtocolOperation> =
         listOf(
             BleProtocolOperation.Write(controlUuid, byteArrayOf(0x01), withResponse = true),
             speedCommand(intensity),
         )
-
-    override fun stopCommand(): BleProtocolOperation.Write =
-        BleProtocolOperation.Write(controlUuid, byteArrayOf(0x07), withResponse = true)
-
-    override fun stopCommands(): List<BleProtocolOperation> =
-        listOf(speedCommand(0), stopCommand())
 
     private fun speedCommand(intensity: Int) = BleProtocolOperation.Write(
         characteristicUuid = speedUuid,
@@ -505,6 +515,7 @@ private object OhMiBodEsca2Protocol : BleDeviceProtocol {
         controllable = true,
         intensityMax = 100,
         supportsMode = false,
+        controlStyle = ToyControlStyle.IntensityOnly,
         automatic = true,
     )
 
@@ -512,10 +523,13 @@ private object OhMiBodEsca2Protocol : BleDeviceProtocol {
         fingerprint.name.equals("OhMiBod 4.0", ignoreCase = true) &&
                 fingerprint.characteristicUuids.contains(writeUuid)
 
-    override fun setCommand(mode: Int, intensity: Int): BleProtocolOperation.Write =
-        command(intensity)
-
-    override fun stopCommand(): BleProtocolOperation.Write = command(0)
+    override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
+        when (action) {
+            is ToyControlAction.Intensity -> listOf(command(action.value))
+            is ToyControlAction.Combined -> listOf(command(action.intensity))
+            is ToyControlAction.Pattern -> emptyList()
+            ToyControlAction.Stop -> listOf(command(0))
+        }
 
     private fun command(intensity: Int) = BleProtocolOperation.Write(
         characteristicUuid = writeUuid,
@@ -534,6 +548,7 @@ private object PinkPunchProtocol : BleDeviceProtocol {
         controllable = true,
         intensityMax = 100,
         supportsMode = false,
+        controlStyle = ToyControlStyle.IntensityOnly,
         automatic = true,
     )
 
@@ -542,10 +557,13 @@ private object PinkPunchProtocol : BleDeviceProtocol {
                 fingerprint.characteristicUuids.contains(writeUuid) &&
                 fingerprint.characteristicUuids.contains(notifyUuid)
 
-    override fun setCommand(mode: Int, intensity: Int): BleProtocolOperation.Write =
-        command(0x09, intensity)
-
-    override fun stopCommand(): BleProtocolOperation.Write = command(0x09, 0)
+    override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
+        when (action) {
+            is ToyControlAction.Intensity -> listOf(command(0x09, action.value))
+            is ToyControlAction.Combined -> listOf(command(0x09, action.intensity))
+            is ToyControlAction.Pattern -> emptyList()
+            ToyControlAction.Stop -> listOf(command(0x09, 0))
+        }
 
     private fun command(mode: Int, intensity: Int) = BleProtocolOperation.Write(
         characteristicUuid = writeUuid,
@@ -563,6 +581,7 @@ private object LovenutsProtocol : BleDeviceProtocol {
         controllable = true,
         intensityMax = 15,
         supportsMode = false,
+        controlStyle = ToyControlStyle.IntensityOnly,
         automatic = true,
     )
 
@@ -570,11 +589,13 @@ private object LovenutsProtocol : BleDeviceProtocol {
         fingerprint.name.equals("Love_Nuts", ignoreCase = true) &&
                 fingerprint.characteristicUuids.contains(writeUuid)
 
-    override fun setCommand(mode: Int, intensity: Int): BleProtocolOperation.Write =
-        patternCommand(intensity.coerceIn(0, status.intensityMax))
-
-    override fun stopCommand(): BleProtocolOperation.Write =
-        patternCommand(speed = 0)
+    override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
+        when (action) {
+            is ToyControlAction.Intensity -> listOf(patternCommand(action.value.coerceIn(0, status.intensityMax)))
+            is ToyControlAction.Combined -> listOf(patternCommand(action.intensity.coerceIn(0, status.intensityMax)))
+            is ToyControlAction.Pattern -> emptyList()
+            ToyControlAction.Stop -> listOf(patternCommand(speed = 0))
+        }
 
     private fun patternCommand(speed: Int): BleProtocolOperation.Write {
         val packed = ((speed and 0x0f) shl 4) or (speed and 0x0f)
@@ -600,6 +621,7 @@ private object JeJoueNuoProtocol : BleDeviceProtocol {
         intensityMax = 5,
         supportsMode = true,
         modeMax = 3,
+        controlStyle = ToyControlStyle.CombinedPatternAndIntensity,
         automatic = true,
     )
 
@@ -609,10 +631,13 @@ private object JeJoueNuoProtocol : BleDeviceProtocol {
         return knownName && fingerprint.characteristicUuids.contains(writeUuid)
     }
 
-    override fun setCommand(mode: Int, intensity: Int): BleProtocolOperation.Write =
-        command(mode.coerceIn(1, status.modeMax), intensity.coerceIn(0, status.intensityMax))
-
-    override fun stopCommand(): BleProtocolOperation.Write = command(pattern = 1, speed = 0)
+    override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
+        when (action) {
+            is ToyControlAction.Combined -> listOf(command(action.mode.coerceIn(1, status.modeMax), action.intensity.coerceIn(0, status.intensityMax)))
+            is ToyControlAction.Intensity -> listOf(command(pattern = 1, speed = action.value.coerceIn(0, status.intensityMax)))
+            is ToyControlAction.Pattern -> listOf(command(pattern = action.mode.coerceIn(1, status.modeMax), speed = status.intensityMax.coerceAtLeast(1)))
+            ToyControlAction.Stop -> listOf(command(pattern = 1, speed = 0))
+        }
 
     private fun command(pattern: Int, speed: Int) = BleProtocolOperation.Write(
         characteristicUuid = writeUuid,
@@ -639,6 +664,7 @@ private object LovenseProtocol : BleDeviceProtocol {
         controllable = true,
         intensityMax = 20,
         supportsMode = false,
+        controlStyle = ToyControlStyle.IntensityOnly,
         automatic = true,
     )
 
@@ -654,10 +680,13 @@ private object LovenseProtocol : BleDeviceProtocol {
         return emptyList()
     }
 
-    override fun setCommand(mode: Int, intensity: Int): BleProtocolOperation.Write =
-        command("Vibrate:${intensity.coerceIn(0, status.intensityMax)};")
-
-    override fun stopCommand(): BleProtocolOperation.Write = command("Vibrate:0;")
+    override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
+        when (action) {
+            is ToyControlAction.Intensity -> listOf(command("Vibrate:${action.value.coerceIn(0, status.intensityMax)};"))
+            is ToyControlAction.Combined -> listOf(command("Vibrate:${action.intensity.coerceIn(0, status.intensityMax)};"))
+            is ToyControlAction.Pattern -> emptyList()
+            ToyControlAction.Stop -> listOf(command("Vibrate:0;"))
+        }
 
     private fun command(value: String) = BleProtocolOperation.Write(
         characteristicUuid = writeUuid,
@@ -685,6 +714,7 @@ private object AnkniProtocol : BleDeviceProtocol {
         verifiedControl = true,
         intensityMax = 3,
         supportsMode = false,
+        controlStyle = ToyControlStyle.IntensityOnly,
         automatic = true,
     )
 
@@ -723,10 +753,13 @@ private object AnkniProtocol : BleDeviceProtocol {
         )
     }
 
-    override fun setCommand(mode: Int, intensity: Int): BleProtocolOperation.Write =
-        controlCommand(intensity.coerceIn(1, status.intensityMax))
-
-    override fun stopCommand(): BleProtocolOperation.Write = controlCommand(0)
+    override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
+        when (action) {
+            is ToyControlAction.Intensity -> listOf(controlCommand(action.value.coerceIn(1, status.intensityMax)))
+            is ToyControlAction.Combined -> listOf(controlCommand(action.intensity.coerceIn(1, status.intensityMax)))
+            is ToyControlAction.Pattern -> emptyList()
+            ToyControlAction.Stop -> listOf(controlCommand(0))
+        }
 
     private fun controlCommand(speed: Int) = BleProtocolOperation.Write(
         characteristicUuid = writeUuid,
@@ -758,14 +791,20 @@ private object AnkniYwtdProtocol : BleDeviceProtocol {
     private val serviceUuid = uuid("0000dddd-0000-1000-8000-00805f9b34fb")
     private val writeUuid = uuid("0000ddd1-0000-1000-8000-00805f9b34fb")
     private val notifyUuid = uuid("0000ddd2-0000-1000-8000-00805f9b34fb")
+    private const val MODE_COMMAND = 0x0F
+    private const val SLIDE_COMMAND = 0x08
+    private const val SLIDE_DURATION = 0xC8
 
     override val status = BleProtocolStatus(
         id = "ankni_ywtd",
-        displayName = "ANKNI YWTD",
+        displayName = "ANKNI / Mizzzee DDDD",
         controllable = true,
         intensityMax = 100,
         supportsMode = true,
-        modeMax = 8,
+        modeMax = 10,
+        controlStyle = ToyControlStyle.ExclusivePatternOrIntensity,
+        modeLabel = "预设节奏",
+        intensityLabel = "滑动强度",
         automatic = true,
     )
 
@@ -774,27 +813,30 @@ private object AnkniYwtdProtocol : BleDeviceProtocol {
                 fingerprint.characteristicUuids.contains(writeUuid) &&
                 fingerprint.characteristicUuids.contains(notifyUuid)
 
-    override fun setCommand(mode: Int, intensity: Int): BleProtocolOperation.Write =
+    override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
+        when (action) {
+            is ToyControlAction.Pattern ->
+                listOf(write(aaFrame(MODE_COMMAND, action.mode.coerceIn(1, status.modeMax))))
+            is ToyControlAction.Intensity ->
+                listOf(write(aaFrame(SLIDE_COMMAND, action.value.coerceIn(0, status.intensityMax), SLIDE_DURATION)))
+            is ToyControlAction.Combined ->
+                listOf(write(aaFrame(MODE_COMMAND, action.mode.coerceIn(1, status.modeMax))))
+            ToyControlAction.Stop ->
+                listOf(write(aaFrame(MODE_COMMAND, 0)))
+        }
+
+    private fun write(bytes: ByteArray): BleProtocolOperation.Write =
         BleProtocolOperation.Write(
             characteristicUuid = writeUuid,
-            bytes = byteArrayOf(
-                0x55,
-                0x09,
-                0x00,
-                0x00,
-                mode.coerceIn(1, status.modeMax).toByte(),
-                intensity.coerceIn(0, status.intensityMax).toByte(),
-                0x00,
-            ),
+            bytes = bytes,
             withResponse = false,
         )
 
-    override fun stopCommand(): BleProtocolOperation.Write =
-        BleProtocolOperation.Write(
-            characteristicUuid = writeUuid,
-            bytes = byteArrayOf(0x55, 0xFE.toByte(), 0x09, 0x00, 0x00, 0x00, 0x00),
-            withResponse = false,
-        )
+    private fun aaFrame(command: Int, vararg payload: Int): ByteArray {
+        val body = intArrayOf(0xAA, command, payload.size) + payload.map { it.coerceIn(0, 0xFF) }
+        val checksum = body.sum() and 0xFF
+        return (body + checksum).map { it.toByte() }.toByteArray()
+    }
 }
 
 private fun uuid(value: String): UUID = UUID.fromString(value)

@@ -69,6 +69,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.funny.aitoy.ble.BleConnectionState
 import com.funny.aitoy.ble.ProtocolAttemptStatus
 import com.funny.aitoy.ble.ScannedBleDevice
+import com.funny.aitoy.ble.ToyControlStyle
 import com.funny.aitoy.chat.ChatScreen
 import com.funny.aitoy.chat.ChatViewModel
 import kotlin.math.roundToInt
@@ -603,42 +604,37 @@ private fun DeviceRow(
 
 @Composable
 private fun ControlRoom(vm: BridgeViewModel) {
-    Panel(title = "轻柔控制", icon = Icons.Outlined.AutoAwesome) {
+    Panel(title = "设备控制", icon = Icons.Outlined.AutoAwesome) {
+        val status = vm.protocolStatus
         Text(
             text = when {
-                !vm.protocolStatus.controllable ->
-                    "这个设备还需要补充指令。可以打开高级工具，导入别人分享的指令，或按教程采集数据。"
-
-                !vm.protocolStatus.verifiedControl ->
-                    "已连上设备，但控制效果还没确认。请从低强度开始试一下；如果没反应，可以在高级工具里调整或导入指令。"
-
-                else ->
-                    "从低强度开始测试，确认有反应后再慢慢调整。"
+                !status.controllable -> "还没有可用的控制指令。可以在高级工具中导入或填写指令。"
+                status.controlStyle == ToyControlStyle.ExclusivePatternOrIntensity ->
+                    "这个设备有两套独立控制：预设节奏会按设备内置节奏运行，滑动强度会切换到连续强度。"
+                status.controlStyle == ToyControlStyle.CombinedPatternAndIntensity ->
+                    "选择节奏并调节强度，设备会按当前组合运行。"
+                status.controlStyle == ToyControlStyle.PatternOnly ->
+                    "选择一个预设节奏，设备会按内置节奏运行。"
+                else -> "调节强度，设备会按当前强度运行。"
             },
-            color = if (vm.protocolStatus.controllable) TextSoft else Danger,
+            color = if (status.controllable) TextSoft else Danger,
             style = MaterialTheme.typography.bodyMedium,
         )
         Spacer(Modifier.height(16.dp))
-        if (vm.protocolStatus.supportsMode) {
-            Text(vm.currentModeLabel(), color = TextSoft)
-            Slider(
-                value = vm.mode.toFloat(),
-                onValueChange = { vm.updateMode(it.roundToInt()) },
-                modifier = Modifier.testTag("mode_slider"),
-                valueRange = 1f..maxOf(1, vm.protocolStatus.modeMax).toFloat(),
-                steps = (vm.protocolStatus.modeMax - 2).coerceAtLeast(0),
-                enabled = vm.protocolStatus.controllable,
-            )
+        when (status.controlStyle) {
+            ToyControlStyle.ExclusivePatternOrIntensity -> {
+                PatternSelector(vm)
+                Spacer(Modifier.height(18.dp))
+                IntensityControl(vm)
+            }
+            ToyControlStyle.CombinedPatternAndIntensity -> {
+                PatternSelector(vm)
+                Spacer(Modifier.height(14.dp))
+                IntensityControl(vm)
+            }
+            ToyControlStyle.PatternOnly -> PatternSelector(vm)
+            ToyControlStyle.IntensityOnly -> IntensityControl(vm)
         }
-        Text("强度 ${vm.intensity}", color = TextSoft)
-        Slider(
-            value = vm.intensity.toFloat(),
-            onValueChange = { vm.updateIntensity(it.roundToInt()) },
-            modifier = Modifier.testTag("intensity_slider"),
-            valueRange = 1f..maxOf(1, vm.protocolStatus.intensityMax).toFloat(),
-            steps = (vm.protocolStatus.intensityMax - 2).coerceAtLeast(0),
-            enabled = vm.protocolStatus.controllable,
-        )
         if (vm.controlTrialStarted && !vm.currentDeviceSaved) {
             Spacer(Modifier.height(8.dp))
             Text("刚才的控制是否正常？", color = TextMain, fontWeight = FontWeight.SemiBold)
@@ -681,6 +677,59 @@ private fun ControlRoom(vm: BridgeViewModel) {
             }
         }
     }
+}
+
+@Composable
+private fun PatternSelector(vm: BridgeViewModel) {
+    val maxMode = vm.protocolStatus.modeMax.coerceAtLeast(1)
+    Text(vm.protocolStatus.modeLabel, color = TextMain, fontWeight = FontWeight.SemiBold)
+    Spacer(Modifier.height(10.dp))
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        (1..maxMode).chunked(5).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                row.forEach { index ->
+                    val selected = vm.mode == index
+                    Button(
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("mode_$index"),
+                        onClick = { vm.updateMode(index) },
+                        enabled = vm.protocolStatus.controllable,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (selected) RoseDeep else VelvetLight,
+                            contentColor = if (selected) Color.White else TextMain,
+                        ),
+                    ) {
+                        Text(index.toString())
+                    }
+                }
+                repeat(5 - row.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
+    }
+    Spacer(Modifier.height(8.dp))
+    Text(vm.currentModeLabel(), color = TextSoft, style = MaterialTheme.typography.bodySmall)
+}
+
+@Composable
+private fun IntensityControl(vm: BridgeViewModel) {
+    val maxIntensity = vm.protocolStatus.intensityMax.coerceAtLeast(1)
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(vm.protocolStatus.intensityLabel, color = TextMain, fontWeight = FontWeight.SemiBold)
+        Text("${vm.intensity}/$maxIntensity", color = Rose, fontWeight = FontWeight.Bold)
+    }
+    Slider(
+        value = vm.intensity.toFloat(),
+        onValueChange = { vm.updateIntensity(it.roundToInt()) },
+        modifier = Modifier.testTag("intensity_slider"),
+        valueRange = 1f..maxIntensity.toFloat(),
+        steps = (maxIntensity - 2).coerceAtLeast(0),
+        enabled = vm.protocolStatus.controllable,
+    )
 }
 
 @Composable

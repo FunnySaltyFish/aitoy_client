@@ -20,6 +20,8 @@ import com.funny.aitoy.ble.CachitoBroadcastProtocol
 import com.funny.aitoy.ble.ProtocolAttemptStatus
 import com.funny.aitoy.ble.ProtocolTemplate
 import com.funny.aitoy.ble.ScannedBleDevice
+import com.funny.aitoy.ble.ToyControlAction
+import com.funny.aitoy.ble.ToyControlStyle
 import com.funny.aitoy.chat.ToyTool
 import com.funny.aitoy.chat.ToyToolResult
 import com.funny.aitoy.core.kmp.ToastType
@@ -93,6 +95,10 @@ private sealed interface RelaySequenceStep {
         val intensity: Int,
         val durationSec: Int?,
     ) : RelaySequenceStep
+
+    data class Pattern(val mode: Int, val durationSec: Int?) : RelaySequenceStep
+
+    data class Intensity(val value: Int, val durationSec: Int?) : RelaySequenceStep
 
     data class Sleep(val durationSec: Int) : RelaySequenceStep
 
@@ -181,12 +187,12 @@ class BridgeViewModel : ViewModel() {
     var commandTemplate: String by mutableDataSaverStateOf(
         DataSaverUtils,
         "BLE_COMMAND_TEMPLATE",
-        "55 09 00 00 {mode} {intensity} 00",
+        "AA 08 02 {intensity} C8 {checksum}",
     )
     var stopTemplate: String by mutableDataSaverStateOf(
         DataSaverUtils,
         "BLE_STOP_TEMPLATE",
-        "55 FE 09 00 00 00 00",
+        "AA 0F 01 00 BA",
     )
     var writeWithResponse: Boolean by mutableDataSaverStateOf(
         DataSaverUtils,
@@ -234,6 +240,16 @@ class BridgeViewModel : ViewModel() {
         }.getOrDefault(emptyList())
 
     val protocolPresets = listOf(
+        ProtocolPreset(
+            name = "ANKNI / Mizzzee DDDD",
+            description = "ANKNI 名称、DDDD/DDD1 服务的谜姬/安可尼设备；自动识别优先，手动测试时可用此模板。",
+            serviceUuid = "0000dddd-0000-1000-8000-00805f9b34fb",
+            writeUuid = "0000ddd1-0000-1000-8000-00805f9b34fb",
+            notifyUuid = "0000ddd2-0000-1000-8000-00805f9b34fb",
+            commandTemplate = "AA 08 02 {intensity} C8 {checksum}",
+            stopTemplate = "AA 0F 01 00 BA",
+            writeWithResponse = false,
+        ),
         ProtocolPreset(
             name = "Roselex / DSJM",
             description = "已验证的 DSJM/Roselex 系列模板，适合无法自动识别时手动尝试。",
@@ -317,21 +333,12 @@ class BridgeViewModel : ViewModel() {
     private var keepAlive: Runnable? = null
     private val autoStop = Runnable {
         cancelKeepAlive()
-        runCatching { controller.stopDevice(mode) }
+        runCatching { controller.stopDevice() }
             .onSuccess { appendLog("安全计时结束，已自动发送停止指令") }
             .onFailure { appendLog("自动停止失败：${it.message}") }
     }
-    private val controlTrial = Runnable {
-        runCatching {
-            controller.sendCommand(mode, intensity)
-            syncRelayDevice()
-            startKeepAlive(mode, intensity, autoStopSec = 5)
-            mainHandler.removeCallbacks(autoStop)
-            mainHandler.postDelayed(autoStop, 5_000L)
-        }.onFailure {
-            busyHint = it.message ?: "控制失败"
-        }
-    }
+    private var pendingControlAction: ToyControlAction? = null
+    private val controlTrial = Runnable { pendingControlAction?.let(::sendLocalControlAction) }
     private val relay = RelayClient(
         onState = {
             relayState = it
@@ -423,14 +430,14 @@ class BridgeViewModel : ViewModel() {
         val next = value.coerceIn(1, protocolStatus.modeMax.coerceAtLeast(1))
         if (mode == next) return
         mode = next
-        scheduleControlTrial()
+        scheduleControlTrial(patternAction(next))
     }
 
     fun updateIntensity(value: Int) {
         val next = value.coerceIn(1, protocolStatus.intensityMax.coerceAtLeast(1))
         if (intensity == next) return
         intensity = next
-        scheduleControlTrial()
+        scheduleControlTrial(intensityAction(next))
     }
 
     fun stopDevice() = runAction {
@@ -438,7 +445,7 @@ class BridgeViewModel : ViewModel() {
         mainHandler.removeCallbacks(autoStop)
         mainHandler.removeCallbacks(controlTrial)
         cancelKeepAlive()
-        controller.stopDevice(mode)
+        controller.stopDevice()
         syncRelayDevice()
     }
 
@@ -447,7 +454,7 @@ class BridgeViewModel : ViewModel() {
         mainHandler.removeCallbacks(autoStop)
         mainHandler.removeCallbacks(controlTrial)
         cancelKeepAlive()
-        controller.stopDevice(mode)
+        controller.stopDevice()
         syncRelayDevice()
     }
 
@@ -893,6 +900,8 @@ class BridgeViewModel : ViewModel() {
                     intensity = intensity,
                     mode = mode,
                     intensityMax = protocolStatus.intensityMax,
+                    modeMax = protocolStatus.modeMax,
+                    controlStyle = protocolStatus.controlStyle.name,
                 )
             )
         )
@@ -933,11 +942,28 @@ class BridgeViewModel : ViewModel() {
                 when (step) {
                     is RelaySequenceStep.Set -> {
                         val durationSec = step.durationSec ?: safeDefaultDuration
-                        sendToySet(
-                            intensityPercent = step.intensity,
-                            requestedMode = step.mode,
-                            autoStopSec = durationSec,
-                        )
+                        sendToySet(step.intensity, step.mode, durationSec)
+                        stopped = false
+                        delay(durationSec.coerceIn(1, 30) * 1_000L)
+                        sendToyStop()
+                        stopped = true
+                    }
+                    is RelaySequenceStep.Pattern -> {
+                        val durationSec = step.durationSec ?: safeDefaultDuration
+                        sendToyAction(ToyControlAction.Pattern(step.mode.coerceAtLeast(1)), durationSec)
+                        mode = step.mode.coerceAtLeast(1)
+                        syncRelayDevice()
+                        stopped = false
+                        delay(durationSec.coerceIn(1, 30) * 1_000L)
+                        sendToyStop()
+                        stopped = true
+                    }
+                    is RelaySequenceStep.Intensity -> {
+                        val durationSec = step.durationSec ?: safeDefaultDuration
+                        val mappedIntensity = mapIntensityPercent(step.value)
+                        sendToyAction(ToyControlAction.Intensity(mappedIntensity), durationSec)
+                        intensity = mappedIntensity
+                        syncRelayDevice()
                         stopped = false
                         delay(durationSec.coerceIn(1, 30) * 1_000L)
                         sendToyStop()
@@ -975,9 +1001,25 @@ class BridgeViewModel : ViewModel() {
                 part.startsWith("set(") && part.endsWith(")") -> {
                     val args = parseSequenceArguments(part.removePrefix("set(").removeSuffix(")"))
                     val mode = args["mode"]?.coerceAtLeast(1) ?: throw SequenceScriptFormatException()
-                    val intensity = args["intensity"]?.coerceIn(0, 40) ?: throw SequenceScriptFormatException()
+                    val intensity = args["intensity"]?.coerceIn(0, 100) ?: throw SequenceScriptFormatException()
                     val duration = args["duration"]?.coerceIn(1, 30)
                     RelaySequenceStep.Set(mode = mode, intensity = intensity, durationSec = duration)
+                }
+                part.startsWith("pattern(") && part.endsWith(")") -> {
+                    val args = parseSequenceArguments(part.removePrefix("pattern(").removeSuffix(")"))
+                    RelaySequenceStep.Pattern(
+                        mode = args["mode"]?.coerceAtLeast(1) ?: throw SequenceScriptFormatException(),
+                        durationSec = args["duration"]?.coerceIn(1, 30),
+                    )
+                }
+                part.startsWith("intensity(") && part.endsWith(")") -> {
+                    val args = parseSequenceArguments(part.removePrefix("intensity(").removeSuffix(")"))
+                    RelaySequenceStep.Intensity(
+                        value = args["value"]?.coerceIn(0, 100)
+                            ?: args["intensity"]?.coerceIn(0, 100)
+                            ?: throw SequenceScriptFormatException(),
+                        durationSec = args["duration"]?.coerceIn(1, 30),
+                    )
                 }
                 else -> throw SequenceScriptFormatException()
             }
@@ -1000,30 +1042,47 @@ class BridgeViewModel : ViewModel() {
         requestedMode: Int,
         autoStopSec: Int,
     ) {
-        mainHandler.removeCallbacks(autoStop)
-        val maxIntensity = protocolStatus.intensityMax.coerceAtLeast(1)
-        val mappedIntensity = (
-            (intensityPercent.coerceIn(0, 100) / 100.0) * maxIntensity
-            ).roundToInt().coerceIn(0, maxIntensity)
+        val mappedIntensity = mapIntensityPercent(intensityPercent)
         val mappedMode = requestedMode.coerceAtLeast(1)
-        controller.sendCommand(mode = mappedMode, intensity = mappedIntensity)
-        startKeepAlive(mappedMode, mappedIntensity, autoStopSec)
+        val action = when (protocolStatus.controlStyle) {
+            ToyControlStyle.PatternOnly -> ToyControlAction.Pattern(mappedMode)
+            ToyControlStyle.IntensityOnly -> ToyControlAction.Intensity(mappedIntensity)
+            ToyControlStyle.ExclusivePatternOrIntensity -> {
+                if (mappedIntensity > 0) ToyControlAction.Intensity(mappedIntensity)
+                else ToyControlAction.Pattern(mappedMode)
+            }
+            ToyControlStyle.CombinedPatternAndIntensity -> ToyControlAction.Combined(mappedMode, mappedIntensity)
+        }
+        sendToyAction(action, autoStopSec)
         mode = mappedMode
         intensity = mappedIntensity
-        busyHint = "设备正在运行，稍后会自动停止"
         syncRelayDevice()
+    }
+
+    private fun mapIntensityPercent(intensityPercent: Int): Int {
+        val maxIntensity = protocolStatus.intensityMax.coerceAtLeast(1)
+        return ((intensityPercent.coerceIn(0, 100) / 100.0) * maxIntensity)
+            .roundToInt()
+            .coerceIn(0, maxIntensity)
+    }
+
+    private fun sendToyAction(action: ToyControlAction, autoStopSec: Int) {
+        mainHandler.removeCallbacks(autoStop)
+        controller.sendAction(action)
+        startKeepAlive(action, autoStopSec)
+        busyHint = "设备正在运行，稍后会自动停止"
         mainHandler.postDelayed(autoStop, autoStopSec.coerceIn(1, 30) * 1_000L)
     }
 
     private fun sendToyStop(all: Boolean = false) {
         mainHandler.removeCallbacks(autoStop)
         cancelKeepAlive()
-        controller.stopDevice(mode)
+        controller.stopDevice()
         busyHint = if (all) "已全部停止" else "已停止"
         syncRelayDevice()
     }
 
-    private fun startKeepAlive(mode: Int, intensity: Int, autoStopSec: Int) {
+    private fun startKeepAlive(action: ToyControlAction, autoStopSec: Int) {
         cancelKeepAlive()
         val interval = protocolStatus.repeatIntervalMs.coerceAtLeast(0)
         if (interval <= 0) return
@@ -1032,7 +1091,7 @@ class BridgeViewModel : ViewModel() {
             override fun run() {
                 if (System.currentTimeMillis() >= deadline) return
                 runCatching {
-                    controller.sendCommand(mode = mode, intensity = intensity)
+                    controller.sendAction(action)
                 }.onFailure {
                     appendLog("保活写入失败：${it.message ?: "命令发送失败"}")
                 }
@@ -1068,12 +1127,41 @@ class BridgeViewModel : ViewModel() {
         return "节奏 ${mode}"
     }
 
-    private fun scheduleControlTrial() {
+    private fun patternAction(nextMode: Int): ToyControlAction =
+        when (protocolStatus.controlStyle) {
+            ToyControlStyle.IntensityOnly -> ToyControlAction.Intensity(intensity)
+            ToyControlStyle.PatternOnly,
+            ToyControlStyle.ExclusivePatternOrIntensity -> ToyControlAction.Pattern(nextMode)
+            ToyControlStyle.CombinedPatternAndIntensity -> ToyControlAction.Combined(nextMode, intensity)
+        }
+
+    private fun intensityAction(nextIntensity: Int): ToyControlAction =
+        when (protocolStatus.controlStyle) {
+            ToyControlStyle.PatternOnly -> ToyControlAction.Pattern(mode)
+            ToyControlStyle.IntensityOnly,
+            ToyControlStyle.ExclusivePatternOrIntensity -> ToyControlAction.Intensity(nextIntensity)
+            ToyControlStyle.CombinedPatternAndIntensity -> ToyControlAction.Combined(mode, nextIntensity)
+        }
+
+    private fun scheduleControlTrial(action: ToyControlAction) {
         if (!protocolStatus.controllable || connectionState != BleConnectionState.Ready) return
+        pendingControlAction = action
         controlTrialStarted = true
-        busyHint = "正在尝试，稍后会自动停止"
+        busyHint = "正在运行，5 秒后会自动停止"
         mainHandler.removeCallbacks(controlTrial)
         mainHandler.postDelayed(controlTrial, 250L)
+    }
+
+    private fun sendLocalControlAction(action: ToyControlAction) {
+        runCatching {
+            controller.sendAction(action)
+            syncRelayDevice()
+            startKeepAlive(action, autoStopSec = 5)
+            mainHandler.removeCallbacks(autoStop)
+            mainHandler.postDelayed(autoStop, 5_000L)
+        }.onFailure {
+            busyHint = it.message ?: "控制失败"
+        }
     }
 
     private fun rememberDevice(

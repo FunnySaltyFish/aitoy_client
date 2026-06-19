@@ -34,6 +34,8 @@ data class RelayDevice(
     val intensity: Int,
     val mode: Int,
     val intensityMax: Int,
+    val modeMax: Int,
+    val controlStyle: String,
 )
 
 class RelayClient(
@@ -170,6 +172,8 @@ class RelayClient(
                                 .put("intensity", device.intensity)
                                 .put("mode", device.mode)
                                 .put("intensityMax", device.intensityMax)
+                                .put("modeMax", device.modeMax)
+                                .put("controlStyle", device.controlStyle)
                                 .put("adapterType", "template_ble")
                                 .put("capabilities", JSONArray(listOf("sequence"))),
                         )
