@@ -21,11 +21,13 @@ ADMIN_KEY = os.environ.get("AITOY_ADMIN_KEY", "FunnyAIToy")
 PLATFORM = "android"
 CHANNEL = "common"
 PACKAGE_NAME = "com.funny.aitoy"
-UPDATE_LOG = """AI Toy Bridge 0.2.1
+UPDATE_LOG = """AI Toy Bridge 0.3.0
 
-第三个版本：
-- 修复了 MCP token 错误的问题，之前都是 fishfish，如果之前填过配置的，现在需要重新填自己的新配置
-- 优化页面的显示逻辑，以及初次连接时的权限弹窗
+第四个版本：
+- 增加国内更多设备的理论支持，包括谜姬、醉清风等
+- 控制模式重写，支持模式和强度分开控制的设备
+
+欢迎各位尝试手动的设备。如果不支持的话，可以在群里反馈。给出对应的官方 App 或小程序名称（优先小程序），我将会尝试分析接入
 
 第二个版本：
 - 修改之前部分模式中错误编写的字段，现在应该支持更多设备了。
