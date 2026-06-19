@@ -289,12 +289,7 @@ class AndroidBleController(
 
     fun sendAction(action: ToyControlAction) {
         activeBroadcastProtocol?.let { protocol ->
-            when (action) {
-                is ToyControlAction.Pattern -> protocol.setCommands(action.mode, 1)
-                is ToyControlAction.Intensity -> protocol.setCommands(1, action.value)
-                is ToyControlAction.Combined -> protocol.setCommands(action.mode, action.intensity)
-                ToyControlAction.Stop -> protocol.stopCommands(1)
-            }.forEach(advertiser::start)
+            protocol.commandsFor(action).forEach(advertiser::start)
             return
         }
         val protocol = activeProtocol ?: error("当前设备尚无可用的内置协议")

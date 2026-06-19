@@ -726,8 +726,8 @@ private fun IntensityControl(vm: BridgeViewModel) {
         value = vm.intensity.toFloat(),
         onValueChange = { vm.updateIntensity(it.roundToInt()) },
         modifier = Modifier.testTag("intensity_slider"),
-        valueRange = 1f..maxIntensity.toFloat(),
-        steps = (maxIntensity - 2).coerceAtLeast(0),
+        valueRange = 0f..maxIntensity.toFloat(),
+        steps = (maxIntensity - 1).coerceAtLeast(0),
         enabled = vm.protocolStatus.controllable,
     )
 }

@@ -58,23 +58,6 @@ private object SistalkMonsterPubProtocol : BleDeviceProtocol {
     private val motorServiceUuid = uuid("00006000-0000-1000-8000-00805f9b34fb")
     private val runUuid = uuid("00006001-0000-1000-8000-00805f9b34fb")
     private val stopUuid = uuid("00006002-0000-1000-8000-00805f9b34fb")
-    private val knownNames = setOf(
-        "PiPiJing",
-        "XiaoLu",
-        "LuXiaoHan",
-        "SuoYinQiu",
-        "BaiHu",
-        "MonsterPub",
-        "MONSTERPUB",
-        "Gugudai",
-        "ShaYu",
-        "Yuyi",
-        "LuWuShuang",
-        "LiBo",
-        "QingTing",
-        "Shuidi",
-        "Huohu",
-    )
     private val levelMap = intArrayOf(
         0,
         10,
@@ -110,11 +93,9 @@ private object SistalkMonsterPubProtocol : BleDeviceProtocol {
     )
 
     override fun matches(fingerprint: BleGattFingerprint): Boolean {
-        val hasMotorService = fingerprint.serviceUuids.contains(motorServiceUuid) &&
+        return fingerprint.serviceUuids.contains(motorServiceUuid) &&
                 fingerprint.characteristicUuids.contains(runUuid) &&
                 fingerprint.characteristicUuids.contains(stopUuid)
-        if (!hasMotorService) return false
-        return knownNames.any { it.equals(fingerprint.name, ignoreCase = true) }
     }
 
     override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
@@ -149,7 +130,8 @@ private object SvakomQhSx045Protocol : BleDeviceProtocol {
     )
 
     override fun matches(fingerprint: BleGattFingerprint): Boolean {
-        val knownName = fingerprint.name.equals("QH-SX045A-B", ignoreCase = true)
+        val name = fingerprint.name.normalizedDeviceName()
+        val knownName = name.contains("qh-sx") || name.contains("svakom")
         val hasSvakomGatt = fingerprint.serviceUuids.contains(serviceUuid) &&
                 fingerprint.characteristicUuids.contains(writeUuid)
         return knownName && hasSvakomGatt
@@ -194,10 +176,8 @@ private object MizzzeeXhtkjProtocol : BleDeviceProtocol {
     )
 
     override fun matches(fingerprint: BleGattFingerprint): Boolean {
-        val knownName = fingerprint.name.equals("XHTKJ", ignoreCase = true)
-        val hasMizzzeeGatt = fingerprint.serviceUuids.contains(serviceUuid) &&
+        return fingerprint.serviceUuids.contains(serviceUuid) &&
                 fingerprint.characteristicUuids.contains(writeUuid)
-        return knownName && hasMizzzeeGatt
     }
 
     override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
@@ -277,7 +257,8 @@ private object SenseeCcpa10S2Protocol : BleDeviceProtocol {
     )
 
     override fun matches(fingerprint: BleGattFingerprint): Boolean {
-        val knownName = fingerprint.name.equals("CCPA10S2", ignoreCase = true)
+        val name = fingerprint.name.normalizedDeviceName()
+        val knownName = name.contains("ccpa") || name.contains("sensee")
         val hasSenseeGatt = fingerprint.serviceUuids.contains(serviceUuid) &&
                 fingerprint.characteristicUuids.contains(writeUuid)
         return knownName && hasSenseeGatt
@@ -520,8 +501,7 @@ private object OhMiBodEsca2Protocol : BleDeviceProtocol {
     )
 
     override fun matches(fingerprint: BleGattFingerprint): Boolean =
-        fingerprint.name.equals("OhMiBod 4.0", ignoreCase = true) &&
-                fingerprint.characteristicUuids.contains(writeUuid)
+        fingerprint.characteristicUuids.contains(writeUuid)
 
     override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
         when (action) {
@@ -553,7 +533,7 @@ private object PinkPunchProtocol : BleDeviceProtocol {
     )
 
     override fun matches(fingerprint: BleGattFingerprint): Boolean =
-        fingerprint.name.equals("Pink_Punch", ignoreCase = true) &&
+        fingerprint.name.normalizedDeviceName().contains("pinkpunch") &&
                 fingerprint.characteristicUuids.contains(writeUuid) &&
                 fingerprint.characteristicUuids.contains(notifyUuid)
 
@@ -586,7 +566,7 @@ private object LovenutsProtocol : BleDeviceProtocol {
     )
 
     override fun matches(fingerprint: BleGattFingerprint): Boolean =
-        fingerprint.name.equals("Love_Nuts", ignoreCase = true) &&
+        fingerprint.name.normalizedDeviceName().let { it.contains("lovenuts") || it.contains("love-nuts") } &&
                 fingerprint.characteristicUuids.contains(writeUuid)
 
     override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
@@ -843,3 +823,6 @@ private fun uuid(value: String): UUID = UUID.fromString(value)
 
 private fun bytes(vararg values: Int): ByteArray =
     values.map { (it and 0xff).toByte() }.toByteArray()
+
+private fun String.normalizedDeviceName(): String =
+    lowercase().replace("_", "").replace(" ", "")

@@ -13,9 +13,7 @@ internal interface BleBroadcastProtocol {
 
     fun matches(device: ScannedBleDevice): Boolean
 
-    fun setCommands(mode: Int, intensity: Int): List<BleAdvertiseOperation>
-
-    fun stopCommands(mode: Int): List<BleAdvertiseOperation>
+    fun commandsFor(action: ToyControlAction): List<BleAdvertiseOperation>
 }
 
 internal object BleBroadcastProtocolRegistry {
@@ -65,6 +63,7 @@ internal object CachitoBroadcastProtocol : BleBroadcastProtocol {
         intensityMax = 100,
         supportsMode = true,
         modeMax = modeTemplates.size,
+        controlStyle = ToyControlStyle.CombinedPatternAndIntensity,
         automatic = true,
     )
 
@@ -83,12 +82,20 @@ internal object CachitoBroadcastProtocol : BleBroadcastProtocol {
         return knownHint
     }
 
-    override fun setCommands(mode: Int, intensity: Int): List<BleAdvertiseOperation> {
+    override fun commandsFor(action: ToyControlAction): List<BleAdvertiseOperation> =
+        when (action) {
+            is ToyControlAction.Pattern -> control(action.mode, 100)
+            is ToyControlAction.Intensity -> control(1, action.value)
+            is ToyControlAction.Combined -> control(action.mode, action.intensity)
+            ToyControlAction.Stop -> stop(1)
+        }
+
+    private fun control(mode: Int, intensity: Int): List<BleAdvertiseOperation> {
         val selected = modeTemplates[(mode - 1).coerceIn(0, modeTemplates.lastIndex)]
         return listOf(BleAdvertiseOperation(finalUuid(selected.command, intensity.coerceIn(0, 100))))
     }
 
-    override fun stopCommands(mode: Int): List<BleAdvertiseOperation> {
+    private fun stop(mode: Int): List<BleAdvertiseOperation> {
         val selected = modeTemplates[(mode - 1).coerceIn(0, modeTemplates.lastIndex)]
         return listOf(BleAdvertiseOperation(finalUuid(selected.stop, 0)))
     }

@@ -434,7 +434,7 @@ class BridgeViewModel : ViewModel() {
     }
 
     fun updateIntensity(value: Int) {
-        val next = value.coerceIn(1, protocolStatus.intensityMax.coerceAtLeast(1))
+        val next = value.coerceIn(0, protocolStatus.intensityMax.coerceAtLeast(1))
         if (intensity == next) return
         intensity = next
         scheduleControlTrial(intensityAction(next))
@@ -950,8 +950,9 @@ class BridgeViewModel : ViewModel() {
                     }
                     is RelaySequenceStep.Pattern -> {
                         val durationSec = step.durationSec ?: safeDefaultDuration
-                        sendToyAction(ToyControlAction.Pattern(step.mode.coerceAtLeast(1)), durationSec)
-                        mode = step.mode.coerceAtLeast(1)
+                        val mappedMode = step.mode.coerceIn(1, protocolStatus.modeMax.coerceAtLeast(1))
+                        sendToyAction(ToyControlAction.Pattern(mappedMode), durationSec)
+                        mode = mappedMode
                         syncRelayDevice()
                         stopped = false
                         delay(durationSec.coerceIn(1, 30) * 1_000L)
@@ -1043,7 +1044,7 @@ class BridgeViewModel : ViewModel() {
         autoStopSec: Int,
     ) {
         val mappedIntensity = mapIntensityPercent(intensityPercent)
-        val mappedMode = requestedMode.coerceAtLeast(1)
+        val mappedMode = requestedMode.coerceIn(1, protocolStatus.modeMax.coerceAtLeast(1))
         val action = when (protocolStatus.controlStyle) {
             ToyControlStyle.PatternOnly -> ToyControlAction.Pattern(mappedMode)
             ToyControlStyle.IntensityOnly -> ToyControlAction.Intensity(mappedIntensity)
