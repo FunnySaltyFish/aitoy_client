@@ -46,6 +46,7 @@ data class BleProtocolStatus(
     val supportsMode: Boolean = false,
     val modeMax: Int = 8,
     val automatic: Boolean = false,
+    val repeatIntervalMs: Int = 0,
 )
 
 data class ProtocolAttemptStatus(

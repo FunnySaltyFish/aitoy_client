@@ -314,7 +314,9 @@ class BridgeViewModel : ViewModel() {
         onLog = ::appendLog,
     )
     private val mainHandler = Handler(Looper.getMainLooper())
+    private var keepAlive: Runnable? = null
     private val autoStop = Runnable {
+        cancelKeepAlive()
         runCatching { controller.stopDevice(mode) }
             .onSuccess { appendLog("安全计时结束，已自动发送停止指令") }
             .onFailure { appendLog("自动停止失败：${it.message}") }
@@ -323,6 +325,7 @@ class BridgeViewModel : ViewModel() {
         runCatching {
             controller.sendCommand(mode, intensity)
             syncRelayDevice()
+            startKeepAlive(mode, intensity, autoStopSec = 5)
             mainHandler.removeCallbacks(autoStop)
             mainHandler.postDelayed(autoStop, 5_000L)
         }.onFailure {
@@ -412,6 +415,7 @@ class BridgeViewModel : ViewModel() {
         controlTrialStarted = false
         showDeviceRemarkDialog = false
         mainHandler.removeCallbacks(controlTrial)
+        cancelKeepAlive()
         controller.disconnect()
     }
 
@@ -433,6 +437,7 @@ class BridgeViewModel : ViewModel() {
         busyHint = "已停止"
         mainHandler.removeCallbacks(autoStop)
         mainHandler.removeCallbacks(controlTrial)
+        cancelKeepAlive()
         controller.stopDevice(mode)
         syncRelayDevice()
     }
@@ -441,6 +446,7 @@ class BridgeViewModel : ViewModel() {
         busyHint = "已全部停止"
         mainHandler.removeCallbacks(autoStop)
         mainHandler.removeCallbacks(controlTrial)
+        cancelKeepAlive()
         controller.stopDevice(mode)
         syncRelayDevice()
     }
@@ -1001,6 +1007,7 @@ class BridgeViewModel : ViewModel() {
             ).roundToInt().coerceIn(0, maxIntensity)
         val mappedMode = requestedMode.coerceAtLeast(1)
         controller.sendCommand(mode = mappedMode, intensity = mappedIntensity)
+        startKeepAlive(mappedMode, mappedIntensity, autoStopSec)
         mode = mappedMode
         intensity = mappedIntensity
         busyHint = "设备正在运行，稍后会自动停止"
@@ -1010,9 +1017,35 @@ class BridgeViewModel : ViewModel() {
 
     private fun sendToyStop(all: Boolean = false) {
         mainHandler.removeCallbacks(autoStop)
+        cancelKeepAlive()
         controller.stopDevice(mode)
         busyHint = if (all) "已全部停止" else "已停止"
         syncRelayDevice()
+    }
+
+    private fun startKeepAlive(mode: Int, intensity: Int, autoStopSec: Int) {
+        cancelKeepAlive()
+        val interval = protocolStatus.repeatIntervalMs.coerceAtLeast(0)
+        if (interval <= 0) return
+        val deadline = System.currentTimeMillis() + autoStopSec.coerceIn(1, 30) * 1_000L
+        keepAlive = object : Runnable {
+            override fun run() {
+                if (System.currentTimeMillis() >= deadline) return
+                runCatching {
+                    controller.sendCommand(mode = mode, intensity = intensity)
+                }.onFailure {
+                    appendLog("保活写入失败：${it.message ?: "命令发送失败"}")
+                }
+                mainHandler.postDelayed(this, interval.toLong())
+            }
+        }.also {
+            mainHandler.postDelayed(it, interval.toLong())
+        }
+    }
+
+    private fun cancelKeepAlive() {
+        keepAlive?.let(mainHandler::removeCallbacks)
+        keepAlive = null
     }
 
     private fun currentDeviceId(): String {
@@ -1102,6 +1135,7 @@ class BridgeViewModel : ViewModel() {
     override fun onCleared() {
         controller.close()
         mainHandler.removeCallbacks(autoStop)
+        cancelKeepAlive()
         relay.close()
     }
 

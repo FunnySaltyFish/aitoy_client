@@ -42,6 +42,10 @@ internal object BleProtocolRegistry {
         AnkniProtocol,
         AnkniYwtdProtocol,
         KissToyProtocol,
+        SistalkMonsterPubProtocol,
+        SvakomQhSx045Protocol,
+        MizzzeeXhtkjProtocol,
+        SenseeCcpa10S2Protocol,
         LovenseProtocol,
         SatisfyerProtocol,
         OhMiBodEsca2Protocol,
@@ -55,6 +59,248 @@ internal object BleProtocolRegistry {
 
     fun resolveAll(fingerprint: BleGattFingerprint): List<BleDeviceProtocol> =
         protocols.filter { it.matches(fingerprint) }
+}
+
+private object SistalkMonsterPubProtocol : BleDeviceProtocol {
+    private val motorServiceUuid = uuid("00006000-0000-1000-8000-00805f9b34fb")
+    private val runUuid = uuid("00006001-0000-1000-8000-00805f9b34fb")
+    private val stopUuid = uuid("00006002-0000-1000-8000-00805f9b34fb")
+    private val knownNames = setOf(
+        "PiPiJing",
+        "XiaoLu",
+        "LuXiaoHan",
+        "SuoYinQiu",
+        "BaiHu",
+        "MonsterPub",
+        "MONSTERPUB",
+        "Gugudai",
+        "ShaYu",
+        "Yuyi",
+        "LuWuShuang",
+        "LiBo",
+        "QingTing",
+        "Shuidi",
+        "Huohu",
+    )
+    private val levelMap = intArrayOf(
+        0,
+        10,
+        14,
+        18,
+        22,
+        26,
+        30,
+        34,
+        38,
+        42,
+        46,
+        50,
+        54,
+        58,
+        62,
+        66,
+        70,
+        74,
+        78,
+        82,
+        86,
+    )
+
+    override val status = BleProtocolStatus(
+        id = "sistalk_monsterpub",
+        displayName = "SISTALK MonsterPub",
+        controllable = true,
+        intensityMax = 20,
+        supportsMode = false,
+        automatic = true,
+    )
+
+    override fun matches(fingerprint: BleGattFingerprint): Boolean {
+        val hasMotorService = fingerprint.serviceUuids.contains(motorServiceUuid) &&
+                fingerprint.characteristicUuids.contains(runUuid) &&
+                fingerprint.characteristicUuids.contains(stopUuid)
+        if (!hasMotorService) return false
+        return knownNames.any { it.equals(fingerprint.name, ignoreCase = true) }
+    }
+
+    override fun setCommand(mode: Int, intensity: Int): BleProtocolOperation.Write {
+        val level = levelMap[intensity.coerceIn(0, status.intensityMax)]
+        return BleProtocolOperation.Write(
+            characteristicUuid = runUuid,
+            bytes = byteArrayOf(level.toByte()),
+            withResponse = false,
+        )
+    }
+
+    override fun stopCommand(): BleProtocolOperation.Write =
+        BleProtocolOperation.Write(
+            characteristicUuid = stopUuid,
+            bytes = byteArrayOf(0x00),
+            withResponse = true,
+        )
+}
+
+private object SvakomQhSx045Protocol : BleDeviceProtocol {
+    private val serviceUuid = uuid("0000ffe0-0000-1000-8000-00805f9b34fb")
+    private val writeUuid = uuid("0000ffe1-0000-1000-8000-00805f9b34fb")
+
+    override val status = BleProtocolStatus(
+        id = "svakom_qh_sx045",
+        displayName = "SVAKOM QH-SX045",
+        controllable = true,
+        intensityMax = 10,
+        supportsMode = false,
+        automatic = true,
+    )
+
+    override fun matches(fingerprint: BleGattFingerprint): Boolean {
+        val knownName = fingerprint.name.equals("QH-SX045A-B", ignoreCase = true)
+        val hasSvakomGatt = fingerprint.serviceUuids.contains(serviceUuid) &&
+                fingerprint.characteristicUuids.contains(writeUuid)
+        return knownName && hasSvakomGatt
+    }
+
+    override fun setCommand(mode: Int, intensity: Int): BleProtocolOperation.Write =
+        command(0x01, intensity.coerceIn(0, status.intensityMax))
+
+    override fun stopCommand(): BleProtocolOperation.Write = command(0x00, 0x00)
+
+    private fun command(mode: Int, speed: Int) = BleProtocolOperation.Write(
+        characteristicUuid = writeUuid,
+        bytes = byteArrayOf(
+            0x55,
+            0x03,
+            0x00,
+            0x00,
+            mode.toByte(),
+            speed.toByte(),
+            0x00,
+        ),
+        withResponse = false,
+    )
+}
+
+private object MizzzeeXhtkjProtocol : BleDeviceProtocol {
+    private val serviceUuid = uuid("0000ff10-0000-1000-8000-00805f9b34fb")
+    private val writeUuid = uuid("0000ff12-0000-1000-8000-00805f9b34fb")
+
+    override val status = BleProtocolStatus(
+        id = "mizzzee_xhtkj",
+        displayName = "Mizzzee XHTKJ",
+        controllable = true,
+        intensityMax = 100,
+        supportsMode = false,
+        automatic = true,
+        repeatIntervalMs = 200,
+    )
+
+    override fun matches(fingerprint: BleGattFingerprint): Boolean {
+        val knownName = fingerprint.name.equals("XHTKJ", ignoreCase = true)
+        val hasMizzzeeGatt = fingerprint.serviceUuids.contains(serviceUuid) &&
+                fingerprint.characteristicUuids.contains(writeUuid)
+        return knownName && hasMizzzeeGatt
+    }
+
+    override fun setCommand(mode: Int, intensity: Int): BleProtocolOperation.Write =
+        command(intensity.coerceIn(0, status.intensityMax))
+
+    override fun stopCommand(): BleProtocolOperation.Write = command(0)
+
+    private fun command(intensity: Int): BleProtocolOperation.Write {
+        val encoded = encodeStrength(intensity)
+        val low = (encoded and 0xff).toByte()
+        val high = ((encoded ushr 8) and 0xff).toByte()
+        return BleProtocolOperation.Write(
+            characteristicUuid = writeUuid,
+            bytes = byteArrayOf(
+                0x03,
+                0x12,
+                0xf3.toByte(),
+                0x00,
+                0xfc.toByte(),
+                0x00,
+                0xfe.toByte(),
+                0x40,
+                0x01,
+                low,
+                high,
+                0x00,
+                0xfc.toByte(),
+                0x00,
+                0xfe.toByte(),
+                0x40,
+                0x01,
+                low,
+                high,
+                0x00,
+            ),
+            withResponse = false,
+        )
+    }
+
+    private fun encodeStrength(intensity: Int): Int {
+        if (intensity <= 0) return 0x003c
+        val scaled = (intensity / 100.0 * 0.7) + 0.3
+        return (((scaled * 1023).toInt() shl 6) or 0x3c).coerceIn(0, 0xffff)
+    }
+}
+
+private object SenseeCcpa10S2Protocol : BleDeviceProtocol {
+    private val serviceUuid = uuid("0000fff0-0000-1000-8000-00805f9b34fb")
+    private val writeUuid = uuid("0000fff5-0000-1000-8000-00805f9b34fb")
+    private val suctionCommands = arrayOf(
+        bytes(0x55, 0xaa, 0xf0, 0x01, 0x00, 0x11, 0x66, 0xf2, 0xf1, 0x00, 0x00),
+        bytes(0x55, 0xaa, 0xf0, 0x01, 0x00, 0x11, 0x66, 0xf2, 0xf2, 0x00, 0x00),
+        bytes(0x55, 0xaa, 0xf0, 0x01, 0x00, 0x11, 0x66, 0xf2, 0xf3, 0x00, 0x00),
+    )
+    private val vibrationCommands = arrayOf(
+        bytes(0x55, 0xaa, 0xf0, 0x01, 0x0d, 0x12, 0x66, 0xf9, 0xf1),
+        bytes(0x55, 0xaa, 0xf0, 0x01, 0x0e, 0x12, 0x66, 0xf9, 0xf2),
+        bytes(0x55, 0xaa, 0xf0, 0x01, 0x0f, 0x12, 0x66, 0xf9, 0xf3),
+        bytes(0x55, 0xaa, 0xf0, 0x01, 0x11, 0x12, 0x66, 0xf9, 0xfa),
+    )
+    private val suctionOff = bytes(0x55, 0xaa, 0xf0, 0x01, 0x00, 0x11, 0x66, 0xf2, 0xf0, 0x00, 0x00)
+    private val vibrationOff = bytes(0x55, 0xaa, 0xf0, 0x01, 0x10, 0x12, 0x66, 0xf9, 0xf0)
+
+    override val status = BleProtocolStatus(
+        id = "sensee_ccpa10s2",
+        displayName = "Sensee CCPA10S2",
+        controllable = true,
+        intensityMax = 3,
+        supportsMode = true,
+        modeMax = 2,
+        automatic = true,
+    )
+
+    override fun matches(fingerprint: BleGattFingerprint): Boolean {
+        val knownName = fingerprint.name.equals("CCPA10S2", ignoreCase = true)
+        val hasSenseeGatt = fingerprint.serviceUuids.contains(serviceUuid) &&
+                fingerprint.characteristicUuids.contains(writeUuid)
+        return knownName && hasSenseeGatt
+    }
+
+    override fun setCommand(mode: Int, intensity: Int): BleProtocolOperation.Write {
+        val normalizedMode = mode.coerceIn(1, status.modeMax)
+        val level = intensity.coerceIn(0, status.intensityMax)
+        val payload = when {
+            level == 0 && normalizedMode == 1 -> suctionOff
+            level == 0 -> vibrationOff
+            normalizedMode == 1 -> suctionCommands[level - 1]
+            else -> vibrationCommands[level - 1]
+        }
+        return write(payload)
+    }
+
+    override fun stopCommand(): BleProtocolOperation.Write = write(suctionOff)
+
+    override fun stopCommands(): List<BleProtocolOperation> =
+        listOf(write(suctionOff), write(vibrationOff))
+
+    private fun write(payload: ByteArray) = BleProtocolOperation.Write(
+        characteristicUuid = writeUuid,
+        bytes = payload,
+        withResponse = false,
+    )
 }
 
 private object KissToyProtocol : BleDeviceProtocol {
@@ -552,3 +798,6 @@ private object AnkniYwtdProtocol : BleDeviceProtocol {
 }
 
 private fun uuid(value: String): UUID = UUID.fromString(value)
+
+private fun bytes(vararg values: Int): ByteArray =
+    values.map { (it and 0xff).toByte() }.toByteArray()
