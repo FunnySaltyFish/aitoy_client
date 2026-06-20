@@ -34,6 +34,8 @@ class AndroidBleController(
     private var gatt: BluetoothGatt? = null
     private var template: ProtocolTemplate? = null
     private var connectedName = ""
+    private var connectedManufacturerData = ""
+    private var connectedScanRecordHex = ""
     private var activeProtocol: BleDeviceProtocol? = null
     private var activeBroadcastProtocol: BleBroadcastProtocol? = null
     private var protocolReady = false
@@ -141,6 +143,8 @@ class AndroidBleController(
             val config = template ?: return
             val fingerprint = BleGattFingerprint(
                 name = connectedName,
+                manufacturerData = connectedManufacturerData,
+                scanRecordHex = connectedScanRecordHex,
                 serviceUuids = gatt.services.map { it.uuid }.toSet(),
                 characteristicUuids = gatt.services
                     .flatMap { it.characteristics }
@@ -239,6 +243,8 @@ class AndroidBleController(
         stopScan()
         disconnect()
         connectedName = device.name
+        connectedManufacturerData = device.manufacturerData
+        connectedScanRecordHex = device.scanRecordHex
         template = protocolTemplate
         activeProtocol = null
         activeBroadcastProtocol = null
@@ -256,7 +262,8 @@ class AndroidBleController(
         operationId++
         trace(
             "连接请求 op=$operationId name=${device.name} address=${device.address} service=${protocolTemplate.serviceUuid} " +
-                "write=${protocolTemplate.writeUuid} notify=${protocolTemplate.notifyUuid.ifBlank { "<none>" }}",
+                "write=${protocolTemplate.writeUuid} notify=${protocolTemplate.notifyUuid.ifBlank { "<none>" }} " +
+                "manufacturer=${device.manufacturerData.ifBlank { "<none>" }}",
         )
         broadcastProtocolCandidates = BleBroadcastProtocolRegistry.resolveAll(device)
         if (broadcastProtocolCandidates.isNotEmpty()) {
@@ -688,6 +695,8 @@ class AndroidBleController(
             if (currentGatt != null && currentTemplate != null) {
                 val fingerprint = BleGattFingerprint(
                     name = connectedName,
+                    manufacturerData = connectedManufacturerData,
+                    scanRecordHex = connectedScanRecordHex,
                     serviceUuids = currentGatt.services.map { it.uuid }.toSet(),
                     characteristicUuids = currentGatt.services
                         .flatMap { it.characteristics }

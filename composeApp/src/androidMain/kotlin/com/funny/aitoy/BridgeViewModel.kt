@@ -66,6 +66,8 @@ data class RememberedToy(
     val address: String,
     val protocolName: String,
     val lastSeenAt: Long,
+    val manufacturerData: String = "",
+    val scanRecordHex: String = "",
 )
 
 enum class ToyRuntimeState(val label: String) {
@@ -132,6 +134,7 @@ private class SequenceScriptFormatException : IllegalArgumentException("序列�
 private const val LegacyDefaultUserToken = "ut_fishfish"
 private const val DefaultCommunityUrl = "https://qm.qq.com/q/ytRVIe6O7m"
 private const val DefaultTutorialUrl = "https://docs.qq.com/s/4dhBqBSu1u5900Qh7qvYHW/folder/YFZTdLuzaIxv"
+private const val MaxSequenceDurationSec = 300
 
 private fun generateDefaultUserToken(): String = "ut_${UUID.randomUUID().toString().replace("-", "")}"
 
@@ -258,6 +261,8 @@ class BridgeViewModel : ViewModel() {
                     address = item.optString("address"),
                     protocolName = item.optString("protocolName").ifBlank { "已保存" },
                     lastSeenAt = item.optLong("lastSeenAt"),
+                    manufacturerData = item.optString("manufacturerData"),
+                    scanRecordHex = item.optString("scanRecordHex"),
                 )
             }.filter { it.address.isNotBlank() }
         }.getOrDefault(emptyList())
@@ -493,6 +498,8 @@ class BridgeViewModel : ViewModel() {
                 address = toy.address,
                 rssi = 0,
                 connectable = true,
+                manufacturerData = toy.manufacturerData,
+                scanRecordHex = toy.scanRecordHex,
             )
         )
     }
@@ -572,7 +579,9 @@ class BridgeViewModel : ViewModel() {
                         .put("name", it.name)
                         .put("address", it.address)
                         .put("protocolName", it.protocolName)
-                        .put("lastSeenAt", it.lastSeenAt),
+                        .put("lastSeenAt", it.lastSeenAt)
+                        .put("manufacturerData", it.manufacturerData)
+                        .put("scanRecordHex", it.scanRecordHex),
                 )
             }
         rememberedDevicesJson = merged.toString()
@@ -1062,7 +1071,7 @@ class BridgeViewModel : ViewModel() {
         steps: List<RelaySequenceStep>,
         defaultDurationSec: Int?,
     ) {
-        val safeDefaultDuration = (defaultDurationSec ?: 30).coerceIn(1, 30)
+        val safeDefaultDuration = (defaultDurationSec ?: 30).coerceIn(1, MaxSequenceDurationSec)
         var stopped = false
         try {
             steps.forEach { step ->
@@ -1071,7 +1080,7 @@ class BridgeViewModel : ViewModel() {
                         val durationSec = step.durationSec ?: safeDefaultDuration
                         sendToySet(step.intensity, step.mode, durationSec)
                         stopped = false
-                        delay(durationSec.coerceIn(1, 30) * 1_000L)
+                        delay(durationSec.coerceIn(1, MaxSequenceDurationSec) * 1_000L)
                         sendToyStop()
                         stopped = true
                     }
@@ -1082,7 +1091,7 @@ class BridgeViewModel : ViewModel() {
                         mode = mappedMode
                         syncRelayDevice()
                         stopped = false
-                        delay(durationSec.coerceIn(1, 30) * 1_000L)
+                        delay(durationSec.coerceIn(1, MaxSequenceDurationSec) * 1_000L)
                         sendToyStop()
                         stopped = true
                     }
@@ -1093,7 +1102,7 @@ class BridgeViewModel : ViewModel() {
                         intensity = mappedIntensity
                         syncRelayDevice()
                         stopped = false
-                        delay(durationSec.coerceIn(1, 30) * 1_000L)
+                        delay(durationSec.coerceIn(1, MaxSequenceDurationSec) * 1_000L)
                         sendToyStop()
                         stopped = true
                     }
@@ -1130,14 +1139,14 @@ class BridgeViewModel : ViewModel() {
                     val args = parseSequenceArguments(part.removePrefix("set(").removeSuffix(")"))
                     val mode = args["mode"]?.coerceAtLeast(1) ?: throw SequenceScriptFormatException()
                     val intensity = args["intensity"]?.coerceIn(0, 100) ?: throw SequenceScriptFormatException()
-                    val duration = args["duration"]?.coerceIn(1, 30)
+                    val duration = args["duration"]?.coerceIn(1, MaxSequenceDurationSec)
                     RelaySequenceStep.Set(mode = mode, intensity = intensity, durationSec = duration)
                 }
                 part.startsWith("pattern(") && part.endsWith(")") -> {
                     val args = parseSequenceArguments(part.removePrefix("pattern(").removeSuffix(")"))
                     RelaySequenceStep.Pattern(
                         mode = args["mode"]?.coerceAtLeast(1) ?: throw SequenceScriptFormatException(),
-                        durationSec = args["duration"]?.coerceIn(1, 30),
+                        durationSec = args["duration"]?.coerceIn(1, MaxSequenceDurationSec),
                     )
                 }
                 part.startsWith("intensity(") && part.endsWith(")") -> {
@@ -1146,7 +1155,7 @@ class BridgeViewModel : ViewModel() {
                         value = args["value"]?.coerceIn(0, 100)
                             ?: args["intensity"]?.coerceIn(0, 100)
                             ?: throw SequenceScriptFormatException(),
-                        durationSec = args["duration"]?.coerceIn(1, 30),
+                        durationSec = args["duration"]?.coerceIn(1, MaxSequenceDurationSec),
                     )
                 }
                 else -> throw SequenceScriptFormatException()
@@ -1200,7 +1209,7 @@ class BridgeViewModel : ViewModel() {
         controller.sendAction(action)
         startKeepAlive(action, autoStopSec)
         busyHint = "设备正在运行，稍后会自动停止"
-        mainHandler.postDelayed(autoStop, autoStopSec.coerceIn(1, 30) * 1_000L)
+        mainHandler.postDelayed(autoStop, autoStopSec.coerceIn(1, MaxSequenceDurationSec) * 1_000L)
     }
 
     private fun sendToyStop(all: Boolean = false) {
@@ -1216,7 +1225,7 @@ class BridgeViewModel : ViewModel() {
         cancelKeepAlive()
         val interval = protocolStatus.repeatIntervalMs.coerceAtLeast(0)
         if (interval <= 0) return
-        val deadline = System.currentTimeMillis() + autoStopSec.coerceIn(1, 30) * 1_000L
+        val deadline = System.currentTimeMillis() + autoStopSec.coerceIn(1, MaxSequenceDurationSec) * 1_000L
         keepAlive = object : Runnable {
             override fun run() {
                 if (System.currentTimeMillis() >= deadline) return
@@ -1336,11 +1345,15 @@ class BridgeViewModel : ViewModel() {
         protocolName: String,
     ) {
         if (address.isBlank()) return
+        val scanned = devices.firstOrNull { it.address == address }
+        val existing = rememberedDevices.firstOrNull { it.address == address }
         val current = JSONObject()
             .put("name", remark)
             .put("address", address)
             .put("protocolName", protocolName)
             .put("lastSeenAt", System.currentTimeMillis())
+            .put("manufacturerData", scanned?.manufacturerData ?: existing?.manufacturerData.orEmpty())
+            .put("scanRecordHex", scanned?.scanRecordHex ?: existing?.scanRecordHex.orEmpty())
         val merged = JSONArray()
         merged.put(current)
         rememberedDevices
@@ -1352,7 +1365,9 @@ class BridgeViewModel : ViewModel() {
                         .put("name", it.name)
                         .put("address", it.address)
                         .put("protocolName", it.protocolName)
-                        .put("lastSeenAt", it.lastSeenAt),
+                        .put("lastSeenAt", it.lastSeenAt)
+                        .put("manufacturerData", it.manufacturerData)
+                        .put("scanRecordHex", it.scanRecordHex),
                 )
             }
         rememberedDevicesJson = merged.toString()

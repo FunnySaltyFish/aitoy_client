@@ -36,9 +36,14 @@ internal sealed interface BleProtocolOperation {
 
 internal data class BleGattFingerprint(
     val name: String,
+    val manufacturerData: String,
+    val scanRecordHex: String,
     val serviceUuids: Set<UUID>,
     val characteristicUuids: Set<UUID>,
-)
+) {
+    val sistalkProtocolVersion: Int
+        get() = manufacturerData.firstManufacturerByte() ?: 0
+}
 
 internal interface BleDeviceProtocol {
     val status: BleProtocolStatus
@@ -57,8 +62,10 @@ internal object BleProtocolRegistry {
         AnkniProtocol,
         AnkniYwtdProtocol,
         KissToyProtocol,
-        SistalkMonsterPartyV3Protocol,
-        SistalkMonsterPubProtocol,
+        SistalkMonsterPartyProtocol,
+        SistalkMonsterPubMultiMotorProtocol,
+        SistalkMonsterPubDualMotorProtocol,
+        SistalkMonsterPubSingleMotorProtocol,
         SistalkMixPwmProtocol,
         SvakomQhSx045Protocol,
         MizzzeeXhtkjProtocol,
@@ -86,6 +93,7 @@ private object SistalkMixPwmProtocol : BleDeviceProtocol {
     private val monsterPubServiceUuid = uuid("00006000-0000-1000-8000-00805f9b34fb")
     private val monsterPubRunUuid = uuid("00006001-0000-1000-8000-00805f9b34fb")
     private val monsterPubStopUuid = uuid("00006002-0000-1000-8000-00805f9b34fb")
+    private val currentPwm = IntArray(2)
 
     override val status = BleProtocolStatus(
         id = "sistalk_mix_pwm",
@@ -101,26 +109,32 @@ private object SistalkMixPwmProtocol : BleDeviceProtocol {
 
     override fun matches(fingerprint: BleGattFingerprint): Boolean =
         fingerprint.characteristicUuids.contains(pwmUuid) &&
-                !fingerprint.name.isLegacySistalkMonsterPubName() &&
                 !fingerprint.hasSistalkV2Gatt() &&
-                !fingerprint.hasMonsterPubGatt()
+                !fingerprint.hasMonsterPubGatt() &&
+                !fingerprint.hasSistalkScanManufacturer()
+
+    override fun initialize(fingerprint: BleGattFingerprint): List<BleProtocolOperation> {
+        currentPwm.fill(0)
+        return emptyList()
+    }
 
     override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
         when (action) {
-            is ToyControlAction.Intensity -> listOf(pwm(action.value, 0))
-            is ToyControlAction.Combined -> listOf(pwmForChannel(action.mode, action.intensity))
-            is ToyControlAction.Pattern -> listOf(pwmForChannel(action.mode, status.intensityMax.coerceAtLeast(1)))
-            ToyControlAction.Stop -> listOf(pwm(0, 0))
+            is ToyControlAction.Intensity -> listOf(updateChannel(1, action.value))
+            is ToyControlAction.Combined -> listOf(updateChannel(action.mode, action.intensity))
+            is ToyControlAction.Pattern -> listOf(updateChannel(action.mode, status.intensityMax.coerceAtLeast(1)))
+            ToyControlAction.Stop -> listOf(stop())
         }
 
-    private fun pwmForChannel(channel: Int, intensity: Int): BleProtocolOperation.Write {
-        val normalized = intensity.coerceIn(0, status.intensityMax)
-        // 按官方界面顺序暂定为 [吮吸, 尾震]，真机验证若相反再交换。
-        return if (channel.coerceIn(1, 2) == 1) {
-            pwm(normalized, 0)
-        } else {
-            pwm(0, normalized)
-        }
+    private fun updateChannel(channel: Int, intensity: Int): BleProtocolOperation.Write {
+        val index = channel.coerceIn(1, 2) - 1
+        currentPwm[index] = intensity.coerceIn(0, status.intensityMax)
+        return pwm(currentPwm[0], currentPwm[1])
+    }
+
+    private fun stop(): BleProtocolOperation.Write {
+        currentPwm.fill(0)
+        return pwm(0, 0)
     }
 
     private fun pwm(suction: Int, tailVibration: Int): BleProtocolOperation.Write =
@@ -144,16 +158,17 @@ private object SistalkMixPwmProtocol : BleDeviceProtocol {
                 characteristicUuids.contains(monsterPubStopUuid)
 }
 
-private object SistalkMonsterPartyV3Protocol : BleDeviceProtocol {
+private object SistalkMonsterPartyProtocol : BleDeviceProtocol {
     private val serviceUuid = uuid("00009000-0000-1000-8000-00805f9b34fb")
     private val opUuid = uuid("00009001-0000-1000-8000-00805f9b34fb")
     private val functionUuid = uuid("00009002-0000-1000-8000-00805f9b34fb")
 
     private const val COMMAND_MOTOR = 0xA0
     private const val COMMAND_POWER_OFF = 0xA2
+    private val currentPwm = IntArray(2)
 
     override val status = BleProtocolStatus(
-        id = "sistalk_monsterparty_v3",
+        id = "sistalk_monsterparty",
         displayName = "SISTALK Monster Party",
         controllable = true,
         intensityMax = 100,
@@ -165,29 +180,33 @@ private object SistalkMonsterPartyV3Protocol : BleDeviceProtocol {
     )
 
     override fun matches(fingerprint: BleGattFingerprint): Boolean =
-        fingerprint.serviceUuids.contains(serviceUuid) &&
+        fingerprint.sistalkProtocolVersion != 1 &&
+                fingerprint.serviceUuids.contains(serviceUuid) &&
                 fingerprint.characteristicUuids.contains(opUuid) &&
                 fingerprint.characteristicUuids.contains(functionUuid)
 
     override fun initialize(fingerprint: BleGattFingerprint): List<BleProtocolOperation> =
-        listOf(BleProtocolOperation.SubscribeNotify(functionUuid))
+        listOf(BleProtocolOperation.SubscribeNotify(functionUuid)).also {
+            currentPwm.fill(0)
+        }
 
     override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
         when (action) {
-            is ToyControlAction.Intensity -> listOf(motorCommand(action.value, 0))
-            is ToyControlAction.Combined -> listOf(motorCommandForChannel(action.mode, action.intensity))
-            is ToyControlAction.Pattern -> listOf(motorCommandForChannel(action.mode, status.intensityMax.coerceAtLeast(1)))
-            ToyControlAction.Stop -> listOf(motorCommand(0, 0))
+            is ToyControlAction.Intensity -> listOf(updateChannel(1, action.value))
+            is ToyControlAction.Combined -> listOf(updateChannel(action.mode, action.intensity))
+            is ToyControlAction.Pattern -> listOf(updateChannel(action.mode, status.intensityMax.coerceAtLeast(1)))
+            ToyControlAction.Stop -> listOf(stop())
         }
 
-    private fun motorCommandForChannel(channel: Int, intensity: Int): BleProtocolOperation.Write {
-        val normalized = intensity.coerceIn(0, status.intensityMax)
-        // 按官方界面顺序暂定为 [吮吸, 尾震]，真机验证若相反再交换。
-        return if (channel.coerceIn(1, 2) == 1) {
-            motorCommand(normalized, 0)
-        } else {
-            motorCommand(0, normalized)
-        }
+    private fun updateChannel(channel: Int, intensity: Int): BleProtocolOperation.Write {
+        val index = channel.coerceIn(1, 2) - 1
+        currentPwm[index] = intensity.coerceIn(0, status.intensityMax)
+        return motorCommand(currentPwm[0], currentPwm[1])
+    }
+
+    private fun stop(): BleProtocolOperation.Write {
+        currentPwm.fill(0)
+        return motorCommand(0, 0)
     }
 
     private fun motorCommand(suction: Int, tailVibration: Int): BleProtocolOperation.Write =
@@ -210,12 +229,35 @@ private object SistalkMonsterPartyV3Protocol : BleDeviceProtocol {
         functionCommand(COMMAND_POWER_OFF)
 }
 
-private object SistalkMonsterPubProtocol : BleDeviceProtocol {
+private object SistalkMonsterPubMultiMotorProtocol : SistalkMonsterPubProtocolBase(
+    id = "sistalk_monsterpub_multi",
+    displayName = "SISTALK MonsterPub",
+    writeUuid = uuid("0000600a-0000-1000-8000-00805f9b34fb"),
+    channelCount = 10,
+)
+
+private object SistalkMonsterPubDualMotorProtocol : SistalkMonsterPubProtocolBase(
+    id = "sistalk_monsterpub_dual",
+    displayName = "SISTALK MonsterPub",
+    writeUuid = uuid("00006003-0000-1000-8000-00805f9b34fb"),
+    channelCount = 2,
+)
+
+private object SistalkMonsterPubSingleMotorProtocol : SistalkMonsterPubProtocolBase(
+    id = "sistalk_monsterpub",
+    displayName = "SISTALK MonsterPub",
+    writeUuid = uuid("00006001-0000-1000-8000-00805f9b34fb"),
+    channelCount = 1,
+)
+
+private sealed class SistalkMonsterPubProtocolBase(
+    id: String,
+    displayName: String,
+    private val writeUuid: UUID,
+    private val channelCount: Int,
+) : BleDeviceProtocol {
     private val motorServiceUuid = uuid("00006000-0000-1000-8000-00805f9b34fb")
-    private val runUuid = uuid("00006001-0000-1000-8000-00805f9b34fb")
-    private val stopUuid = uuid("00006002-0000-1000-8000-00805f9b34fb")
-    private const val START_PULSE_LEVEL = 20
-    private var previousLevel = -1
+    private val currentPwm = IntArray(channelCount)
     private val levelMap = intArrayOf(
         0,
         10,
@@ -241,54 +283,57 @@ private object SistalkMonsterPubProtocol : BleDeviceProtocol {
     )
 
     override val status = BleProtocolStatus(
-        id = "sistalk_monsterpub",
-        displayName = "SISTALK MonsterPub",
+        id = id,
+        displayName = displayName,
         controllable = true,
         intensityMax = 20,
-        supportsMode = false,
-        controlStyle = ToyControlStyle.IntensityOnly,
+        supportsMode = channelCount > 1,
+        modeMax = channelCount,
+        controlStyle = if (channelCount > 1) {
+            ToyControlStyle.CombinedPatternAndIntensity
+        } else {
+            ToyControlStyle.IntensityOnly
+        },
+        modeLabel = "通道",
         automatic = true,
     )
 
     override fun matches(fingerprint: BleGattFingerprint): Boolean {
         return fingerprint.serviceUuids.contains(motorServiceUuid) &&
-                fingerprint.characteristicUuids.contains(runUuid) &&
-                fingerprint.characteristicUuids.contains(stopUuid)
+                fingerprint.characteristicUuids.contains(writeUuid) &&
+                fingerprint.sistalkProtocolVersion <= 1
     }
 
     override fun initialize(fingerprint: BleGattFingerprint): List<BleProtocolOperation> {
-        previousLevel = 0
+        currentPwm.fill(0)
         return emptyList()
     }
 
     override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
         when (action) {
-            is ToyControlAction.Intensity -> run(action.value)
-            is ToyControlAction.Combined -> run(action.intensity)
-            is ToyControlAction.Pattern -> emptyList()
+            is ToyControlAction.Intensity -> listOf(updateChannel(1, action.value))
+            is ToyControlAction.Combined -> listOf(updateChannel(action.mode, action.intensity))
+            is ToyControlAction.Pattern -> listOf(updateChannel(action.mode, status.intensityMax.coerceAtLeast(1)))
             ToyControlAction.Stop -> listOf(stop())
         }
 
-    private fun run(intensity: Int): List<BleProtocolOperation.Write> {
-        val level = levelMap[intensity.coerceIn(0, status.intensityMax)]
-        if (level == 0) return listOf(stop())
-        val commands = buildList {
-            if (level < START_PULSE_LEVEL && previousLevel <= 0) {
-                add(runLevel(START_PULSE_LEVEL))
-            }
-            add(runLevel(level))
-        }
-        previousLevel = level
-        return commands
+    private fun updateChannel(channel: Int, intensity: Int): BleProtocolOperation.Write {
+        val index = channel.coerceIn(1, channelCount) - 1
+        currentPwm[index] = levelMap[intensity.coerceIn(0, status.intensityMax)]
+        return motorWrite(currentPwm)
     }
-
-    private fun runLevel(level: Int): BleProtocolOperation.Write =
-        BleProtocolOperation.Write(runUuid, byteArrayOf(level.toByte()), withResponse = false)
 
     private fun stop(): BleProtocolOperation.Write {
-        previousLevel = 0
-        return BleProtocolOperation.Write(stopUuid, byteArrayOf(0x00), withResponse = true)
+        currentPwm.fill(0)
+        return motorWrite(currentPwm)
     }
+
+    private fun motorWrite(levels: IntArray): BleProtocolOperation.Write =
+        BleProtocolOperation.Write(
+            characteristicUuid = writeUuid,
+            bytes = levels.toByteArrayForSistalkV1(),
+            withResponse = false,
+        )
 }
 
 private object SvakomQhSx045Protocol : BleDeviceProtocol {
@@ -1003,5 +1048,22 @@ private fun bytes(vararg values: Int): ByteArray =
 private fun String.normalizedDeviceName(): String =
     lowercase().replace("_", "").replace(" ", "")
 
-private fun String.isLegacySistalkMonsterPubName(): Boolean =
-    normalizedDeviceName() == "monsterpub"
+private fun String.firstManufacturerByte(): Int? {
+    val payload = substringAfter(':', missingDelimiterValue = this)
+    return payload
+        .trim()
+        .split(Regex("\\s+"))
+        .firstOrNull()
+        ?.takeIf { it.length in 1..2 && it.all { ch -> ch.isDigit() || ch.lowercaseChar() in 'a'..'f' } }
+        ?.toIntOrNull(16)
+}
+
+private fun BleGattFingerprint.hasSistalkScanManufacturer(): Boolean =
+    manufacturerData.startsWith("0x2512:", ignoreCase = true)
+
+private fun IntArray.toByteArrayForSistalkV1(): ByteArray =
+    if (size > 2) {
+        byteArrayOf(size.toByte()) + map { it.coerceIn(0, 0xff).toByte() }
+    } else {
+        map { it.coerceIn(0, 0xff).toByte() }.toByteArray()
+    }
