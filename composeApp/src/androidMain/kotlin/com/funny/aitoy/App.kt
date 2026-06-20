@@ -372,6 +372,26 @@ private fun StatusPill(state: BleConnectionState) {
 }
 
 @Composable
+private fun DeviceStatePill(state: ToyRuntimeState) {
+    val color = when (state) {
+        ToyRuntimeState.Connected -> Mint
+        ToyRuntimeState.Connecting -> Honey
+        ToyRuntimeState.Failed -> Danger
+        ToyRuntimeState.Offline -> TextSoft
+    }
+    Text(
+        text = state.label,
+        color = color,
+        modifier = Modifier
+            .background(color.copy(alpha = 0.12f), RoundedCornerShape(50))
+            .padding(horizontal = 9.dp, vertical = 5.dp),
+        style = MaterialTheme.typography.labelSmall,
+        fontWeight = FontWeight.Bold,
+        maxLines = 1,
+    )
+}
+
+@Composable
 private fun ConnectFlow(vm: BridgeViewModel) {
     Panel(title = "连接设备", icon = Icons.Outlined.BluetoothSearching) {
         FlowStep(
@@ -389,8 +409,8 @@ private fun ConnectFlow(vm: BridgeViewModel) {
             Spacer(Modifier.height(8.dp))
             Text(it, color = Danger)
         }
-        RecentDevices(vm)
-        DeviceList(vm.devices, vm.selectedAddress, vm::connect)
+        ManagedDevices(vm)
+        DeviceList(vm.devices, vm.highlightedDeviceAddress, vm.toyRuntimeStates, vm::connect)
     }
 }
 
@@ -481,39 +501,88 @@ private fun ProtocolAttemptCard(status: ProtocolAttemptStatus) {
 }
 
 @Composable
-private fun RecentDevices(vm: BridgeViewModel) {
-    if (vm.rememberedDevices.isEmpty()) return
+private fun ManagedDevices(vm: BridgeViewModel) {
+    if (vm.managedToys.isEmpty()) return
     Spacer(Modifier.height(18.dp))
-    Text("常用设备", color = Honey, fontWeight = FontWeight.Bold)
+    Text("我的设备", color = Honey, fontWeight = FontWeight.Bold)
     Spacer(Modifier.height(8.dp))
-    vm.rememberedDevices.take(3).forEach { toy ->
+    vm.managedToys.forEach { toy ->
+        ManagedDeviceRow(vm, toy)
+        Spacer(Modifier.height(8.dp))
+    }
+}
+
+@Composable
+private fun ManagedDeviceRow(vm: BridgeViewModel, toy: ManagedToy) {
+    val remembered = RememberedToy(
+        name = toy.name,
+        address = toy.address,
+        protocolName = toy.protocolName,
+        lastSeenAt = 0L,
+    )
+    val connected = toy.runtimeState == ToyRuntimeState.Connected
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(if (connected) Color(0xFF23362E) else Color(0xFF241B24))
+            .border(1.dp, if (connected) Color(0x6638F2A1) else Line, RoundedCornerShape(16.dp))
+            .clickable { vm.connectRemembered(remembered) }
+            .padding(13.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                toy.name,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            DeviceStatePill(toy.runtimeState)
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            toy.protocolName,
+            color = TextSoft,
+            style = MaterialTheme.typography.bodySmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            toy.address,
+            color = TextSoft,
+            fontFamily = FontFamily.Monospace,
+            style = MaterialTheme.typography.bodySmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Spacer(Modifier.height(10.dp))
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp))
-                .background(Color(0xFF241B24))
-                .padding(13.dp),
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .clickable { vm.connectRemembered(toy) },
+            Button(
+                onClick = { vm.connectRemembered(remembered) },
+                colors = ButtonDefaults.buttonColors(containerColor = RoseDeep, contentColor = Color.White),
             ) {
-                Text(toy.name, fontWeight = FontWeight.SemiBold)
-                Text(toy.protocolName, color = TextSoft, style = MaterialTheme.typography.bodySmall)
+                Text(if (connected) "重连" else "连接")
             }
-            TextButton(onClick = { vm.editRememberedDevice(toy) }) {
-                Text("备注")
+            if (connected) {
+                OutlinedButton(onClick = vm::stopDevice) {
+                    Text("停止")
+                }
             }
-            TextButton(onClick = { vm.deleteRememberedDevice(toy) }) {
-                Text("删除")
-            }
-            TextButton(onClick = { vm.connectRemembered(toy) }) {
-                Text("连接")
+            Spacer(Modifier.weight(1f))
+            if (toy.saved) {
+                TextButton(onClick = { vm.editRememberedDevice(remembered) }) {
+                    Text("备注")
+                }
+                TextButton(onClick = { vm.deleteRememberedDevice(remembered) }) {
+                    Text("删除")
+                }
             }
         }
-        Spacer(Modifier.height(8.dp))
     }
 }
 
@@ -521,6 +590,7 @@ private fun RecentDevices(vm: BridgeViewModel) {
 private fun DeviceList(
     devices: List<ScannedBleDevice>,
     selectedAddress: String,
+    states: Map<String, ToyRuntimeState>,
     onConnect: (ScannedBleDevice) -> Unit,
 ) {
     if (devices.isEmpty()) return
@@ -531,6 +601,7 @@ private fun DeviceList(
         DeviceRow(
             device = device,
             selected = selectedAddress == device.address,
+            runtimeState = states[device.address],
             onConnect = { onConnect(device) },
         )
         Spacer(Modifier.height(8.dp))
@@ -541,6 +612,7 @@ private fun DeviceList(
 private fun DeviceRow(
     device: ScannedBleDevice,
     selected: Boolean,
+    runtimeState: ToyRuntimeState?,
     onConnect: () -> Unit,
 ) {
     Row(
@@ -555,12 +627,16 @@ private fun DeviceRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text(
-                device.name,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    device.name,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                runtimeState?.let { DeviceStatePill(it) }
+            }
             Text(
                 "${device.address}  ${device.rssi} dBm",
                 color = TextSoft,

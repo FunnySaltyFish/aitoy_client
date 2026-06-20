@@ -9,6 +9,7 @@ import android.os.PowerManager
 import android.provider.Settings
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
@@ -67,6 +68,26 @@ data class RememberedToy(
     val lastSeenAt: Long,
 )
 
+enum class ToyRuntimeState(val label: String) {
+    Offline("未连接"),
+    Connecting("正在连接"),
+    Connected("已连接"),
+    Failed("连接不上"),
+}
+
+data class ManagedToy(
+    val name: String,
+    val address: String,
+    val protocolName: String,
+    val runtimeState: ToyRuntimeState,
+    val selected: Boolean,
+    val current: Boolean,
+    val saved: Boolean,
+)
+
+private fun ManagedToy.lastSeenKey(saved: List<RememberedToy>): Long =
+    saved.firstOrNull { it.address == address }?.lastSeenAt ?: 0L
+
 data class ProtocolPreset(
     val name: String,
     val description: String,
@@ -117,6 +138,7 @@ private fun generateDefaultUserToken(): String = "ut_${UUID.randomUUID().toStrin
 class BridgeViewModel : ViewModel() {
     val devices = mutableStateListOf<ScannedBleDevice>()
     val logs = mutableStateListOf<String>()
+    val toyRuntimeStates = mutableStateMapOf<String, ToyRuntimeState>()
 
     var connectionState by mutableStateOf(BleConnectionState.Idle)
         private set
@@ -240,6 +262,46 @@ class BridgeViewModel : ViewModel() {
             }.filter { it.address.isNotBlank() }
         }.getOrDefault(emptyList())
 
+    val highlightedDeviceAddress: String
+        get() = selectedAddress.takeIf {
+            connectionState == BleConnectionState.Connecting ||
+                connectionState == BleConnectionState.Discovering ||
+                connectionState == BleConnectionState.Ready ||
+                connectionState == BleConnectionState.Disconnecting
+        }.orEmpty()
+
+    val managedToys: List<ManagedToy>
+        get() {
+            val saved = rememberedDevices
+            val rows = saved.map { toy ->
+                ManagedToy(
+                    name = toy.name,
+                    address = toy.address,
+                    protocolName = toy.protocolName,
+                    runtimeState = toyRuntimeStates[toy.address] ?: ToyRuntimeState.Offline,
+                    selected = selectedAddress == toy.address,
+                    current = selectedAddress == toy.address,
+                    saved = true,
+                )
+            }.toMutableList()
+            if (selectedAddress.isNotBlank() && rows.none { it.address == selectedAddress }) {
+                rows += ManagedToy(
+                    name = selectedName.ifBlank { "蓝牙设备" },
+                    address = selectedAddress,
+                    protocolName = protocolStatus.displayName.ifBlank { "尚未识别" },
+                    runtimeState = toyRuntimeStates[selectedAddress] ?: runtimeStateForConnection(),
+                    selected = true,
+                    current = true,
+                    saved = false,
+                )
+            }
+            return rows.sortedWith(
+                compareByDescending<ManagedToy> { it.runtimeState == ToyRuntimeState.Connected }
+                    .thenByDescending { it.current }
+                    .thenByDescending { it.lastSeenKey(saved) }
+            )
+        }
+
     val protocolPresets = listOf(
         ProtocolPreset(
             name = "ANKNI / Mizzzee DDDD",
@@ -320,11 +382,19 @@ class BridgeViewModel : ViewModel() {
         onDevice = ::onDeviceFound,
         onState = {
             connectionState = it
+            updateSelectedRuntimeState(it)
             updateTraceContext()
             if (it == BleConnectionState.Ready) {
                 currentDeviceSaved = rememberedDevices.any { toy -> toy.address == selectedAddress }
                 syncRelayDevice()
                 autoOnlineSavedDevice()
+            } else if (it == BleConnectionState.Error) {
+                busyHint = "设备连接不上，请确认设备已开机并靠近手机"
+                syncRelayDevice()
+                autoOfflineWhenNoConnectedSavedDevice()
+            } else if (it == BleConnectionState.Idle) {
+                syncRelayDevice()
+                autoOfflineWhenNoConnectedSavedDevice()
             }
         },
         onProtocol = {
@@ -397,8 +467,12 @@ class BridgeViewModel : ViewModel() {
             appendLog("跳过不可连接且未识别的广播设备：name=${device.name} address=${device.address}")
             return@runAction
         }
+        selectedAddress.takeIf { it.isNotBlank() && it != device.address }?.let { previous ->
+            toyRuntimeStates[previous] = ToyRuntimeState.Offline
+        }
         selectedAddress = device.address
         selectedName = device.name
+        toyRuntimeStates[device.address] = ToyRuntimeState.Connecting
         protocolAttemptStatus = ProtocolAttemptStatus()
         protocolStatus = BleProtocolStatus()
         updateTraceContext()
@@ -428,9 +502,12 @@ class BridgeViewModel : ViewModel() {
         protocolAttemptStatus = ProtocolAttemptStatus()
         controlTrialStarted = false
         showDeviceRemarkDialog = false
+        selectedAddress.takeIf { it.isNotBlank() }?.let { toyRuntimeStates[it] = ToyRuntimeState.Offline }
         mainHandler.removeCallbacks(controlTrial)
         cancelKeepAlive()
         controller.disconnect()
+        syncRelayDevice()
+        autoOfflineWhenNoConnectedSavedDevice()
     }
 
     fun updateMode(value: Int) {
@@ -499,7 +576,12 @@ class BridgeViewModel : ViewModel() {
                 )
             }
         rememberedDevicesJson = merged.toString()
-        if (toy.address == selectedAddress) currentDeviceSaved = false
+        toyRuntimeStates.remove(toy.address)
+        if (toy.address == selectedAddress) {
+            currentDeviceSaved = false
+            syncRelayDevice()
+            autoOfflineWhenNoConnectedSavedDevice()
+        }
         busyHint = "已从我的设备移除"
     }
 
@@ -524,6 +606,7 @@ class BridgeViewModel : ViewModel() {
             autoOnlineAddress = ""
             autoOnlineSavedDevice()
         }
+        syncRelayDevice()
         showDeviceRemarkDialog = false
         editingRemarkAddress = ""
         editingRemarkProtocolName = ""
@@ -886,6 +969,7 @@ class BridgeViewModel : ViewModel() {
         val index = devices.indexOfFirst { it.address == device.address }
         if (index >= 0) devices[index] = device else devices.add(device)
         devices.sortByDescending { it.rssi }
+        toyRuntimeStates.putIfAbsent(device.address, ToyRuntimeState.Offline)
     }
 
     private fun appendLog(message: String) {
@@ -908,28 +992,51 @@ class BridgeViewModel : ViewModel() {
     }
 
     private fun syncRelayDevice() {
-        if (selectedAddress.isBlank()) return
+        val saved = rememberedDevices
+        val addresses = linkedSetOf<String>()
+        saved.forEach { addresses += it.address }
+        if (selectedAddress.isNotBlank()) addresses += selectedAddress
+        if (addresses.isEmpty()) return
+        val connectedAddress = selectedAddress.takeIf { connectionState == BleConnectionState.Ready }.orEmpty()
+        val defaultAddress = connectedAddress.ifBlank { saved.firstOrNull()?.address.orEmpty() }
         relay.syncDevices(
-            listOf(
+            addresses.map { address ->
+                val remembered = saved.firstOrNull { it.address == address }
+                val isCurrent = address == selectedAddress
                 RelayDevice(
-                    deviceId = currentDeviceId(),
-                    displayName = selectedName.ifBlank { "蓝牙设备" },
-                    connected = connectionState == BleConnectionState.Ready,
-                    isDefault = true,
-                    protocolName = protocolStatus.displayName.ifBlank { "尚未识别" },
-                    intensity = intensity,
-                    mode = mode,
-                    intensityMax = protocolStatus.intensityMax,
-                    modeMax = protocolStatus.modeMax,
-                    controlStyle = protocolStatus.controlStyle.name,
+                    deviceId = deviceIdForAddress(address),
+                    displayName = when {
+                        isCurrent -> selectedName.ifBlank { remembered?.name.orEmpty() }.ifBlank { "蓝牙设备" }
+                        else -> remembered?.name.orEmpty().ifBlank { "蓝牙设备" }
+                    },
+                    connected = address == connectedAddress,
+                    isDefault = address == defaultAddress,
+                    protocolName = when {
+                        isCurrent -> protocolStatus.displayName.ifBlank { remembered?.protocolName.orEmpty() }
+                        else -> remembered?.protocolName.orEmpty()
+                    }.ifBlank { "尚未识别" },
+                    intensity = if (isCurrent) intensity else 0,
+                    mode = if (isCurrent) mode else 1,
+                    intensityMax = if (isCurrent) protocolStatus.intensityMax else 0,
+                    modeMax = if (isCurrent) protocolStatus.modeMax else 1,
+                    controlStyle = if (isCurrent) protocolStatus.controlStyle.name else ToyControlStyle.IntensityOnly.name,
                 )
-            )
+            }
         )
     }
 
     private fun handleRelayCommand(command: RelayCommand) {
         if (command.action != "sequence") {
             relay.commandResult(command.commandId, false, "暂不支持这个操作")
+            return
+        }
+        val targetDeviceId = command.deviceId
+        if (targetDeviceId != null && targetDeviceId != currentDeviceId()) {
+            relay.commandResult(command.commandId, false, "请先在 App 中连接这台设备")
+            return
+        }
+        if (connectionState != BleConnectionState.Ready || selectedAddress.isBlank()) {
+            relay.commandResult(command.commandId, false, "设备还没有连接")
             return
         }
         val steps = runCatching {
@@ -1131,11 +1238,46 @@ class BridgeViewModel : ViewModel() {
     }
 
     private fun currentDeviceId(): String {
+        return deviceIdForAddress(selectedAddress)
+    }
+
+    private fun deviceIdForAddress(address: String): String {
         val digest = MessageDigest.getInstance("SHA-256")
-            .digest(selectedAddress.toByteArray())
+            .digest(address.toByteArray())
             .take(8)
             .joinToString("") { "%02x".format(it) }
         return "dev_$digest"
+    }
+
+    private fun runtimeStateForConnection(): ToyRuntimeState =
+        when (connectionState) {
+            BleConnectionState.Connecting,
+            BleConnectionState.Discovering,
+            BleConnectionState.Disconnecting -> ToyRuntimeState.Connecting
+            BleConnectionState.Ready -> ToyRuntimeState.Connected
+            BleConnectionState.Error -> ToyRuntimeState.Failed
+            BleConnectionState.Idle -> ToyRuntimeState.Offline
+        }
+
+    private fun updateSelectedRuntimeState(state: BleConnectionState) {
+        if (selectedAddress.isBlank()) return
+        toyRuntimeStates[selectedAddress] = when (state) {
+            BleConnectionState.Connecting,
+            BleConnectionState.Discovering,
+            BleConnectionState.Disconnecting -> ToyRuntimeState.Connecting
+            BleConnectionState.Ready -> ToyRuntimeState.Connected
+            BleConnectionState.Error -> ToyRuntimeState.Failed
+            BleConnectionState.Idle -> ToyRuntimeState.Offline
+        }
+    }
+
+    private fun connectedSavedDeviceCount(): Int =
+        rememberedDevices.count { toyRuntimeStates[it.address] == ToyRuntimeState.Connected }
+
+    private fun autoOfflineWhenNoConnectedSavedDevice() {
+        if (relayState == "已在线" && connectedSavedDeviceCount() == 0) {
+            disconnectRelay()
+        }
     }
 
     fun currentModeLabel(): String {
