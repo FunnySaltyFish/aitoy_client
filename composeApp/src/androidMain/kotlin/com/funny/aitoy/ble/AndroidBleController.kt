@@ -203,6 +203,14 @@ class AndroidBleController(
 
         override fun onDescriptorWrite(gatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
             trace("Notify 配置回调 uuid=${descriptor.uuid} status=$status")
+            if (operationInProgress) {
+                operationInProgress = false
+                if (status == BluetoothGatt.GATT_SUCCESS) {
+                    executeNextOperation()
+                } else {
+                    handleProtocolOperationFailed("Notify 配置失败 status=$status")
+                }
+            }
         }
     }
 
@@ -585,6 +593,41 @@ class AndroidBleController(
                 if (!started) {
                     operationInProgress = false
                     handleProtocolOperationFailed("提交读取失败：${characteristic.uuid}")
+                }
+            }
+            is BleProtocolOperation.SubscribeNotify -> {
+                val characteristic = findCharacteristic(operation.characteristicUuid)
+                    ?: run {
+                        operationInProgress = false
+                        handleProtocolOperationFailed("找不到通知通道：${operation.characteristicUuid}")
+                        return
+                    }
+                val localEnabled = gatt?.setCharacteristicNotification(characteristic, true) == true
+                trace("启用 Notify 本地监听 uuid=${characteristic.uuid} result=$localEnabled")
+                val descriptor = characteristic.getDescriptor(CLIENT_CHARACTERISTIC_CONFIG_UUID)
+                if (descriptor == null) {
+                    operationInProgress = false
+                    handleProtocolOperationFailed("找不到 Notify 描述符：${characteristic.uuid}")
+                    return
+                }
+                val value = if (characteristic.properties and BluetoothGattCharacteristic.PROPERTY_INDICATE != 0) {
+                    BluetoothGattDescriptor.ENABLE_INDICATION_VALUE
+                } else {
+                    BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                }
+                val descriptorResult = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    gatt?.writeDescriptor(descriptor, value) ?: -1
+                } else {
+                    @Suppress("DEPRECATION")
+                    descriptor.value = value
+                    @Suppress("DEPRECATION")
+                    if (gatt?.writeDescriptor(descriptor) == true) BluetoothGatt.GATT_SUCCESS else -1
+                }
+                trace("写入 Notify 描述符 result=$descriptorResult")
+                if (descriptorResult != BluetoothGatt.GATT_SUCCESS) {
+                    operationInProgress = false
+                    handleProtocolOperationFailed("提交 Notify 描述符失败：$descriptorResult")
+                    return
                 }
             }
             is BleProtocolOperation.Write -> write(operation)
