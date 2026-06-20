@@ -29,7 +29,6 @@ import com.funny.aitoy.core.kmp.ToastType
 import com.funny.aitoy.core.kmp.appCtx
 import com.funny.aitoy.core.kmp.openUrl
 import com.funny.aitoy.core.kmp.toast
-import com.funny.aitoy.core.prefs.AiToyPrefs
 import com.funny.aitoy.core.prefs.DataSaverUtils
 import com.funny.aitoy.diagnostics.AiToyCrashReporter
 import com.funny.aitoy.diagnostics.AiToyTraceUploader
@@ -435,12 +434,7 @@ class BridgeViewModel : ViewModel() {
     private var autoOnlineAddress = ""
 
     init {
-        if (AiToyPrefs.apiPrefix == "aitoy") {
-            AiToyPrefs.apiPrefix = OkHttpUtils.DEFAULT_API_PREFIX
-        }
-        if (AiToyPrefs.serverBaseUrl.isBlank()) {
-            OkHttpUtils.useProductionBaseUrl()
-        }
+        OkHttpUtils.ensureDefaultNetworkConfig()
         refreshBaseUrlState()
         ensureDefaultUserToken()
         userTokenDraft = userToken
