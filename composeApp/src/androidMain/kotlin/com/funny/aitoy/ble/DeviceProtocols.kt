@@ -86,8 +86,10 @@ private object SistalkMixPwmProtocol : BleDeviceProtocol {
         displayName = "SISTALK Mix PWM",
         controllable = true,
         intensityMax = 100,
-        supportsMode = false,
-        controlStyle = ToyControlStyle.IntensityOnly,
+        supportsMode = true,
+        modeMax = 2,
+        controlStyle = ToyControlStyle.CombinedPatternAndIntensity,
+        modeLabel = "部位",
         automatic = true,
     )
 
@@ -96,16 +98,29 @@ private object SistalkMixPwmProtocol : BleDeviceProtocol {
 
     override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
         when (action) {
-            is ToyControlAction.Intensity -> listOf(pwm(action.value))
-            is ToyControlAction.Combined -> listOf(pwm(action.intensity))
-            is ToyControlAction.Pattern -> emptyList()
-            ToyControlAction.Stop -> listOf(pwm(0))
+            is ToyControlAction.Intensity -> listOf(pwm(action.value, 0))
+            is ToyControlAction.Combined -> listOf(pwmForChannel(action.mode, action.intensity))
+            is ToyControlAction.Pattern -> listOf(pwmForChannel(action.mode, status.intensityMax.coerceAtLeast(1)))
+            ToyControlAction.Stop -> listOf(pwm(0, 0))
         }
 
-    private fun pwm(intensity: Int): BleProtocolOperation.Write =
+    private fun pwmForChannel(channel: Int, intensity: Int): BleProtocolOperation.Write {
+        val normalized = intensity.coerceIn(0, status.intensityMax)
+        // 按官方界面顺序暂定为 [吮吸, 尾震]，真机验证若相反再交换。
+        return if (channel.coerceIn(1, 2) == 1) {
+            pwm(normalized, 0)
+        } else {
+            pwm(0, normalized)
+        }
+    }
+
+    private fun pwm(suction: Int, tailVibration: Int): BleProtocolOperation.Write =
         BleProtocolOperation.Write(
             characteristicUuid = pwmUuid,
-            bytes = bytes(intensity.coerceIn(0, status.intensityMax)),
+            bytes = bytes(
+                suction.coerceIn(0, status.intensityMax),
+                tailVibration.coerceIn(0, status.intensityMax),
+            ),
             withResponse = false,
         )
 }
@@ -123,8 +138,10 @@ private object SistalkMonsterPartyV3Protocol : BleDeviceProtocol {
         displayName = "SISTALK Monster Party",
         controllable = true,
         intensityMax = 100,
-        supportsMode = false,
-        controlStyle = ToyControlStyle.IntensityOnly,
+        supportsMode = true,
+        modeMax = 2,
+        controlStyle = ToyControlStyle.CombinedPatternAndIntensity,
+        modeLabel = "部位",
         automatic = true,
     )
 
@@ -138,14 +155,29 @@ private object SistalkMonsterPartyV3Protocol : BleDeviceProtocol {
 
     override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
         when (action) {
-            is ToyControlAction.Intensity -> listOf(motorCommand(action.value))
-            is ToyControlAction.Combined -> listOf(motorCommand(action.intensity))
-            is ToyControlAction.Pattern -> emptyList()
-            ToyControlAction.Stop -> listOf(motorCommand(0))
+            is ToyControlAction.Intensity -> listOf(motorCommand(action.value, 0))
+            is ToyControlAction.Combined -> listOf(motorCommandForChannel(action.mode, action.intensity))
+            is ToyControlAction.Pattern -> listOf(motorCommandForChannel(action.mode, status.intensityMax.coerceAtLeast(1)))
+            ToyControlAction.Stop -> listOf(motorCommand(0, 0))
         }
 
-    private fun motorCommand(intensity: Int): BleProtocolOperation.Write =
-        functionCommand(COMMAND_MOTOR, 0x01, intensity.coerceIn(0, status.intensityMax))
+    private fun motorCommandForChannel(channel: Int, intensity: Int): BleProtocolOperation.Write {
+        val normalized = intensity.coerceIn(0, status.intensityMax)
+        // 按官方界面顺序暂定为 [吮吸, 尾震]，真机验证若相反再交换。
+        return if (channel.coerceIn(1, 2) == 1) {
+            motorCommand(normalized, 0)
+        } else {
+            motorCommand(0, normalized)
+        }
+    }
+
+    private fun motorCommand(suction: Int, tailVibration: Int): BleProtocolOperation.Write =
+        functionCommand(
+            COMMAND_MOTOR,
+            0x02,
+            suction.coerceIn(0, status.intensityMax),
+            tailVibration.coerceIn(0, status.intensityMax),
+        )
 
     private fun functionCommand(command: Int, vararg payload: Int): BleProtocolOperation.Write =
         BleProtocolOperation.Write(
