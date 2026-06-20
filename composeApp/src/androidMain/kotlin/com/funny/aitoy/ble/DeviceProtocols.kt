@@ -85,13 +85,13 @@ private object SistalkMonsterPartyV3Protocol : BleDeviceProtocol {
     private const val COMMAND_MOTOR = 0x01
     private const val COMMAND_FIRMWARE = 0x02
     private const val COMMAND_BATTERY = 0x06
-    private const val COMMAND_POWER_OFF_VIBRATION = 0x0A
+    private const val COMMAND_POWER_OFF = 0xA2
 
     override val status = BleProtocolStatus(
         id = "sistalk_monsterparty_v3",
         displayName = "SISTALK Monster Party",
         controllable = true,
-        intensityMax = 20,
+        intensityMax = 100,
         supportsMode = false,
         controlStyle = ToyControlStyle.IntensityOnly,
         automatic = true,
@@ -129,7 +129,7 @@ private object SistalkMonsterPartyV3Protocol : BleDeviceProtocol {
 
     @Suppress("unused")
     private fun powerOffVibrationCommand(): BleProtocolOperation.Write =
-        opCommand(COMMAND_POWER_OFF_VIBRATION)
+        opCommand(COMMAND_POWER_OFF)
 }
 
 private object SistalkMonsterPubProtocol : BleDeviceProtocol {
