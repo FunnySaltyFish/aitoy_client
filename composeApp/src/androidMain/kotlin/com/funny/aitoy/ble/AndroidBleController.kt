@@ -128,7 +128,9 @@ class AndroidBleController(
                 service.characteristics.forEach { characteristic ->
                     trace(
                         "特征 uuid=${characteristic.uuid} properties=0x" +
-                            characteristic.properties.toString(16),
+                            characteristic.properties.toString(16) +
+                            " ${characteristic.propertiesText()} descriptors=" +
+                            characteristic.descriptors.joinToString { descriptor -> descriptor.uuid.toString() }.ifBlank { "<none>" },
                     )
                 }
             }
@@ -289,11 +291,15 @@ class AndroidBleController(
 
     fun sendAction(action: ToyControlAction) {
         activeBroadcastProtocol?.let { protocol ->
-            protocol.commandsFor(action).forEach(advertiser::start)
+            val commands = protocol.commandsFor(action)
+            trace("广播控制 action=$action protocol=${protocol.status.id} operations=${commands.size}")
+            commands.forEach(advertiser::start)
             return
         }
         val protocol = activeProtocol ?: error("当前设备尚无可用的内置协议")
-        enqueue(protocol.commandsFor(action))
+        val commands = protocol.commandsFor(action)
+        trace("GATT 控制 action=$action protocol=${protocol.status.id} operations=${commands.size}")
+        enqueue(commands)
     }
 
     fun stopDevice() = sendAction(ToyControlAction.Stop)
@@ -417,7 +423,11 @@ class AndroidBleController(
         protocolReady = false
         operationQueue.clear()
         operationInProgress = false
-        trace("确认协议 ${protocolCandidateIndex + 1}/${protocolCandidates.size}：${protocol.status.displayName}")
+        trace(
+            "确认协议 ${protocolCandidateIndex + 1}/${protocolCandidates.size}：" +
+                "${protocol.status.displayName} id=${protocol.status.id} candidates=" +
+                protocolCandidates.joinToString { it.status.id },
+        )
         updateProtocolAttempt(
             ProtocolAttemptStatus(
                 active = true,
@@ -551,6 +561,10 @@ class AndroidBleController(
     }
 
     private fun enqueue(operations: List<BleProtocolOperation>) {
+        trace("加入 GATT 操作 count=${operations.size} queueBefore=${operationQueue.size}")
+        operations.forEachIndexed { index, operation ->
+            trace("操作[$index] ${operation.describe()}")
+        }
         operationQueue.addAll(operations)
         executeNextOperation()
     }
@@ -708,6 +722,25 @@ class AndroidBleController(
     private fun trace(message: String, error: Boolean = false) {
         if (error) Log.e(TAG, message) else Log.d(TAG, message)
         mainHandler.post { onLog(message) }
+    }
+
+    private fun BleProtocolOperation.describe(): String =
+        when (this) {
+            is BleProtocolOperation.Read -> "Read uuid=$characteristicUuid"
+            is BleProtocolOperation.SubscribeNotify -> "SubscribeNotify uuid=$characteristicUuid"
+            is BleProtocolOperation.Write ->
+                "Write uuid=$characteristicUuid withResponse=$withResponse bytes=${bytes.toHexString()}"
+        }
+
+    private fun BluetoothGattCharacteristic.propertiesText(): String {
+        val names = buildList {
+            if (properties and BluetoothGattCharacteristic.PROPERTY_READ != 0) add("READ")
+            if (properties and BluetoothGattCharacteristic.PROPERTY_WRITE != 0) add("WRITE")
+            if (properties and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE != 0) add("WRITE_NO_RESPONSE")
+            if (properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY != 0) add("NOTIFY")
+            if (properties and BluetoothGattCharacteristic.PROPERTY_INDICATE != 0) add("INDICATE")
+        }
+        return names.joinToString(prefix = "[", postfix = "]").ifBlank { "[]" }
     }
 
     private fun String.toUuidOrNull(): UUID? = trim().takeIf { it.isNotEmpty() }?.let {

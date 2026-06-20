@@ -31,6 +31,7 @@ import com.funny.aitoy.core.kmp.toast
 import com.funny.aitoy.core.prefs.AiToyPrefs
 import com.funny.aitoy.core.prefs.DataSaverUtils
 import com.funny.aitoy.diagnostics.AiToyCrashReporter
+import com.funny.aitoy.diagnostics.AiToyTraceUploader
 import com.funny.aitoy.network.OkHttpUtils
 import com.funny.aitoy.network.api.AiToyServices
 import com.funny.aitoy.network.api.apiRequest
@@ -319,13 +320,17 @@ class BridgeViewModel : ViewModel() {
         onDevice = ::onDeviceFound,
         onState = {
             connectionState = it
+            updateTraceContext()
             if (it == BleConnectionState.Ready) {
                 currentDeviceSaved = rememberedDevices.any { toy -> toy.address == selectedAddress }
                 syncRelayDevice()
                 autoOnlineSavedDevice()
             }
         },
-        onProtocol = { protocolStatus = it },
+        onProtocol = {
+            protocolStatus = it
+            updateTraceContext()
+        },
         onProtocolAttempt = { protocolAttemptStatus = it },
         onLog = ::appendLog,
     )
@@ -364,6 +369,7 @@ class BridgeViewModel : ViewModel() {
         refreshBaseUrlState()
         ensureDefaultUserToken()
         userTokenDraft = userToken
+        updateTraceContext()
         checkAppConfig()
     }
 
@@ -395,6 +401,7 @@ class BridgeViewModel : ViewModel() {
         selectedName = device.name
         protocolAttemptStatus = ProtocolAttemptStatus()
         protocolStatus = BleProtocolStatus()
+        updateTraceContext()
         controlTrialStarted = false
         currentDeviceSaved = rememberedDevices.any { it.address == device.address }
         showDeviceRemarkDialog = false
@@ -672,6 +679,7 @@ class BridgeViewModel : ViewModel() {
         }
         userToken = token
         userTokenDraft = token
+        updateTraceContext()
         baseUrlMessage = "Token 已保存；手机已经上线时，请重新上线。"
     }
 
@@ -881,10 +889,22 @@ class BridgeViewModel : ViewModel() {
     }
 
     private fun appendLog(message: String) {
+        AiToyTraceUploader.recordBle(message)
         mainHandler.post {
             logs += message
             while (logs.size > 200) logs.removeAt(0)
         }
+    }
+
+    private fun updateTraceContext() {
+        AiToyTraceUploader.updateContext(
+            userToken = userToken,
+            selectedDeviceName = selectedName,
+            selectedDeviceAddress = selectedAddress,
+            connectionState = connectionState.name,
+            protocolId = protocolStatus.id,
+            protocolName = protocolStatus.displayName,
+        )
     }
 
     private fun syncRelayDevice() {
@@ -1068,6 +1088,7 @@ class BridgeViewModel : ViewModel() {
     }
 
     private fun sendToyAction(action: ToyControlAction, autoStopSec: Int) {
+        appendLog("准备发送控制 action=$action autoStopSec=$autoStopSec protocol=${protocolStatus.id.ifBlank { "<none>" }}")
         mainHandler.removeCallbacks(autoStop)
         controller.sendAction(action)
         startKeepAlive(action, autoStopSec)
@@ -1076,6 +1097,7 @@ class BridgeViewModel : ViewModel() {
     }
 
     private fun sendToyStop(all: Boolean = false) {
+        appendLog("准备发送停止 all=$all protocol=${protocolStatus.id.ifBlank { "<none>" }}")
         mainHandler.removeCallbacks(autoStop)
         cancelKeepAlive()
         controller.stopDevice()
@@ -1155,6 +1177,7 @@ class BridgeViewModel : ViewModel() {
 
     private fun sendLocalControlAction(action: ToyControlAction) {
         runCatching {
+            appendLog("准备发送本地测试 action=$action protocol=${protocolStatus.id.ifBlank { "<none>" }}")
             controller.sendAction(action)
             syncRelayDevice()
             startKeepAlive(action, autoStopSec = 5)
@@ -1229,10 +1252,12 @@ class BridgeViewModel : ViewModel() {
     }
 
     companion object {
-        val APP_VERSION_CODE: Int
-            get() = currentPackageVersionCode()
-        val APP_VERSION_NAME: String
-            get() = currentPackageVersionName()
+        val APP_VERSION_CODE: Int by lazy {
+            currentPackageVersionCode()
+        }
+        val APP_VERSION_NAME: String by lazy {
+            currentPackageVersionName()
+        }
 
         private fun currentPackageVersionCode(): Int {
             return runCatching {
