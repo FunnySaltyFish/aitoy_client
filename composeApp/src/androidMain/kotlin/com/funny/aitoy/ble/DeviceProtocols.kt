@@ -57,6 +57,7 @@ internal object BleProtocolRegistry {
         AnkniProtocol,
         AnkniYwtdProtocol,
         KissToyProtocol,
+        SistalkMixPwmProtocol,
         SistalkMonsterPartyV3Protocol,
         SistalkMonsterPubProtocol,
         SvakomQhSx045Protocol,
@@ -77,14 +78,44 @@ internal object BleProtocolRegistry {
         protocols.filter { it.matches(fingerprint) }
 }
 
+private object SistalkMixPwmProtocol : BleDeviceProtocol {
+    private val pwmUuid = uuid("00010203-0405-0607-0809-0a0b0c0d2b12")
+
+    override val status = BleProtocolStatus(
+        id = "sistalk_mix_pwm",
+        displayName = "SISTALK Mix PWM",
+        controllable = true,
+        intensityMax = 100,
+        supportsMode = false,
+        controlStyle = ToyControlStyle.IntensityOnly,
+        automatic = true,
+    )
+
+    override fun matches(fingerprint: BleGattFingerprint): Boolean =
+        fingerprint.characteristicUuids.contains(pwmUuid)
+
+    override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
+        when (action) {
+            is ToyControlAction.Intensity -> listOf(pwm(action.value))
+            is ToyControlAction.Combined -> listOf(pwm(action.intensity))
+            is ToyControlAction.Pattern -> emptyList()
+            ToyControlAction.Stop -> listOf(pwm(0))
+        }
+
+    private fun pwm(intensity: Int): BleProtocolOperation.Write =
+        BleProtocolOperation.Write(
+            characteristicUuid = pwmUuid,
+            bytes = bytes(intensity.coerceIn(0, status.intensityMax)),
+            withResponse = false,
+        )
+}
+
 private object SistalkMonsterPartyV3Protocol : BleDeviceProtocol {
     private val serviceUuid = uuid("00009000-0000-1000-8000-00805f9b34fb")
     private val opUuid = uuid("00009001-0000-1000-8000-00805f9b34fb")
     private val functionUuid = uuid("00009002-0000-1000-8000-00805f9b34fb")
 
-    private const val COMMAND_MOTOR = 0x01
-    private const val COMMAND_FIRMWARE = 0x02
-    private const val COMMAND_BATTERY = 0x06
+    private const val COMMAND_MOTOR = 0xA0
     private const val COMMAND_POWER_OFF = 0xA2
 
     override val status = BleProtocolStatus(
@@ -103,11 +134,7 @@ private object SistalkMonsterPartyV3Protocol : BleDeviceProtocol {
                 fingerprint.characteristicUuids.contains(functionUuid)
 
     override fun initialize(fingerprint: BleGattFingerprint): List<BleProtocolOperation> =
-        listOf(
-            BleProtocolOperation.SubscribeNotify(functionUuid),
-            opCommand(COMMAND_FIRMWARE),
-            opCommand(COMMAND_BATTERY),
-        )
+        listOf(BleProtocolOperation.SubscribeNotify(functionUuid))
 
     override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
         when (action) {
@@ -118,18 +145,18 @@ private object SistalkMonsterPartyV3Protocol : BleDeviceProtocol {
         }
 
     private fun motorCommand(intensity: Int): BleProtocolOperation.Write =
-        opCommand(COMMAND_MOTOR, intensity.coerceIn(0, status.intensityMax))
+        functionCommand(COMMAND_MOTOR, 0x01, intensity.coerceIn(0, status.intensityMax))
 
-    private fun opCommand(command: Int, vararg payload: Int): BleProtocolOperation.Write =
+    private fun functionCommand(command: Int, vararg payload: Int): BleProtocolOperation.Write =
         BleProtocolOperation.Write(
-            characteristicUuid = opUuid,
-            bytes = bytes(command, *payload),
+            characteristicUuid = functionUuid,
+            bytes = bytes(command, ((payload.size shl 3) or 0x80), *payload),
             withResponse = false,
         )
 
     @Suppress("unused")
     private fun powerOffVibrationCommand(): BleProtocolOperation.Write =
-        opCommand(COMMAND_POWER_OFF)
+        functionCommand(COMMAND_POWER_OFF)
 }
 
 private object SistalkMonsterPubProtocol : BleDeviceProtocol {
