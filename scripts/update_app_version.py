@@ -23,10 +23,10 @@ CHANNEL = "common"
 PACKAGE_NAME = "com.funny.aitoy"
 FORCE_UPDATE_MAX_VERSION_CODE = 200
 DEFAULT_MIN_SUPPORTED_VERSION_CODE = FORCE_UPDATE_MAX_VERSION_CODE + 1
-UPDATE_LOG = """AI Toy Bridge 0.3.1
+UPDATE_LOG = """AI Toy Bridge 0.3.3
 
-第五各版本：
-- 优化对小怪兽系列的支持。当前谜姬系列已经有多位群友成功！
+第五个版本：
+- 增加对小怪兽系列的支持，已有成功案例，感谢群友 @急事请打电话 和 @呜嘎呜嘎 的协助测试。此外，当前谜姬系列已经有多位群友成功！
 - 应用终于有图标啦！有意见也欢迎反馈
 
 第四个版本：
