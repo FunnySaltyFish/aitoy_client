@@ -21,6 +21,8 @@ ADMIN_KEY = os.environ.get("AITOY_ADMIN_KEY", "FunnyAIToy")
 PLATFORM = "android"
 CHANNEL = "common"
 PACKAGE_NAME = "com.funny.aitoy"
+FORCE_UPDATE_MAX_VERSION_CODE = 200
+DEFAULT_MIN_SUPPORTED_VERSION_CODE = FORCE_UPDATE_MAX_VERSION_CODE + 1
 UPDATE_LOG = """AI Toy Bridge 0.3.0
 
 第四个版本：
@@ -207,7 +209,8 @@ def main() -> int:
     print(f"已安装包: {package_info.package_name}")
     print(f"版本: {package_info.version_name} ({package_info.version_code})")
     print(f"平台/渠道: {args.platform}/{args.channel}")
-    print(f"最低支持版本: {package_info.version_code}")
+    print(f"强制更新版本: <= {FORCE_UPDATE_MAX_VERSION_CODE}")
+    print(f"最低可继续版本: {DEFAULT_MIN_SUPPORTED_VERSION_CODE}")
     print("更新日志:")
     print(UPDATE_LOG.strip())
     if not args.yes:
@@ -218,7 +221,7 @@ def main() -> int:
         "channel": args.channel,
         "versionCode": package_info.version_code,
         "versionName": package_info.version_name,
-        "minSupportedVersionCode": package_info.version_code,
+        "minSupportedVersionCode": DEFAULT_MIN_SUPPORTED_VERSION_CODE,
         "fileExtension": apk_path.suffix.lstrip(".") or "apk",
         "updateLog": UPDATE_LOG.strip(),
     }
