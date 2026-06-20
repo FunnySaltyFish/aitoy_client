@@ -57,9 +57,9 @@ internal object BleProtocolRegistry {
         AnkniProtocol,
         AnkniYwtdProtocol,
         KissToyProtocol,
-        SistalkMixPwmProtocol,
         SistalkMonsterPartyV3Protocol,
         SistalkMonsterPubProtocol,
+        SistalkMixPwmProtocol,
         SvakomQhSx045Protocol,
         MizzzeeXhtkjProtocol,
         SenseeCcpa10S2Protocol,
@@ -80,6 +80,12 @@ internal object BleProtocolRegistry {
 
 private object SistalkMixPwmProtocol : BleDeviceProtocol {
     private val pwmUuid = uuid("00010203-0405-0607-0809-0a0b0c0d2b12")
+    private val sistalkV2ServiceUuid = uuid("00009000-0000-1000-8000-00805f9b34fb")
+    private val sistalkV2OpUuid = uuid("00009001-0000-1000-8000-00805f9b34fb")
+    private val sistalkV2FunctionUuid = uuid("00009002-0000-1000-8000-00805f9b34fb")
+    private val monsterPubServiceUuid = uuid("00006000-0000-1000-8000-00805f9b34fb")
+    private val monsterPubRunUuid = uuid("00006001-0000-1000-8000-00805f9b34fb")
+    private val monsterPubStopUuid = uuid("00006002-0000-1000-8000-00805f9b34fb")
 
     override val status = BleProtocolStatus(
         id = "sistalk_mix_pwm",
@@ -94,7 +100,10 @@ private object SistalkMixPwmProtocol : BleDeviceProtocol {
     )
 
     override fun matches(fingerprint: BleGattFingerprint): Boolean =
-        fingerprint.characteristicUuids.contains(pwmUuid)
+        fingerprint.characteristicUuids.contains(pwmUuid) &&
+                !fingerprint.name.isLegacySistalkMonsterPubName() &&
+                !fingerprint.hasSistalkV2Gatt() &&
+                !fingerprint.hasMonsterPubGatt()
 
     override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
         when (action) {
@@ -123,6 +132,16 @@ private object SistalkMixPwmProtocol : BleDeviceProtocol {
             ),
             withResponse = false,
         )
+
+    private fun BleGattFingerprint.hasSistalkV2Gatt(): Boolean =
+        serviceUuids.contains(sistalkV2ServiceUuid) &&
+                characteristicUuids.contains(sistalkV2OpUuid) &&
+                characteristicUuids.contains(sistalkV2FunctionUuid)
+
+    private fun BleGattFingerprint.hasMonsterPubGatt(): Boolean =
+        serviceUuids.contains(monsterPubServiceUuid) &&
+                characteristicUuids.contains(monsterPubRunUuid) &&
+                characteristicUuids.contains(monsterPubStopUuid)
 }
 
 private object SistalkMonsterPartyV3Protocol : BleDeviceProtocol {
@@ -983,3 +1002,6 @@ private fun bytes(vararg values: Int): ByteArray =
 
 private fun String.normalizedDeviceName(): String =
     lowercase().replace("_", "").replace(" ", "")
+
+private fun String.isLegacySistalkMonsterPubName(): Boolean =
+    normalizedDeviceName() == "monsterpub"
