@@ -9,7 +9,27 @@ internal sealed interface BleProtocolOperation {
         val characteristicUuid: UUID,
         val bytes: ByteArray,
         val withResponse: Boolean,
-    ) : BleProtocolOperation
+    ) : BleProtocolOperation {
+        override fun equals(other: Any?): Boolean {
+            if (this === other) return true
+            if (javaClass != other?.javaClass) return false
+
+            other as Write
+
+            if (withResponse != other.withResponse) return false
+            if (characteristicUuid != other.characteristicUuid) return false
+            if (!bytes.contentEquals(other.bytes)) return false
+
+            return true
+        }
+
+        override fun hashCode(): Int {
+            var result = withResponse.hashCode()
+            result = 31 * result + characteristicUuid.hashCode()
+            result = 31 * result + bytes.contentHashCode()
+            return result
+        }
+    }
 }
 
 internal data class BleGattFingerprint(
@@ -58,6 +78,8 @@ private object SistalkMonsterPubProtocol : BleDeviceProtocol {
     private val motorServiceUuid = uuid("00006000-0000-1000-8000-00805f9b34fb")
     private val runUuid = uuid("00006001-0000-1000-8000-00805f9b34fb")
     private val stopUuid = uuid("00006002-0000-1000-8000-00805f9b34fb")
+    private const val START_PULSE_LEVEL = 20
+    private var previousLevel = -1
     private val levelMap = intArrayOf(
         0,
         10,
@@ -98,21 +120,39 @@ private object SistalkMonsterPubProtocol : BleDeviceProtocol {
                 fingerprint.characteristicUuids.contains(stopUuid)
     }
 
+    override fun initialize(fingerprint: BleGattFingerprint): List<BleProtocolOperation> {
+        previousLevel = 0
+        return emptyList()
+    }
+
     override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
         when (action) {
-            is ToyControlAction.Intensity -> listOf(run(action.value))
-            is ToyControlAction.Combined -> listOf(run(action.intensity))
+            is ToyControlAction.Intensity -> run(action.value)
+            is ToyControlAction.Combined -> run(action.intensity)
             is ToyControlAction.Pattern -> emptyList()
             ToyControlAction.Stop -> listOf(stop())
         }
 
-    private fun run(intensity: Int): BleProtocolOperation.Write {
+    private fun run(intensity: Int): List<BleProtocolOperation.Write> {
         val level = levelMap[intensity.coerceIn(0, status.intensityMax)]
-        return BleProtocolOperation.Write(runUuid, byteArrayOf(level.toByte()), withResponse = false)
+        if (level == 0) return listOf(stop())
+        val commands = buildList {
+            if (level < START_PULSE_LEVEL && previousLevel <= 0) {
+                add(runLevel(START_PULSE_LEVEL))
+            }
+            add(runLevel(level))
+        }
+        previousLevel = level
+        return commands
     }
 
-    private fun stop(): BleProtocolOperation.Write =
-        BleProtocolOperation.Write(stopUuid, byteArrayOf(0x00), withResponse = true)
+    private fun runLevel(level: Int): BleProtocolOperation.Write =
+        BleProtocolOperation.Write(runUuid, byteArrayOf(level.toByte()), withResponse = false)
+
+    private fun stop(): BleProtocolOperation.Write {
+        previousLevel = 0
+        return BleProtocolOperation.Write(stopUuid, byteArrayOf(0x00), withResponse = true)
+    }
 }
 
 private object SvakomQhSx045Protocol : BleDeviceProtocol {

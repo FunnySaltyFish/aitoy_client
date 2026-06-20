@@ -268,15 +268,7 @@ class AndroidBleController(
             return
         }
         if (!device.connectable) {
-            trace("跳过不可连接且未识别的广播设备 address=${device.address}", error = true)
-            updateProtocolAttempt(
-                ProtocolAttemptStatus(
-                    title = "这个广播暂时无法控制",
-                    message = "没有识别到可用的广播协议",
-                ),
-            )
-            updateState(BleConnectionState.Error)
-            return
+            trace("扫描结果显示不可连接，仍尝试读取设备能力 address=${device.address}")
         }
         updateState(BleConnectionState.Connecting)
         val remoteDevice = adapter?.getRemoteDevice(device.address)
@@ -308,9 +300,7 @@ class AndroidBleController(
                 handleProtocolOperationFailed("找不到写入通道：${operation.characteristicUuid}")
                 return
             }
-        val supportsNoResponse =
-            characteristic.properties and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE != 0
-        val writeWithResponse = operation.withResponse || !supportsNoResponse
+        val writeWithResponse = operation.withResponse
         val writeType = if (writeWithResponse) {
             BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
         } else {

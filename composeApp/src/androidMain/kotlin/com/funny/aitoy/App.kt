@@ -572,7 +572,7 @@ private fun DeviceRow(
             val hint = when {
                 device.broadcastProtocolName.isNotBlank() -> "已识别：${device.broadcastProtocolName}"
                 device.connectable -> "可连接"
-                else -> "未识别广播"
+                else -> "可尝试连接"
             }
             Text(
                 hint,
@@ -595,7 +595,7 @@ private fun DeviceRow(
                 when {
                     device.broadcastProtocolName.isNotBlank() -> "广播测试"
                     device.connectable -> "连接"
-                    else -> "不可连接"
+                    else -> "尝试连接"
                 }
             )
         }

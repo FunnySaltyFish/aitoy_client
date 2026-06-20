@@ -10,7 +10,7 @@ data class ScannedBleDevice(
     val scanRecordHex: String = "",
     val broadcastProtocolName: String = "",
 ) {
-    val controllable: Boolean get() = connectable || broadcastProtocolName.isNotBlank()
+    val controllable: Boolean get() = connectable || broadcastProtocolName.isNotBlank() || serviceUuids.isNotEmpty()
 }
 
 enum class BleConnectionState(val label: String) {
