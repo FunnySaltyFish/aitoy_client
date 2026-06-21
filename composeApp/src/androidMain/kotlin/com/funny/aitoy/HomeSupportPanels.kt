@@ -137,7 +137,7 @@ internal fun HelpSettingsPanel(vm: BridgeViewModel) {
         AnimatedVisibility(vm.showGuide) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 FlowStep("A", "连接设备", "先寻找设备并连接，应用会优先尝试自动识别。")
-                FlowStep("B", "确认可用", "从低强度开始测试，正常后保存到我的设备。")
+                FlowStep("B", "确认可用", "从低强度开始，正常后保存到我的设备。")
                 FlowStep("C", "自动上线", "已保存设备连接成功后，手机会自动上线给 AI 使用。")
             }
         }
@@ -177,7 +177,7 @@ internal fun AdvancedPanel(vm: BridgeViewModel) {
     Panel(title = "分析与适配", icon = Icons.Outlined.Tune) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                "自动连接没反应时，从这里导入指令、重新测试，再保存可用设备。",
+                "自动连接没反应时，从这里导入指令、重新连接，再保存可用设备。",
                 color = TextSoft,
                 modifier = Modifier.weight(1f),
             )
@@ -214,7 +214,7 @@ private fun AnalysisStatus(vm: BridgeViewModel) {
     }
     val detail = when {
         vm.manualControlEnabled && connected -> "改动指令后，需要重新连接才会生效。"
-        vm.manualControlEnabled -> "选择设备后，会按这组指令测试。"
+        vm.manualControlEnabled -> "选择设备后，会按这组指令控制。"
         connected -> "如果控制没反应，可以导入或选择同款指令。"
         else -> "自动识别失败后，再回到这里导入指令。"
     }
@@ -234,7 +234,7 @@ private fun AnalysisStatus(vm: BridgeViewModel) {
                 onClick = vm::reconnectWithCurrentTemplate,
                 colors = ButtonDefaults.buttonColors(containerColor = Rose, contentColor = Ink),
             ) {
-                Text(if (connected) "重新连接测试" else "选择设备测试")
+                Text(if (connected) "重新连接" else "选择设备")
             }
         } else {
             OutlinedButton(onClick = { if (!vm.scanning) vm.toggleScan() }) {
@@ -250,7 +250,7 @@ private fun AnalysisFlow(vm: BridgeViewModel) {
     SoftTitle("推荐流程")
     FlowStep("1", "导入或选择指令", "有分享链接就先导入；没有链接，再从模板库选择相近设备。")
     Spacer(Modifier.height(8.dp))
-    FlowStep("2", "重新连接测试", "连接后从低强度开始，确认设备是否有反应。")
+    FlowStep("2", "重新连接", "连接后从低强度开始，确认设备是否有反应。")
     Spacer(Modifier.height(8.dp))
     FlowStep("3", "保存可用设备", "确认正常后保存备注，下次连接会自动上线。")
     if (vm.importMessage.isNotBlank()) {
@@ -322,7 +322,7 @@ private fun ShareTools(vm: BridgeViewModel) {
     SoftTitle("导入与分享")
     FormField("分享链接或口令", vm.importCode) { vm.importCode = it }
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        Button(onClick = vm::importSharedTemplate) { Text("导入并测试") }
+        Button(onClick = vm::importSharedTemplate) { Text("导入指令") }
         OutlinedButton(onClick = vm::shareCurrentTemplate) { Text("分享当前指令") }
     }
     if (vm.shareMessage.isNotBlank()) {

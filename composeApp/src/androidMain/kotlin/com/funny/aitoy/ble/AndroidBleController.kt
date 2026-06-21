@@ -673,6 +673,10 @@ class AndroidBleController(
 
     private fun handleProtocolOperationFailed(reason: String) {
         operationQueue.clear()
+        if (protocolReady) {
+            trace(reason, error = true)
+            return
+        }
         if (!protocolReady && protocolCandidates.isNotEmpty()) {
             activeProtocol?.status?.displayName
                 ?.takeIf { it.isNotBlank() && it !in failedProtocolNames }

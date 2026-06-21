@@ -141,6 +141,12 @@ class BridgeViewModel : ViewModel() {
     val devices = mutableStateListOf<ScannedBleDevice>()
     val logs = mutableStateListOf<String>()
     val toyRuntimeStates = mutableStateMapOf<String, ToyRuntimeState>()
+    private val deviceConnectionStates = mutableStateMapOf<String, BleConnectionState>()
+    private val deviceProtocolStatuses = mutableStateMapOf<String, BleProtocolStatus>()
+    private val deviceProtocolAttempts = mutableStateMapOf<String, ProtocolAttemptStatus>()
+    private val deviceDisplayNames = mutableStateMapOf<String, String>()
+    private val deviceModes = mutableStateMapOf<String, Int>()
+    private val deviceIntensities = mutableStateMapOf<String, Int>()
 
     var connectionState by mutableStateOf(BleConnectionState.Idle)
         private set
@@ -277,6 +283,10 @@ class BridgeViewModel : ViewModel() {
     val managedToys: List<ManagedToy>
         get() {
             val saved = rememberedDevices
+            val addresses = linkedSetOf<String>()
+            saved.forEach { addresses += it.address }
+            controllers.keys.forEach { addresses += it }
+            if (selectedAddress.isNotBlank()) addresses += selectedAddress
             val rows = saved.map { toy ->
                 ManagedToy(
                     name = toy.name,
@@ -288,17 +298,27 @@ class BridgeViewModel : ViewModel() {
                     saved = true,
                 )
             }.toMutableList()
-            if (selectedAddress.isNotBlank() && rows.none { it.address == selectedAddress }) {
-                rows += ManagedToy(
-                    name = selectedName.ifBlank { "蓝牙设备" },
-                    address = selectedAddress,
-                    protocolName = protocolStatus.displayName.ifBlank { "尚未识别" },
-                    runtimeState = toyRuntimeStates[selectedAddress] ?: runtimeStateForConnection(),
-                    selected = true,
-                    current = true,
-                    saved = false,
-                )
-            }
+            addresses
+                .filter { address -> rows.none { it.address == address } }
+                .forEach { address ->
+                    rows += ManagedToy(
+                        name = when {
+                            address == selectedAddress -> selectedName
+                            deviceDisplayNames[address].orEmpty().isNotBlank() -> deviceDisplayNames[address].orEmpty()
+                            else -> devices.firstOrNull { it.address == address }?.name.orEmpty()
+                        }.ifBlank { "蓝牙设备" },
+                        address = address,
+                        protocolName = protocolStatusFor(address).displayName.ifBlank { "尚未识别" },
+                        runtimeState = toyRuntimeStates[address] ?: if (address == selectedAddress) {
+                            connectionState.toRuntimeState()
+                        } else {
+                            ToyRuntimeState.Offline
+                        },
+                        selected = selectedAddress == address,
+                        current = selectedAddress == address,
+                        saved = false,
+                    )
+                }
             return rows.sortedWith(
                 compareByDescending<ManagedToy> { it.runtimeState == ToyRuntimeState.Connected }
                     .thenByDescending { it.current }
@@ -309,7 +329,7 @@ class BridgeViewModel : ViewModel() {
     val protocolPresets = listOf(
         ProtocolPreset(
             name = "ANKNI / Mizzzee DDDD",
-            description = "ANKNI 名称、DDDD/DDD1 服务的谜姬/安可尼设备；自动识别优先，手动测试时可用此模板。",
+            description = "ANKNI 名称、DDDD/DDD1 服务的谜姬/安可尼设备；自动识别优先，也可手动套用此模板。",
             serviceUuid = "0000dddd-0000-1000-8000-00805f9b34fb",
             writeUuid = "0000ddd1-0000-1000-8000-00805f9b34fb",
             notifyUuid = "0000ddd2-0000-1000-8000-00805f9b34fb",
@@ -368,7 +388,7 @@ class BridgeViewModel : ViewModel() {
         ToyTool(
             name = "set_toy_vibration",
             title = "调节设备",
-            description = "设置强度、节奏和持续时间；到时会自动停止。",
+            description = "按指定时间调节强度和节奏。",
         ),
         ToyTool(
             name = "stop_toy",
@@ -382,40 +402,17 @@ class BridgeViewModel : ViewModel() {
         ),
     )
 
-    private val controller = AndroidBleController(
+    private val scanController = AndroidBleController(
         onDevice = ::onDeviceFound,
-        onState = {
-            connectionState = it
-            updateSelectedRuntimeState(it)
-            updateTraceContext()
-            if (it == BleConnectionState.Ready) {
-                currentDeviceSaved = rememberedDevices.any { toy -> toy.address == selectedAddress }
-                syncRelayDevice()
-                autoOnlineSavedDevice()
-            } else if (it == BleConnectionState.Error) {
-                busyHint = "设备连接不上，请确认设备已开机并靠近手机"
-                syncRelayDevice()
-                autoOfflineWhenNoConnectedSavedDevice()
-            } else if (it == BleConnectionState.Idle) {
-                syncRelayDevice()
-                autoOfflineWhenNoConnectedSavedDevice()
-            }
-        },
-        onProtocol = {
-            protocolStatus = it
-            updateTraceContext()
-        },
-        onProtocolAttempt = { protocolAttemptStatus = it },
+        onState = { },
+        onProtocol = { },
+        onProtocolAttempt = { },
         onLog = ::appendLog,
     )
+    private val controllers = mutableMapOf<String, AndroidBleController>()
+    private val keepAliveTasks = mutableMapOf<String, Runnable>()
+    private val autoStopTasks = mutableMapOf<String, Runnable>()
     private val mainHandler = Handler(Looper.getMainLooper())
-    private var keepAlive: Runnable? = null
-    private val autoStop = Runnable {
-        cancelKeepAlive()
-        runCatching { controller.stopDevice() }
-            .onSuccess { appendLog("安全计时结束，已自动发送停止指令") }
-            .onFailure { appendLog("自动停止失败：${it.message}") }
-    }
     private var pendingControlAction: ToyControlAction? = null
     private val controlTrial = Runnable { pendingControlAction?.let(::sendLocalControlAction) }
     private val relay = RelayClient(
@@ -429,7 +426,7 @@ class BridgeViewModel : ViewModel() {
         onLog = ::appendLog,
         onCommand = ::handleRelayCommand,
     )
-    private var relaySequenceJob: Job? = null
+    private val relaySequenceJobs = mutableMapOf<String, Job>()
     private var debugLogTapCount = 0
     private var autoOnlineAddress = ""
 
@@ -442,6 +439,63 @@ class BridgeViewModel : ViewModel() {
         checkAppConfig()
     }
 
+    private fun controllerFor(address: String): AndroidBleController =
+        controllers.getOrPut(address) {
+            AndroidBleController(
+                onDevice = ::onDeviceFound,
+                onState = { onDeviceConnectionState(address, it) },
+                onProtocol = { onDeviceProtocol(address, it) },
+                onProtocolAttempt = { onDeviceProtocolAttempt(address, it) },
+                onLog = ::appendLog,
+            )
+        }
+
+    private fun onDeviceConnectionState(address: String, state: BleConnectionState) {
+        deviceConnectionStates[address] = state
+        toyRuntimeStates[address] = state.toRuntimeState()
+        if (address == selectedAddress) {
+            connectionState = state
+            updateTraceContext()
+        }
+        when (state) {
+            BleConnectionState.Ready -> {
+                if (address == selectedAddress) {
+                    currentDeviceSaved = rememberedDevices.any { toy -> toy.address == selectedAddress }
+                }
+                syncRelayDevice()
+                if (address == selectedAddress) autoOnlineSavedDevice()
+            }
+            BleConnectionState.Error -> {
+                if (address == selectedAddress) {
+                    busyHint = "设备连接不上，请确认设备已开机并靠近手机"
+                }
+                syncRelayDevice()
+                autoOfflineWhenNoConnectedSavedDevice()
+            }
+            BleConnectionState.Idle -> {
+                syncRelayDevice()
+                autoOfflineWhenNoConnectedSavedDevice()
+            }
+            else -> Unit
+        }
+    }
+
+    private fun onDeviceProtocol(address: String, status: BleProtocolStatus) {
+        deviceProtocolStatuses[address] = status
+        if (address == selectedAddress) {
+            protocolStatus = status
+            clampCurrentControlValues()
+            updateTraceContext()
+        }
+    }
+
+    private fun onDeviceProtocolAttempt(address: String, status: ProtocolAttemptStatus) {
+        deviceProtocolAttempts[address] = status
+        if (address == selectedAddress) {
+            protocolAttemptStatus = status
+        }
+    }
+
     private fun ensureDefaultUserToken() {
         if (userToken.isBlank() || (!developerMode && userToken == LegacyDefaultUserToken)) {
             userToken = generateDefaultUserToken()
@@ -451,11 +505,11 @@ class BridgeViewModel : ViewModel() {
     fun toggleScan() {
         errorMessage = null
         if (scanning) {
-            controller.stopScan()
+            scanController.stopScan()
             scanning = false
         } else {
             devices.clear()
-            controller.startScan()
+            scanController.startScan()
             scanning = true
         }
     }
@@ -466,14 +520,20 @@ class BridgeViewModel : ViewModel() {
             appendLog("跳过不可连接且未识别的广播设备：name=${device.name} address=${device.address}")
             return@runAction
         }
-        selectedAddress.takeIf { it.isNotBlank() && it != device.address }?.let { previous ->
-            toyRuntimeStates[previous] = ToyRuntimeState.Offline
+        if (toyRuntimeStates[device.address] == ToyRuntimeState.Connected) {
+            selectDevice(device.address)
+            busyHint = "已切换到 ${device.name}"
+            return@runAction
         }
         selectedAddress = device.address
         selectedName = device.name
+        deviceDisplayNames[device.address] = device.name
         toyRuntimeStates[device.address] = ToyRuntimeState.Connecting
+        deviceConnectionStates[device.address] = BleConnectionState.Connecting
         protocolAttemptStatus = ProtocolAttemptStatus()
         protocolStatus = BleProtocolStatus()
+        deviceProtocolAttempts[device.address] = protocolAttemptStatus
+        deviceProtocolStatuses[device.address] = protocolStatus
         updateTraceContext()
         controlTrialStarted = false
         currentDeviceSaved = rememberedDevices.any { it.address == device.address }
@@ -482,10 +542,16 @@ class BridgeViewModel : ViewModel() {
             rememberedDevices.firstOrNull { it.address == device.address }?.name.orEmpty()
         scanning = false
         busyHint = "正在为你连接 ${device.name}"
-        controller.connect(device, currentTemplate())
+        scanController.stopScan()
+        controllerFor(device.address).connect(device, currentTemplate())
     }
 
     fun connectRemembered(toy: RememberedToy) {
+        if (toyRuntimeStates[toy.address] == ToyRuntimeState.Connected) {
+            selectDevice(toy.address)
+            busyHint = "已切换到 ${toy.name}"
+            return
+        }
         connect(
             ScannedBleDevice(
                 name = toy.name,
@@ -498,15 +564,39 @@ class BridgeViewModel : ViewModel() {
         )
     }
 
+    fun selectDevice(address: String) {
+        if (address.isBlank()) return
+        selectedAddress = address
+        selectedName = deviceDisplayNames[address]
+            ?: rememberedDevices.firstOrNull { it.address == address }?.name
+            ?: devices.firstOrNull { it.address == address }?.name
+            ?: "蓝牙设备"
+        connectionState = deviceConnectionStates[address] ?: BleConnectionState.Idle
+        protocolStatus = deviceProtocolStatuses[address] ?: BleProtocolStatus()
+        protocolAttemptStatus = deviceProtocolAttempts[address] ?: ProtocolAttemptStatus()
+        mode = deviceModes[address] ?: 1
+        intensity = deviceIntensities[address] ?: 1
+        currentDeviceSaved = rememberedDevices.any { it.address == address }
+        controlTrialStarted = false
+        showDeviceRemarkDialog = false
+        updateTraceContext()
+        syncRelayDevice()
+    }
+
     fun disconnect() {
+        val address = selectedAddress
+        if (address.isBlank()) return
         busyHint = ""
         protocolAttemptStatus = ProtocolAttemptStatus()
         controlTrialStarted = false
         showDeviceRemarkDialog = false
-        selectedAddress.takeIf { it.isNotBlank() }?.let { toyRuntimeStates[it] = ToyRuntimeState.Offline }
+        toyRuntimeStates[address] = ToyRuntimeState.Offline
+        deviceConnectionStates[address] = BleConnectionState.Idle
         mainHandler.removeCallbacks(controlTrial)
-        cancelKeepAlive()
-        controller.disconnect()
+        cancelAutoStop(address)
+        cancelKeepAlive(address)
+        controllers[address]?.disconnect()
+        connectionState = BleConnectionState.Idle
         syncRelayDevice()
         autoOfflineWhenNoConnectedSavedDevice()
     }
@@ -515,31 +605,51 @@ class BridgeViewModel : ViewModel() {
         val next = value.coerceIn(1, protocolStatus.modeMax.coerceAtLeast(1))
         if (mode == next) return
         mode = next
+        selectedAddress.takeIf { it.isNotBlank() }?.let { deviceModes[it] = next }
         scheduleControlTrial(patternAction(next))
+    }
+
+    fun updateMode(address: String, value: Int) {
+        if (address != selectedAddress) selectDevice(address)
+        updateMode(value)
     }
 
     fun updateIntensity(value: Int) {
         val next = value.coerceIn(0, protocolStatus.intensityMax.coerceAtLeast(1))
         if (intensity == next) return
         intensity = next
+        selectedAddress.takeIf { it.isNotBlank() }?.let { deviceIntensities[it] = next }
         scheduleControlTrial(intensityAction(next))
     }
 
+    fun updateIntensity(address: String, value: Int) {
+        if (address != selectedAddress) selectDevice(address)
+        updateIntensity(value)
+    }
+
     fun stopDevice() = runAction {
+        val address = selectedAddress
+        if (address.isBlank()) return@runAction
         busyHint = "已停止"
-        mainHandler.removeCallbacks(autoStop)
         mainHandler.removeCallbacks(controlTrial)
-        cancelKeepAlive()
-        controller.stopDevice()
+        stopDevice(address)
         syncRelayDevice()
     }
 
     fun stopAllDevices() = runAction {
         busyHint = "已全部停止"
-        mainHandler.removeCallbacks(autoStop)
         mainHandler.removeCallbacks(controlTrial)
-        cancelKeepAlive()
-        controller.stopDevice()
+        autoStopTasks.keys.toList().forEach(::cancelAutoStop)
+        keepAliveTasks.keys.toList().forEach(::cancelKeepAlive)
+        controllers.values.forEach { controller ->
+            runCatching { controller.stopDevice() }
+        }
+        syncRelayDevice()
+    }
+
+    fun stopDevice(address: String) = runAction {
+        stopToyAtAddress(address)
+        if (address == selectedAddress) busyHint = "已停止"
         syncRelayDevice()
     }
 
@@ -640,7 +750,7 @@ class BridgeViewModel : ViewModel() {
             requestedMode = mode.coerceAtLeast(1),
             autoStopSec = safeDuration,
         )
-        ToyToolResult(true, "已调节设备，$safeDuration 秒后会自动停止。")
+        ToyToolResult(true, "已调节设备，持续 $safeDuration 秒。")
     }.getOrElse {
         ToyToolResult(false, it.message ?: "操作没有完成。")
     }
@@ -835,8 +945,8 @@ class BridgeViewModel : ViewModel() {
         manualControlEnabled = true
         showAdvanced = true
         showTemplateLibrary = false
-        importMessage = "已选择 ${preset.name}，下一步重新连接设备测试"
-        busyHint = "手动指令已准备好，请重新连接测试"
+        importMessage = "已选择 ${preset.name}，下一步重新连接设备"
+        busyHint = "手动指令已准备好，请重新连接"
         appendLog("已应用模板：${preset.name}")
     }
 
@@ -924,8 +1034,8 @@ class BridgeViewModel : ViewModel() {
                 manualControlEnabled = true
                 showAdvanced = true
                 showTemplateLibrary = false
-                importMessage = "已导入，下一步重新连接设备测试"
-                busyHint = "手动指令已准备好，请重新连接测试"
+                importMessage = "已导入，下一步重新连接设备"
+                busyHint = "手动指令已准备好，请重新连接"
                 appendLog("已导入分享指令：${result.title}")
             }.onFailure {
                 importMessage = it.message ?: "导入失败"
@@ -936,7 +1046,7 @@ class BridgeViewModel : ViewModel() {
     fun reconnectWithCurrentTemplate() {
         if (selectedAddress.isBlank()) {
             if (!scanning) toggleScan()
-            busyHint = "请选择要测试的设备"
+            busyHint = "请选择要连接的设备"
             return
         }
         val device = devices.firstOrNull { it.address == selectedAddress }
@@ -998,31 +1108,34 @@ class BridgeViewModel : ViewModel() {
         val saved = rememberedDevices
         val addresses = linkedSetOf<String>()
         saved.forEach { addresses += it.address }
+        controllers.keys.forEach { addresses += it }
         if (selectedAddress.isNotBlank()) addresses += selectedAddress
         if (addresses.isEmpty()) return
-        val connectedAddress = selectedAddress.takeIf { connectionState == BleConnectionState.Ready }.orEmpty()
-        val defaultAddress = connectedAddress.ifBlank { saved.firstOrNull()?.address.orEmpty() }
+        val defaultAddress = defaultConnectedAddress().ifBlank { saved.firstOrNull()?.address.orEmpty() }
         relay.syncDevices(
             addresses.map { address ->
                 val remembered = saved.firstOrNull { it.address == address }
                 val isCurrent = address == selectedAddress
+                val status = protocolStatusFor(address)
                 RelayDevice(
                     deviceId = deviceIdForAddress(address),
                     displayName = when {
                         isCurrent -> selectedName.ifBlank { remembered?.name.orEmpty() }.ifBlank { "蓝牙设备" }
+                        deviceDisplayNames[address].orEmpty().isNotBlank() -> deviceDisplayNames[address].orEmpty()
                         else -> remembered?.name.orEmpty().ifBlank { "蓝牙设备" }
                     },
-                    connected = address == connectedAddress,
+                    connected = deviceConnectionStates[address] == BleConnectionState.Ready,
                     isDefault = address == defaultAddress,
                     protocolName = when {
+                        status.displayName.isNotBlank() && status.displayName != "尚未识别" -> status.displayName
                         isCurrent -> protocolStatus.displayName.ifBlank { remembered?.protocolName.orEmpty() }
                         else -> remembered?.protocolName.orEmpty()
                     }.ifBlank { "尚未识别" },
-                    intensity = if (isCurrent) intensity else 0,
-                    mode = if (isCurrent) mode else 1,
-                    intensityMax = if (isCurrent) protocolStatus.intensityMax else 0,
-                    modeMax = if (isCurrent) protocolStatus.modeMax else 1,
-                    controlStyle = if (isCurrent) protocolStatus.controlStyle.name else ToyControlStyle.IntensityOnly.name,
+                    intensity = if (isCurrent) intensity else deviceIntensities[address] ?: 0,
+                    mode = if (isCurrent) mode else deviceModes[address] ?: 1,
+                    intensityMax = status.intensityMax,
+                    modeMax = status.modeMax,
+                    controlStyle = status.controlStyle.name,
                 )
             }
         )
@@ -1033,12 +1146,15 @@ class BridgeViewModel : ViewModel() {
             relay.commandResult(command.commandId, false, "暂不支持这个操作")
             return
         }
-        val targetDeviceId = command.deviceId
-        if (targetDeviceId != null && targetDeviceId != currentDeviceId()) {
-            relay.commandResult(command.commandId, false, "请先在 App 中连接这台设备")
-            return
+        val targetAddress = if (command.deviceId != null) {
+            addressForDeviceId(command.deviceId) ?: run {
+                relay.commandResult(command.commandId, false, "请先在 App 中连接这台设备")
+                return
+            }
+        } else {
+            defaultConnectedAddress()
         }
-        if (connectionState != BleConnectionState.Ready || selectedAddress.isBlank()) {
+        if (targetAddress.isBlank() || deviceConnectionStates[targetAddress] != BleConnectionState.Ready) {
             relay.commandResult(command.commandId, false, "设备还没有连接")
             return
         }
@@ -1048,20 +1164,28 @@ class BridgeViewModel : ViewModel() {
             relay.commandResult(command.commandId, false, "序列脚本格式错误")
             return
         }
-        val previousJob = relaySequenceJob
-        relaySequenceJob = viewModelScope.launch {
+        val previousJob = relaySequenceJobs[targetAddress]
+        val job = viewModelScope.launch {
             previousJob?.cancelAndJoin()
             relay.commandResult(command.commandId, true, "序列已执行")
-            runCatching {
-                executeRelaySequence(steps, command.defaultDurationSec)
-            }.onFailure {
-                if (it is CancellationException) return@launch
-                appendLog("序列执行失败：${it.message ?: "命令执行失败"}")
+            try {
+                runCatching {
+                    executeRelaySequence(targetAddress, steps, command.defaultDurationSec)
+                }.onFailure {
+                    if (it is CancellationException) return@launch
+                    appendLog("序列执行失败：${it.message ?: "命令执行失败"}")
+                }
+            } finally {
+                if (relaySequenceJobs[targetAddress] == coroutineContext[Job]) {
+                    relaySequenceJobs.remove(targetAddress)
+                }
             }
         }
+        relaySequenceJobs[targetAddress] = job
     }
 
     private suspend fun executeRelaySequence(
+        address: String,
         steps: List<RelaySequenceStep>,
         defaultDurationSec: Int?,
     ) {
@@ -1072,43 +1196,51 @@ class BridgeViewModel : ViewModel() {
                 when (step) {
                     is RelaySequenceStep.Set -> {
                         val durationSec = step.durationSec ?: safeDefaultDuration
-                        sendToySet(step.intensity, step.mode, durationSec)
+                        sendToySet(
+                            intensityPercent = step.intensity,
+                            requestedMode = step.mode,
+                            autoStopSec = durationSec,
+                            address = address,
+                            scheduleAutoStop = false,
+                        )
                         stopped = false
                         delay(durationSec.coerceIn(1, MaxSequenceDurationSec) * 1_000L)
-                        sendToyStop()
+                        sendToyStop(address)
                         stopped = true
                     }
                     is RelaySequenceStep.Pattern -> {
                         val durationSec = step.durationSec ?: safeDefaultDuration
-                        val mappedMode = step.mode.coerceIn(1, protocolStatus.modeMax.coerceAtLeast(1))
-                        sendToyAction(ToyControlAction.Pattern(mappedMode), durationSec)
-                        mode = mappedMode
+                        val mappedMode = step.mode.coerceIn(1, protocolStatusFor(address).modeMax.coerceAtLeast(1))
+                        sendToyAction(ToyControlAction.Pattern(mappedMode), durationSec, address, scheduleAutoStop = false)
+                        deviceModes[address] = mappedMode
+                        if (address == selectedAddress) mode = mappedMode
                         syncRelayDevice()
                         stopped = false
                         delay(durationSec.coerceIn(1, MaxSequenceDurationSec) * 1_000L)
-                        sendToyStop()
+                        sendToyStop(address)
                         stopped = true
                     }
                     is RelaySequenceStep.Intensity -> {
                         val durationSec = step.durationSec ?: safeDefaultDuration
-                        val mappedIntensity = mapIntensityPercent(step.value)
-                        sendToyAction(ToyControlAction.Intensity(mappedIntensity), durationSec)
-                        intensity = mappedIntensity
+                        val mappedIntensity = mapIntensityPercent(step.value, address)
+                        sendToyAction(ToyControlAction.Intensity(mappedIntensity), durationSec, address, scheduleAutoStop = false)
+                        deviceIntensities[address] = mappedIntensity
+                        if (address == selectedAddress) intensity = mappedIntensity
                         syncRelayDevice()
                         stopped = false
                         delay(durationSec.coerceIn(1, MaxSequenceDurationSec) * 1_000L)
-                        sendToyStop()
+                        sendToyStop(address)
                         stopped = true
                     }
                     is RelaySequenceStep.Sleep -> delay(step.durationSec.coerceIn(0, 300) * 1_000L)
                     RelaySequenceStep.Stop -> {
-                        sendToyStop()
+                        sendToyStop(address)
                         stopped = true
                     }
                 }
             }
         } finally {
-            if (!stopped) sendToyStop()
+            if (!stopped) sendToyStop(address)
         }
     }
 
@@ -1172,10 +1304,13 @@ class BridgeViewModel : ViewModel() {
         intensityPercent: Int,
         requestedMode: Int,
         autoStopSec: Int,
+        address: String = selectedAddress,
+        scheduleAutoStop: Boolean = true,
     ) {
-        val mappedIntensity = mapIntensityPercent(intensityPercent)
-        val mappedMode = requestedMode.coerceIn(1, protocolStatus.modeMax.coerceAtLeast(1))
-        val action = when (protocolStatus.controlStyle) {
+        val status = protocolStatusFor(address)
+        val mappedIntensity = mapIntensityPercent(intensityPercent, address)
+        val mappedMode = requestedMode.coerceIn(1, status.modeMax.coerceAtLeast(1))
+        val action = when (status.controlStyle) {
             ToyControlStyle.PatternOnly -> ToyControlAction.Pattern(mappedMode)
             ToyControlStyle.IntensityOnly -> ToyControlAction.Intensity(mappedIntensity)
             ToyControlStyle.ExclusivePatternOrIntensity -> {
@@ -1184,47 +1319,81 @@ class BridgeViewModel : ViewModel() {
             }
             ToyControlStyle.CombinedPatternAndIntensity -> ToyControlAction.Combined(mappedMode, mappedIntensity)
         }
-        sendToyAction(action, autoStopSec)
-        mode = mappedMode
-        intensity = mappedIntensity
+        sendToyAction(action, autoStopSec, address, scheduleAutoStop)
+        deviceModes[address] = mappedMode
+        deviceIntensities[address] = mappedIntensity
+        if (address == selectedAddress) {
+            mode = mappedMode
+            intensity = mappedIntensity
+        }
         syncRelayDevice()
     }
 
-    private fun mapIntensityPercent(intensityPercent: Int): Int {
-        val maxIntensity = protocolStatus.intensityMax.coerceAtLeast(1)
+    private fun mapIntensityPercent(intensityPercent: Int, address: String = selectedAddress): Int {
+        val maxIntensity = protocolStatusFor(address).intensityMax.coerceAtLeast(1)
         return ((intensityPercent.coerceIn(0, 100) / 100.0) * maxIntensity)
             .roundToInt()
             .coerceIn(0, maxIntensity)
     }
 
-    private fun sendToyAction(action: ToyControlAction, autoStopSec: Int) {
-        appendLog("准备发送控制 action=$action autoStopSec=$autoStopSec protocol=${protocolStatus.id.ifBlank { "<none>" }}")
-        mainHandler.removeCallbacks(autoStop)
-        controller.sendAction(action)
-        startKeepAlive(action, autoStopSec)
-        busyHint = "设备正在运行，稍后会自动停止"
-        mainHandler.postDelayed(autoStop, autoStopSec.coerceIn(1, MaxSequenceDurationSec) * 1_000L)
+    private fun sendToyAction(
+        action: ToyControlAction,
+        autoStopSec: Int,
+        address: String = selectedAddress,
+        scheduleAutoStop: Boolean = true,
+    ) {
+        val status = protocolStatusFor(address)
+        appendLog("准备发送控制 address=$address action=$action autoStopSec=$autoStopSec protocol=${status.id.ifBlank { "<none>" }}")
+        cancelAutoStop(address)
+        controllerFor(address).sendAction(action)
+        startKeepAlive(action, address, autoStopSec)
+        if (address == selectedAddress) busyHint = "设备正在运行"
+        if (!scheduleAutoStop) return
+        val task = Runnable {
+            cancelKeepAlive(address)
+            runCatching { controllers[address]?.stopDevice() }
+                .onSuccess { appendLog("计时结束，已停止设备 address=$address") }
+                .onFailure { appendLog("停止失败：${it.message}") }
+        }
+        autoStopTasks[address] = task
+        mainHandler.postDelayed(task, autoStopSec.coerceIn(1, MaxSequenceDurationSec) * 1_000L)
     }
 
     private fun sendToyStop(all: Boolean = false) {
-        appendLog("准备发送停止 all=$all protocol=${protocolStatus.id.ifBlank { "<none>" }}")
-        mainHandler.removeCallbacks(autoStop)
-        cancelKeepAlive()
-        controller.stopDevice()
+        val targets = if (all) controllers.keys.toList() else listOf(selectedAddress).filter { it.isNotBlank() }
+        appendLog("准备发送停止 all=$all targets=${targets.joinToString()}")
+        targets.forEach { address ->
+            stopToyAtAddress(address)
+        }
         busyHint = if (all) "已全部停止" else "已停止"
         syncRelayDevice()
     }
 
-    private fun startKeepAlive(action: ToyControlAction, autoStopSec: Int) {
-        cancelKeepAlive()
-        val interval = protocolStatus.repeatIntervalMs.coerceAtLeast(0)
+    private fun sendToyStop(address: String) {
+        appendLog("准备发送停止 address=$address")
+        stopToyAtAddress(address)
+        if (address == selectedAddress) busyHint = "已停止"
+        syncRelayDevice()
+    }
+
+    private fun stopToyAtAddress(address: String) {
+        cancelAutoStop(address)
+        cancelKeepAlive(address)
+        controllers[address]?.stopDevice()
+    }
+
+    private fun startKeepAlive(action: ToyControlAction, address: String, autoStopSec: Int? = null) {
+        cancelKeepAlive(address)
+        val interval = protocolStatusFor(address).repeatIntervalMs.coerceAtLeast(0)
         if (interval <= 0) return
-        val deadline = System.currentTimeMillis() + autoStopSec.coerceIn(1, MaxSequenceDurationSec) * 1_000L
-        keepAlive = object : Runnable {
+        val deadline = autoStopSec?.let {
+            System.currentTimeMillis() + it.coerceIn(1, MaxSequenceDurationSec) * 1_000L
+        }
+        keepAliveTasks[address] = object : Runnable {
             override fun run() {
-                if (System.currentTimeMillis() >= deadline) return
+                if (deadline != null && System.currentTimeMillis() >= deadline) return
                 runCatching {
-                    controller.sendAction(action)
+                    controllers[address]?.sendAction(action)
                 }.onFailure {
                     appendLog("保活写入失败：${it.message ?: "命令发送失败"}")
                 }
@@ -1235,14 +1404,31 @@ class BridgeViewModel : ViewModel() {
         }
     }
 
-    private fun cancelKeepAlive() {
-        keepAlive?.let(mainHandler::removeCallbacks)
-        keepAlive = null
+    private fun cancelKeepAlive(address: String) {
+        keepAliveTasks.remove(address)?.let(mainHandler::removeCallbacks)
+    }
+
+    private fun cancelAutoStop(address: String) {
+        autoStopTasks.remove(address)?.let(mainHandler::removeCallbacks)
     }
 
     private fun currentDeviceId(): String {
         return deviceIdForAddress(selectedAddress)
     }
+
+    private fun addressForDeviceId(deviceId: String): String? {
+        val addresses = linkedSetOf<String>()
+        rememberedDevices.forEach { addresses += it.address }
+        controllers.keys.forEach { addresses += it }
+        devices.forEach { addresses += it.address }
+        selectedAddress.takeIf { it.isNotBlank() }?.let { addresses += it }
+        return addresses.firstOrNull { deviceIdForAddress(it) == deviceId }
+    }
+
+    private fun defaultConnectedAddress(): String =
+        selectedAddress.takeIf { deviceConnectionStates[it] == BleConnectionState.Ready }
+            ?: deviceConnectionStates.entries.firstOrNull { it.value == BleConnectionState.Ready }?.key
+            ?: ""
 
     private fun deviceIdForAddress(address: String): String {
         val digest = MessageDigest.getInstance("SHA-256")
@@ -1252,8 +1438,8 @@ class BridgeViewModel : ViewModel() {
         return "dev_$digest"
     }
 
-    private fun runtimeStateForConnection(): ToyRuntimeState =
-        when (connectionState) {
+    private fun BleConnectionState.toRuntimeState(): ToyRuntimeState =
+        when (this) {
             BleConnectionState.Connecting,
             BleConnectionState.Discovering,
             BleConnectionState.Disconnecting -> ToyRuntimeState.Connecting
@@ -1262,15 +1448,37 @@ class BridgeViewModel : ViewModel() {
             BleConnectionState.Idle -> ToyRuntimeState.Offline
         }
 
-    private fun updateSelectedRuntimeState(state: BleConnectionState) {
-        if (selectedAddress.isBlank()) return
-        toyRuntimeStates[selectedAddress] = when (state) {
-            BleConnectionState.Connecting,
-            BleConnectionState.Discovering,
-            BleConnectionState.Disconnecting -> ToyRuntimeState.Connecting
-            BleConnectionState.Ready -> ToyRuntimeState.Connected
-            BleConnectionState.Error -> ToyRuntimeState.Failed
-            BleConnectionState.Idle -> ToyRuntimeState.Offline
+    fun protocolStatusForAddress(address: String): BleProtocolStatus = protocolStatusFor(address)
+
+    fun modeForAddress(address: String): Int =
+        if (address == selectedAddress) mode else deviceModes[address] ?: 1
+
+    fun intensityForAddress(address: String): Int =
+        if (address == selectedAddress) intensity else deviceIntensities[address] ?: 0
+
+    fun modeLabelForAddress(address: String): String {
+        val status = protocolStatusFor(address)
+        val targetMode = modeForAddress(address)
+        if (status.id == "cachito_advertise") {
+            val name = CachitoBroadcastProtocol.modeNames().getOrNull(targetMode - 1)
+            return if (name.isNullOrBlank()) "模板 ${targetMode}" else "模板 ${targetMode}：$name"
+        }
+        if (status.id == "kisstoy_gatt") {
+            val name = listOf("主电机", "第二电机", "抽插", "双通道").getOrNull(targetMode - 1)
+            return if (name.isNullOrBlank()) "节奏 ${targetMode}" else "节奏 ${targetMode}：$name"
+        }
+        return "节奏 ${targetMode}"
+    }
+
+    private fun protocolStatusFor(address: String): BleProtocolStatus =
+        if (address == selectedAddress) protocolStatus else deviceProtocolStatuses[address] ?: BleProtocolStatus()
+
+    private fun clampCurrentControlValues() {
+        mode = mode.coerceIn(1, protocolStatus.modeMax.coerceAtLeast(1))
+        intensity = intensity.coerceIn(0, protocolStatus.intensityMax.coerceAtLeast(1))
+        if (selectedAddress.isNotBlank()) {
+            deviceModes[selectedAddress] = mode
+            deviceIntensities[selectedAddress] = intensity
         }
     }
 
@@ -1315,19 +1523,21 @@ class BridgeViewModel : ViewModel() {
         if (!protocolStatus.controllable || connectionState != BleConnectionState.Ready) return
         pendingControlAction = action
         controlTrialStarted = true
-        busyHint = "正在运行，5 秒后会自动停止"
+        busyHint = "设备正在运行"
         mainHandler.removeCallbacks(controlTrial)
         mainHandler.postDelayed(controlTrial, 250L)
     }
 
     private fun sendLocalControlAction(action: ToyControlAction) {
         runCatching {
-            appendLog("准备发送本地测试 action=$action protocol=${protocolStatus.id.ifBlank { "<none>" }}")
-            controller.sendAction(action)
+            val address = selectedAddress.ifBlank { error("请选择设备") }
+            appendLog("准备发送本地控制 action=$action protocol=${protocolStatus.id.ifBlank { "<none>" }}")
+            controllerFor(address).sendAction(action)
+            deviceModes[address] = mode
+            deviceIntensities[address] = intensity
             syncRelayDevice()
-            startKeepAlive(action, autoStopSec = 5)
-            mainHandler.removeCallbacks(autoStop)
-            mainHandler.postDelayed(autoStop, 5_000L)
+            cancelAutoStop(address)
+            startKeepAlive(action, address)
         }.onFailure {
             busyHint = it.message ?: "控制失败"
         }
@@ -1396,9 +1606,12 @@ class BridgeViewModel : ViewModel() {
     }
 
     override fun onCleared() {
-        controller.close()
-        mainHandler.removeCallbacks(autoStop)
-        cancelKeepAlive()
+        scanController.close()
+        controllers.values.forEach { it.close() }
+        relaySequenceJobs.values.forEach { it.cancel() }
+        relaySequenceJobs.clear()
+        autoStopTasks.keys.toList().forEach(::cancelAutoStop)
+        keepAliveTasks.keys.toList().forEach(::cancelKeepAlive)
         relay.close()
     }
 

@@ -12,10 +12,13 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -38,8 +41,10 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
@@ -49,7 +54,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -67,11 +74,13 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.funny.aitoy.ble.BleConnectionState
+import com.funny.aitoy.ble.BleProtocolStatus
 import com.funny.aitoy.ble.ProtocolAttemptStatus
 import com.funny.aitoy.ble.ScannedBleDevice
 import com.funny.aitoy.ble.ToyControlStyle
 import com.funny.aitoy.chat.ChatScreen
 import com.funny.aitoy.chat.ChatViewModel
+import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 internal val Ink = Color(0xFF110D12)
@@ -163,11 +172,8 @@ private fun DeviceHome(vm: BridgeViewModel) {
             if (vm.updateState.forceUpdate) {
                 item { Spacer(Modifier.height(8.dp)) }
             } else {
-                if (vm.connectionState != BleConnectionState.Ready) {
-                    item { ConnectFlow(vm) }
-                } else {
-                    item { ControlRoom(vm) }
-                }
+                item { RemotePager(vm) }
+                item { ConnectFlow(vm) }
                 item { AiCompanion(vm) }
                 item { HelpSettingsPanel(vm) }
                 item { AdvancedPanel(vm) }
@@ -321,10 +327,10 @@ private fun DeviceHeader(vm: BridgeViewModel) {
                 if (vm.protocolStatus.verifiedControl) {
                     "已连接，可以开始使用。"
                 } else {
-                    "已连接。控制效果还需要试一下。"
+                    "已连接，可以按当前设备能力控制。"
                 }
             } else {
-                "先连接设备，下面会显示当前尝试到哪一步。"
+                "选择一台设备连接，已连接的设备可以随时切换控制。"
             },
             color = TextMain,
             style = MaterialTheme.typography.bodyMedium,
@@ -350,7 +356,7 @@ private fun DeviceHeader(vm: BridgeViewModel) {
             }
             if (vm.connectionState != BleConnectionState.Idle) {
                 OutlinedButton(onClick = vm::disconnect) {
-                    Text("断开")
+                    Text("断开当前")
                 }
             }
         }
@@ -392,17 +398,85 @@ private fun DeviceStatePill(state: ToyRuntimeState) {
 }
 
 @Composable
-private fun ConnectFlow(vm: BridgeViewModel) {
-    Panel(title = "连接设备", icon = Icons.Outlined.BluetoothSearching) {
-        FlowStep(
-            index = "1",
-            title = "让手机靠近小玩具",
-            text = "保持设备开机，允许查找附近设备。",
+private fun RemotePager(vm: BridgeViewModel) {
+    val connectedToys = vm.managedToys
+        .filter { it.runtimeState == ToyRuntimeState.Connected }
+        .sortedWith(
+            compareByDescending<ManagedToy> { it.saved }
+                .thenBy { it.name }
+                .thenBy { it.address }
         )
-        FlowStep(
-            index = "2",
-            title = "优先自动识别",
-            text = "能识别的设备会直接进入控制页；识别不了，再进入高级工具。",
+    if (connectedToys.isEmpty()) return
+    val pagerState = rememberPagerState(pageCount = { connectedToys.size })
+    val scope = rememberCoroutineScope()
+    val addressKey = connectedToys.joinToString("|") { it.address }
+    val selectedPage = connectedToys.indexOfFirst { it.address == vm.selectedAddress }
+        .takeIf { it >= 0 }
+        ?: 0
+
+    LaunchedEffect(addressKey, vm.selectedAddress) {
+        if (pagerState.currentPage != selectedPage) {
+            pagerState.animateScrollToPage(selectedPage)
+        }
+    }
+    LaunchedEffect(pagerState, addressKey) {
+        snapshotFlow { pagerState.settledPage }
+            .collect { page ->
+                connectedToys.getOrNull(page)
+                    ?.address
+                    ?.takeIf { it != vm.selectedAddress }
+                    ?.let(vm::selectDevice)
+            }
+    }
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        ScrollableTabRow(
+            selectedTabIndex = selectedPage,
+            containerColor = Ink,
+            contentColor = Rose,
+            edgePadding = 8.dp,
+        ) {
+            connectedToys.forEachIndexed { index, toy ->
+                Tab(
+                    selected = index == selectedPage,
+                    onClick = {
+                        vm.selectDevice(toy.address)
+                        scope.launch { pagerState.animateScrollToPage(index) }
+                    },
+                    text = {
+                        Text(
+                            toy.name,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    },
+                )
+            }
+        }
+        HorizontalPager(
+            state = pagerState,
+            key = { page -> connectedToys[page].address },
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 360.dp),
+        ) { page ->
+            val toy = connectedToys[page]
+            Box(Modifier.padding(12.dp)) {
+                ControlRoom(vm, toy)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ConnectFlow(vm: BridgeViewModel) {
+    Panel(title = "设备列表", icon = Icons.Outlined.BluetoothSearching) {
+        Text(
+            "可以继续连接更多设备；已连接的设备会出现在上方遥控器里。",
+            color = TextSoft,
+            style = MaterialTheme.typography.bodyMedium,
         )
         Spacer(Modifier.height(8.dp))
         vm.errorMessage?.let {
@@ -521,13 +595,14 @@ private fun ManagedDeviceRow(vm: BridgeViewModel, toy: ManagedToy) {
         lastSeenAt = 0L,
     )
     val connected = toy.runtimeState == ToyRuntimeState.Connected
+    val current = toy.current
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
-            .background(if (connected) Color(0xFF23362E) else Color(0xFF241B24))
-            .border(1.dp, if (connected) Color(0x6638F2A1) else Line, RoundedCornerShape(16.dp))
-            .clickable { vm.connectRemembered(remembered) }
+            .background(if (current) Color(0xFF2C2F2A) else if (connected) Color(0xFF23362E) else Color(0xFF241B24))
+            .border(1.dp, if (current) Honey else if (connected) Color(0x6638F2A1) else Line, RoundedCornerShape(16.dp))
+            .clickable { if (connected) vm.selectDevice(toy.address) else vm.connectRemembered(remembered) }
             .padding(13.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -563,13 +638,13 @@ private fun ManagedDeviceRow(vm: BridgeViewModel, toy: ManagedToy) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Button(
-                onClick = { vm.connectRemembered(remembered) },
+                onClick = { if (connected) vm.selectDevice(toy.address) else vm.connectRemembered(remembered) },
                 colors = ButtonDefaults.buttonColors(containerColor = RoseDeep, contentColor = Color.White),
             ) {
-                Text(if (connected) "重连" else "连接")
+                Text(if (current) "控制中" else if (connected) "控制" else "连接")
             }
             if (connected) {
-                OutlinedButton(onClick = vm::stopDevice) {
+                OutlinedButton(onClick = { vm.stopDevice(toy.address) }) {
                     Text("停止")
                 }
             }
@@ -669,7 +744,9 @@ private fun DeviceRow(
         ) {
             Text(
                 when {
-                    device.broadcastProtocolName.isNotBlank() -> "广播测试"
+                    runtimeState == ToyRuntimeState.Connected -> "控制"
+                    runtimeState == ToyRuntimeState.Connecting -> "连接中"
+                    device.broadcastProtocolName.isNotBlank() -> "连接"
                     device.connectable -> "连接"
                     else -> "尝试连接"
                 }
@@ -679,19 +756,22 @@ private fun DeviceRow(
 }
 
 @Composable
-private fun ControlRoom(vm: BridgeViewModel) {
-    Panel(title = "设备控制", icon = Icons.Outlined.AutoAwesome) {
-        val status = vm.protocolStatus
+private fun ControlRoom(vm: BridgeViewModel, toy: ManagedToy? = null) {
+    val address = toy?.address ?: vm.selectedAddress
+    val status = if (address.isBlank()) vm.protocolStatus else vm.protocolStatusForAddress(address)
+    val targetMode = if (address.isBlank()) vm.mode else vm.modeForAddress(address)
+    val targetIntensity = if (address.isBlank()) vm.intensity else vm.intensityForAddress(address)
+    Panel(title = toy?.name ?: "遥控器", icon = Icons.Outlined.AutoAwesome) {
         Text(
             text = when {
-                !status.controllable -> "还没有可用的控制指令。可以在高级工具中导入或填写指令。"
+                !status.controllable -> "还没有可用的控制指令。"
                 status.controlStyle == ToyControlStyle.ExclusivePatternOrIntensity ->
-                    "这个设备有两套独立控制：预设节奏会按设备内置节奏运行，滑动强度会切换到连续强度。"
+                    "节奏和强度是两套独立控制。"
                 status.controlStyle == ToyControlStyle.CombinedPatternAndIntensity ->
-                    "选择节奏并调节强度，设备会按当前组合运行。"
+                    "选择节奏并调节强度。"
                 status.controlStyle == ToyControlStyle.PatternOnly ->
-                    "选择一个预设节奏，设备会按内置节奏运行。"
-                else -> "调节强度，设备会按当前强度运行。"
+                    "选择一个预设节奏。"
+                else -> "调节强度，设备会保持当前状态。"
             },
             color = if (status.controllable) TextSoft else Danger,
             style = MaterialTheme.typography.bodyMedium,
@@ -699,21 +779,21 @@ private fun ControlRoom(vm: BridgeViewModel) {
         Spacer(Modifier.height(16.dp))
         when (status.controlStyle) {
             ToyControlStyle.ExclusivePatternOrIntensity -> {
-                PatternSelector(vm)
+                PatternSelector(vm, address, status, targetMode)
                 Spacer(Modifier.height(18.dp))
-                IntensityControl(vm)
+                IntensityControl(vm, address, status, targetIntensity)
             }
             ToyControlStyle.CombinedPatternAndIntensity -> {
-                PatternSelector(vm)
+                PatternSelector(vm, address, status, targetMode)
                 Spacer(Modifier.height(14.dp))
-                IntensityControl(vm)
+                IntensityControl(vm, address, status, targetIntensity)
             }
-            ToyControlStyle.PatternOnly -> PatternSelector(vm)
-            ToyControlStyle.IntensityOnly -> IntensityControl(vm)
+            ToyControlStyle.PatternOnly -> PatternSelector(vm, address, status, targetMode)
+            ToyControlStyle.IntensityOnly -> IntensityControl(vm, address, status, targetIntensity)
         }
-        if (vm.controlTrialStarted && !vm.currentDeviceSaved) {
+        if (address == vm.selectedAddress && vm.controlTrialStarted && !vm.currentDeviceSaved) {
             Spacer(Modifier.height(8.dp))
-            Text("刚才的控制是否正常？", color = TextMain, fontWeight = FontWeight.SemiBold)
+            Text("保存这台设备？", color = TextMain, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Button(
@@ -740,8 +820,10 @@ private fun ControlRoom(vm: BridgeViewModel) {
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("control_stop"),
-                onClick = vm::stopDevice,
-                enabled = vm.protocolStatus.controllable,
+                onClick = {
+                    if (address.isBlank()) vm.stopDevice() else vm.stopDevice(address)
+                },
+                enabled = status.controllable,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = Danger,
                     contentColor = Color.White
@@ -756,21 +838,28 @@ private fun ControlRoom(vm: BridgeViewModel) {
 }
 
 @Composable
-private fun PatternSelector(vm: BridgeViewModel) {
-    val maxMode = vm.protocolStatus.modeMax.coerceAtLeast(1)
-    Text(vm.protocolStatus.modeLabel, color = TextMain, fontWeight = FontWeight.SemiBold)
+private fun PatternSelector(
+    vm: BridgeViewModel,
+    address: String,
+    status: BleProtocolStatus,
+    targetMode: Int,
+) {
+    val maxMode = status.modeMax.coerceAtLeast(1)
+    Text(status.modeLabel, color = TextMain, fontWeight = FontWeight.SemiBold)
     Spacer(Modifier.height(10.dp))
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         (1..maxMode).chunked(5).forEach { row ->
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 row.forEach { index ->
-                    val selected = vm.mode == index
+                    val selected = targetMode == index
                     Button(
                         modifier = Modifier
                             .weight(1f)
                             .testTag("mode_$index"),
-                        onClick = { vm.updateMode(index) },
-                        enabled = vm.protocolStatus.controllable,
+                        onClick = {
+                            if (address.isBlank()) vm.updateMode(index) else vm.updateMode(address, index)
+                        },
+                        enabled = status.controllable,
                         colors = ButtonDefaults.buttonColors(
                             containerColor = if (selected) RoseDeep else VelvetLight,
                             contentColor = if (selected) Color.White else TextMain,
@@ -784,27 +873,38 @@ private fun PatternSelector(vm: BridgeViewModel) {
         }
     }
     Spacer(Modifier.height(8.dp))
-    Text(vm.currentModeLabel(), color = TextSoft, style = MaterialTheme.typography.bodySmall)
+    Text(
+        if (address.isBlank()) vm.currentModeLabel() else vm.modeLabelForAddress(address),
+        color = TextSoft,
+        style = MaterialTheme.typography.bodySmall,
+    )
 }
 
 @Composable
-private fun IntensityControl(vm: BridgeViewModel) {
-    val maxIntensity = vm.protocolStatus.intensityMax.coerceAtLeast(1)
+private fun IntensityControl(
+    vm: BridgeViewModel,
+    address: String,
+    status: BleProtocolStatus,
+    targetIntensity: Int,
+) {
+    val maxIntensity = status.intensityMax.coerceAtLeast(1)
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(vm.protocolStatus.intensityLabel, color = TextMain, fontWeight = FontWeight.SemiBold)
-        Text("${vm.intensity}/$maxIntensity", color = Rose, fontWeight = FontWeight.Bold)
+        Text(status.intensityLabel, color = TextMain, fontWeight = FontWeight.SemiBold)
+        Text("$targetIntensity/$maxIntensity", color = Rose, fontWeight = FontWeight.Bold)
     }
     Slider(
-        value = vm.intensity.toFloat(),
-        onValueChange = { vm.updateIntensity(it.roundToInt()) },
+        value = targetIntensity.toFloat(),
+        onValueChange = {
+            if (address.isBlank()) vm.updateIntensity(it.roundToInt()) else vm.updateIntensity(address, it.roundToInt())
+        },
         modifier = Modifier.testTag("intensity_slider"),
         valueRange = 0f..maxIntensity.toFloat(),
         steps = (maxIntensity - 1).coerceAtLeast(0),
-        enabled = vm.protocolStatus.controllable,
+        enabled = status.controllable,
     )
 }
 
