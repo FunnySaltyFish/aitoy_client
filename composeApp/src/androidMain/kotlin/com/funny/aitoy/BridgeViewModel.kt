@@ -1223,7 +1223,16 @@ class BridgeViewModel : ViewModel() {
                     is RelaySequenceStep.Intensity -> {
                         val durationSec = step.durationSec ?: safeDefaultDuration
                         val mappedIntensity = mapIntensityPercent(step.value, address)
-                        sendToyAction(ToyControlAction.Intensity(mappedIntensity), durationSec, address, scheduleAutoStop = false)
+                        sendToyAction(
+                            intensityAction(
+                                currentMode = modeForAddress(address),
+                                nextIntensity = mappedIntensity,
+                                status = protocolStatusFor(address),
+                            ),
+                            durationSec,
+                            address,
+                            scheduleAutoStop = false,
+                        )
                         deviceIntensities[address] = mappedIntensity
                         if (address == selectedAddress) intensity = mappedIntensity
                         syncRelayDevice()
@@ -1512,11 +1521,25 @@ class BridgeViewModel : ViewModel() {
         }
 
     private fun intensityAction(nextIntensity: Int): ToyControlAction =
-        when (protocolStatus.controlStyle) {
-            ToyControlStyle.PatternOnly -> ToyControlAction.Pattern(mode)
-            ToyControlStyle.IntensityOnly,
-            ToyControlStyle.ExclusivePatternOrIntensity,
-            ToyControlStyle.CombinedPatternAndIntensity -> ToyControlAction.Intensity(nextIntensity)
+        intensityAction(
+            currentMode = mode,
+            nextIntensity = nextIntensity,
+            status = protocolStatus,
+        )
+
+    private fun intensityAction(
+        currentMode: Int,
+        nextIntensity: Int,
+        status: BleProtocolStatus,
+    ): ToyControlAction =
+        when {
+            status.id == "kisstoy_gatt" -> ToyControlAction.Combined(currentMode, nextIntensity)
+            status.controlStyle == ToyControlStyle.PatternOnly -> ToyControlAction.Pattern(currentMode)
+            status.controlStyle == ToyControlStyle.IntensityOnly ||
+                    status.controlStyle == ToyControlStyle.ExclusivePatternOrIntensity ||
+                    status.controlStyle == ToyControlStyle.CombinedPatternAndIntensity ->
+                ToyControlAction.Intensity(nextIntensity)
+            else -> ToyControlAction.Intensity(nextIntensity)
         }
 
     private fun scheduleControlTrial(action: ToyControlAction) {

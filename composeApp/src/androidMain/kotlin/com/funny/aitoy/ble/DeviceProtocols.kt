@@ -581,7 +581,7 @@ private object KissToyProtocol : BleDeviceProtocol {
     override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
         when (action) {
             is ToyControlAction.Combined -> run(action.mode, action.intensity)
-            is ToyControlAction.Intensity -> run(4, action.value)
+            is ToyControlAction.Intensity -> run(1, action.value)
             is ToyControlAction.Pattern -> run(action.mode, 30)
             ToyControlAction.Stop -> stop()
         }
@@ -593,9 +593,17 @@ private object KissToyProtocol : BleDeviceProtocol {
             1 -> listOf(command(kissToyPayload(0x32, 0)), command(kissToyPayload(0x71, 0)))
             2 -> listOf(command(kissToyPayload(0x31, 0)), command(kissToyPayload(0x71, 0)))
             3 -> listOf(command(kissToyPayload(0x31, 0)), command(kissToyPayload(0x32, 0)))
-            else -> listOf(command(kissToyPayload(0x31, 0)), command(kissToyPayload(0x32, 0)), command(kissToyPayload(0x71, 0)))
+            else -> listOf(command(kissToyPayload(0x71, 0)))
         }
-        return clearCommands + command(commandForMode(normalizedMode, normalizedIntensity))
+        val runCommands = if (normalizedMode == 4) {
+            listOf(
+                command(kissToyPayload(0x32, normalizedIntensity)),
+                command(kissToyPayload(0x31, normalizedIntensity)),
+            )
+        } else {
+            listOf(command(commandForMode(normalizedMode, normalizedIntensity)))
+        }
+        return clearCommands + runCommands
     }
 
     private fun stop(): List<BleProtocolOperation> =
@@ -617,7 +625,7 @@ private object KissToyProtocol : BleDeviceProtocol {
             1 -> kissToyPayload(0x31, intensity)
             2 -> kissToyPayload(0x32, intensity)
             3 -> kissToyPayload(0x71, intensity)
-            else -> kissToyPayload(0x40, intensity, intensity)
+            else -> kissToyPayload(0x31, intensity)
         }
 
     private fun kissToyPayload(command: Int, first: Int, second: Int = 0): ByteArray =
