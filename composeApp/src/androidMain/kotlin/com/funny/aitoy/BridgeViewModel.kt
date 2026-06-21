@@ -1307,8 +1307,8 @@ class BridgeViewModel : ViewModel() {
         when (protocolStatus.controlStyle) {
             ToyControlStyle.PatternOnly -> ToyControlAction.Pattern(mode)
             ToyControlStyle.IntensityOnly,
-            ToyControlStyle.ExclusivePatternOrIntensity -> ToyControlAction.Intensity(nextIntensity)
-            ToyControlStyle.CombinedPatternAndIntensity -> ToyControlAction.Combined(mode, nextIntensity)
+            ToyControlStyle.ExclusivePatternOrIntensity,
+            ToyControlStyle.CombinedPatternAndIntensity -> ToyControlAction.Intensity(nextIntensity)
         }
 
     private fun scheduleControlTrial(action: ToyControlAction) {
