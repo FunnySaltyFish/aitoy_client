@@ -23,9 +23,10 @@ CHANNEL = "common"
 PACKAGE_NAME = "com.funny.aitoy"
 FORCE_UPDATE_MAX_VERSION_CODE = 200
 DEFAULT_MIN_SUPPORTED_VERSION_CODE = FORCE_UPDATE_MAX_VERSION_CODE + 1
-UPDATE_LOG = """AI Toy Bridge 0.3.3
+UPDATE_LOG = """AI Toy Bridge 0.3.6
 
-第五个版本：
+第八个版本：
+- 增加多设备同时控制（如果设备协议模式不一样），跟你的 AI 说 “同时让 xxx 和 yyy 震动，分别为模式一、强度 10、15秒 和 模式二、20秒” 试试吧！
 - 增加对小怪兽系列的支持，已有成功案例，感谢群友 @急事请打电话 和 @呜嘎呜嘎 的协助测试。此外，当前谜姬系列已经有多位群友成功！
 - 应用终于有图标啦！有意见也欢迎反馈
 
@@ -34,12 +35,6 @@ UPDATE_LOG = """AI Toy Bridge 0.3.3
 - 控制模式重写，支持模式和强度分开控制的设备
 
 欢迎各位尝试手动的设备。如果不支持的话，可以在群里反馈。给出对应的官方 App 或小程序名称（优先小程序），我将会尝试分析接入
-
-第二个版本：
-- 修改之前部分模式中错误编写的字段，现在应该支持更多设备了。
-- 新增广播能力控制，理论上目前适配 Kisstoy 和 Cachito，欢迎再次尝试
-- 优化控制体验：现在不需要额外点击按钮，直接拖动即可快速尝试，并可以保存设备并修改备注
-- 使用手上的某个设备完成了实际验证，可用！
 """
 
 
