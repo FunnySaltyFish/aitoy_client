@@ -273,12 +273,35 @@ private sealed class SistalkMonsterPubProtocolBase(
 ) : BleDeviceProtocol {
     private val motorServiceUuid = uuid("00006000-0000-1000-8000-00805f9b34fb")
     private val currentPwm = IntArray(channelCount)
+    private val levelMap = intArrayOf(
+        0,
+        10,
+        14,
+        18,
+        22,
+        26,
+        30,
+        34,
+        38,
+        42,
+        46,
+        50,
+        54,
+        58,
+        62,
+        66,
+        70,
+        74,
+        78,
+        82,
+        86,
+    )
 
     override val status = BleProtocolStatus(
         id = id,
         displayName = displayName,
         controllable = true,
-        intensityMax = 100,
+        intensityMax = 20,
         supportsMode = channelCount > 1,
         modeMax = channelCount,
         controlStyle = if (channelCount > 1) {
@@ -310,15 +333,18 @@ private sealed class SistalkMonsterPubProtocolBase(
         }
 
     private fun updateAllChannels(intensity: Int): BleProtocolOperation.Write {
-        currentPwm.fill(intensity.coerceIn(0, status.intensityMax))
+        currentPwm.fill(toLevel(intensity))
         return motorWrite(currentPwm)
     }
 
     private fun updateChannel(channel: Int, intensity: Int): BleProtocolOperation.Write {
         val index = channel.coerceIn(1, channelCount) - 1
-        currentPwm[index] = intensity.coerceIn(0, status.intensityMax)
+        currentPwm[index] = toLevel(intensity)
         return motorWrite(currentPwm)
     }
+
+    private fun toLevel(intensity: Int): Int =
+        levelMap[intensity.coerceIn(0, status.intensityMax)]
 
     private fun stop(): BleProtocolOperation.Write? {
         if (currentPwm.all { it == 0 }) return null
