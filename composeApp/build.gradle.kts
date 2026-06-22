@@ -1,3 +1,4 @@
+import com.android.build.gradle.internal.api.ApkVariantOutputImpl
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import java.io.BufferedReader
 import java.io.FileInputStream
@@ -120,6 +121,15 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    applicationVariants.all {
+        val channel = flavorName.takeIf { it.isNotBlank() } ?: "common"
+        outputs.all {
+            if (this is ApkVariantOutputImpl) {
+                outputFileName = "$channel-$versionName.APK"
+            }
+        }
     }
 }
 
