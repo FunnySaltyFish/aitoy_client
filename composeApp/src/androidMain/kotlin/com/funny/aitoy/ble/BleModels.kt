@@ -61,6 +61,7 @@ data class BleProtocolStatus(
     val modeMax: Int = 8,
     val controlStyle: ToyControlStyle = ToyControlStyle.IntensityOnly,
     val modeLabel: String = "节奏",
+    val modeNames: List<String> = emptyList(),
     val intensityLabel: String = "强度",
     val automatic: Boolean = false,
     val repeatIntervalMs: Int = 0,

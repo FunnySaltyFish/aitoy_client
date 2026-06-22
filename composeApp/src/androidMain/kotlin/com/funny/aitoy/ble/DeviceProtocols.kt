@@ -60,6 +60,7 @@ internal interface BleDeviceProtocol {
 internal object BleProtocolRegistry {
     private val protocols = listOf(
         AnkniProtocol,
+        AnkniTqjDProtocol,
         AnkniYwtdProtocol,
         KissToyProtocol,
         SistalkMonsterPartyProtocol,
@@ -104,6 +105,7 @@ private object SistalkMixPwmProtocol : BleDeviceProtocol {
         modeMax = 2,
         controlStyle = ToyControlStyle.CombinedPatternAndIntensity,
         modeLabel = "部位",
+        modeNames = listOf("吮吸", "尾部震动"),
         automatic = true,
     )
 
@@ -182,6 +184,7 @@ private object SistalkMonsterPartyProtocol : BleDeviceProtocol {
         modeMax = 2,
         controlStyle = ToyControlStyle.CombinedPatternAndIntensity,
         modeLabel = "部位",
+        modeNames = listOf("吮吸", "尾部震动"),
         automatic = true,
     )
 
@@ -249,6 +252,7 @@ private object SistalkMonsterPubMultiMotorProtocol : SistalkMonsterPubProtocolBa
     displayName = "SISTALK MonsterPub",
     writeUuid = uuid("0000600a-0000-1000-8000-00805f9b34fb"),
     channelCount = 10,
+    intensityMax = 100,
 )
 
 private object SistalkMonsterPubDualMotorProtocol : SistalkMonsterPubProtocolBase(
@@ -256,6 +260,7 @@ private object SistalkMonsterPubDualMotorProtocol : SistalkMonsterPubProtocolBas
     displayName = "SISTALK MonsterPub",
     writeUuid = uuid("00006003-0000-1000-8000-00805f9b34fb"),
     channelCount = 2,
+    intensityMax = 100,
 )
 
 private object SistalkMonsterPubSingleMotorProtocol : SistalkMonsterPubProtocolBase(
@@ -263,6 +268,8 @@ private object SistalkMonsterPubSingleMotorProtocol : SistalkMonsterPubProtocolB
     displayName = "SISTALK MonsterPub",
     writeUuid = uuid("00006001-0000-1000-8000-00805f9b34fb"),
     channelCount = 1,
+    intensityMax = 20,
+    useLegacyLevelMap = true,
 )
 
 private sealed class SistalkMonsterPubProtocolBase(
@@ -270,6 +277,8 @@ private sealed class SistalkMonsterPubProtocolBase(
     displayName: String,
     private val writeUuid: UUID,
     private val channelCount: Int,
+    private val intensityMax: Int,
+    private val useLegacyLevelMap: Boolean = false,
 ) : BleDeviceProtocol {
     private val motorServiceUuid = uuid("00006000-0000-1000-8000-00805f9b34fb")
     private val currentPwm = IntArray(channelCount)
@@ -301,7 +310,7 @@ private sealed class SistalkMonsterPubProtocolBase(
         id = id,
         displayName = displayName,
         controllable = true,
-        intensityMax = 20,
+        intensityMax = intensityMax,
         supportsMode = channelCount > 1,
         modeMax = channelCount,
         controlStyle = if (channelCount > 1) {
@@ -310,6 +319,7 @@ private sealed class SistalkMonsterPubProtocolBase(
             ToyControlStyle.IntensityOnly
         },
         modeLabel = "部位",
+        modeNames = (1..channelCount).map { "部位 $it" },
         automatic = true,
     )
 
@@ -344,7 +354,11 @@ private sealed class SistalkMonsterPubProtocolBase(
     }
 
     private fun toLevel(intensity: Int): Int =
-        levelMap[intensity.coerceIn(0, status.intensityMax)]
+        if (useLegacyLevelMap) {
+            levelMap[intensity.coerceIn(0, status.intensityMax)]
+        } else {
+            intensity.coerceIn(0, status.intensityMax)
+        }
 
     private fun stop(): BleProtocolOperation.Write? {
         if (currentPwm.all { it == 0 }) return null
@@ -498,6 +512,7 @@ private object SenseeCcpa10S2Protocol : BleDeviceProtocol {
         modeMax = 2,
         controlStyle = ToyControlStyle.CombinedPatternAndIntensity,
         modeLabel = "功能",
+        modeNames = listOf("吸力", "震动"),
         automatic = true,
     )
 
@@ -566,6 +581,7 @@ private object KissToyProtocol : BleDeviceProtocol {
         supportsMode = true,
         modeMax = 4,
         controlStyle = ToyControlStyle.CombinedPatternAndIntensity,
+        modeNames = listOf("主电机", "第二电机", "抽插", "双通道"),
         automatic = true,
     )
 
@@ -1020,6 +1036,76 @@ private object AnkniProtocol : BleDeviceProtocol {
     }
 }
 
+private object AnkniTqjDProtocol : BleDeviceProtocol {
+    private val serviceUuid = uuid("0000dddd-0000-1000-8000-00805f9b34fb")
+    private val writeUuid = uuid("0000ddd1-0000-1000-8000-00805f9b34fb")
+    private val notifyUuid = uuid("0000ddd2-0000-1000-8000-00805f9b34fb")
+    private const val MODE_COMMAND = 0x06
+    private const val SLIDE_COMMAND = 0x08
+    private const val SLIDE_DURATION = 0x00C8
+
+    override val status = BleProtocolStatus(
+        id = "ankni_tqj_d",
+        displayName = "ANKNI TQJ-D",
+        controllable = true,
+        intensityMax = 10,
+        supportsMode = true,
+        modeMax = 3,
+        controlStyle = ToyControlStyle.CombinedPatternAndIntensity,
+        modeLabel = "功能",
+        modeNames = listOf("吮吸", "震动", "电击"),
+        intensityLabel = "强度",
+        automatic = true,
+    )
+
+    override fun matches(fingerprint: BleGattFingerprint): Boolean {
+        val name = fingerprint.name.lowercase()
+            .replace(" ", "")
+            .replace("_", "")
+            .replace("-", "")
+        return name.contains("tqjd") &&
+                fingerprint.serviceUuids.contains(serviceUuid) &&
+                fingerprint.characteristicUuids.contains(writeUuid) &&
+                fingerprint.characteristicUuids.contains(notifyUuid)
+    }
+
+    override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
+        when (action) {
+            is ToyControlAction.Pattern ->
+                control(action.mode, status.intensityMax)
+            is ToyControlAction.Intensity ->
+                control(1, action.value)
+            is ToyControlAction.Combined ->
+                control(action.mode, action.intensity)
+            ToyControlAction.Stop ->
+                listOf(
+                    write(ankniAaFrame(MODE_COMMAND, 0, 0, 0, 0, 0)),
+                    write(ankniAaFrame(SLIDE_COMMAND, 0, 0, 0, 0, 0, 0)),
+                )
+        }
+
+    private fun control(mode: Int, intensity: Int): List<BleProtocolOperation> {
+        val channelValues = IntArray(4)
+        val channelIndex = when (mode.coerceIn(1, status.modeMax)) {
+            1 -> 2
+            2 -> 1
+            else -> 0
+        }
+        channelValues[channelIndex] = (intensity.coerceIn(0, status.intensityMax) * 10).coerceIn(0, 100)
+        return listOf(
+            write(ankniAaFrame(MODE_COMMAND, *channelValues.map { if (it > 0) 1 else 0 }.toIntArray(), 0)),
+            write(ankniAaFrame(SLIDE_COMMAND, *channelValues, SLIDE_DURATION and 0xff, (SLIDE_DURATION ushr 8) and 0xff)),
+        )
+    }
+
+    private fun write(bytes: ByteArray): BleProtocolOperation.Write =
+        BleProtocolOperation.Write(
+            characteristicUuid = writeUuid,
+            bytes = bytes,
+            withResponse = false,
+        )
+}
+
 private object AnkniYwtdProtocol : BleDeviceProtocol {
     private val serviceUuid = uuid("0000dddd-0000-1000-8000-00805f9b34fb")
     private val writeUuid = uuid("0000ddd1-0000-1000-8000-00805f9b34fb")
@@ -1049,13 +1135,13 @@ private object AnkniYwtdProtocol : BleDeviceProtocol {
     override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
         when (action) {
             is ToyControlAction.Pattern ->
-                listOf(write(aaFrame(MODE_COMMAND, action.mode.coerceIn(1, status.modeMax))))
+                listOf(write(ankniAaFrame(MODE_COMMAND, action.mode.coerceIn(1, status.modeMax))))
             is ToyControlAction.Intensity ->
-                listOf(write(aaFrame(SLIDE_COMMAND, action.value.coerceIn(0, status.intensityMax), SLIDE_DURATION)))
+                listOf(write(ankniAaFrame(SLIDE_COMMAND, action.value.coerceIn(0, status.intensityMax), SLIDE_DURATION)))
             is ToyControlAction.Combined ->
-                listOf(write(aaFrame(MODE_COMMAND, action.mode.coerceIn(1, status.modeMax))))
+                listOf(write(ankniAaFrame(MODE_COMMAND, action.mode.coerceIn(1, status.modeMax))))
             ToyControlAction.Stop ->
-                listOf(write(aaFrame(MODE_COMMAND, 0)))
+                listOf(write(ankniAaFrame(MODE_COMMAND, 0)))
         }
 
     private fun write(bytes: ByteArray): BleProtocolOperation.Write =
@@ -1064,18 +1150,18 @@ private object AnkniYwtdProtocol : BleDeviceProtocol {
             bytes = bytes,
             withResponse = false,
         )
-
-    private fun aaFrame(command: Int, vararg payload: Int): ByteArray {
-        val body = intArrayOf(0xAA, command, payload.size) + payload.map { it.coerceIn(0, 0xFF) }
-        val checksum = body.sum() and 0xFF
-        return (body + checksum).map { it.toByte() }.toByteArray()
-    }
 }
 
 private fun uuid(value: String): UUID = UUID.fromString(value)
 
 private fun bytes(vararg values: Int): ByteArray =
     values.map { (it and 0xff).toByte() }.toByteArray()
+
+private fun ankniAaFrame(command: Int, vararg payload: Int): ByteArray {
+    val body = intArrayOf(0xAA, command, payload.size) + payload.map { it.coerceIn(0, 0xFF) }
+    val checksum = body.sum() and 0xFF
+    return (body + checksum).map { it.toByte() }.toByteArray()
+}
 
 private fun String.normalizedDeviceName(): String =
     lowercase().replace("_", "").replace(" ", "")

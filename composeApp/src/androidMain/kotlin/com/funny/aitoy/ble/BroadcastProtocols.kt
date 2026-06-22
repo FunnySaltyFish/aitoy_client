@@ -36,25 +36,18 @@ internal object BleBroadcastProtocolRegistry {
  */
 internal object CachitoBroadcastProtocol : BleBroadcastProtocol {
     private val modeTemplates = listOf(
-        CachitoMode("通用吸吮", "710000**-0400-####-0302-{sx075}00000000", "710000**-0400-####-0302-0000000000"),
-        CachitoMode("RTD", "710003**-8800-####-0000-{rtd}", "710003**-0200-####-0000-0000000000"),
-        CachitoMode("通用震动", "710000**-0400-####-050A-{sx075}00000000", "710000**-0400-####-0601-0000000000"),
-        CachitoMode("SK4", "710017**-5100-####-0100-640000{sx050}02", "710017**-5100-####-0100-6400000002"),
-        CachitoMode("设备 02 吸吮", "710002**-0400-####-0302-{sx075}00000000", "710002**-0400-####-0601-0000000000"),
-        CachitoMode("设备 04 吸吮", "710004**-0400-####-0302-{sx075}00000000", "710004**-0400-####-0302-0000000000"),
-        CachitoMode("设备 05 吸吮", "710005**-0400-####-0302-{sx075}00000000", "710004**-0400-####-0302-0000000000"),
-        CachitoMode("设备 06 吸吮", "710006**-0400-####-0302-{sx075}00000000", "710004**-0400-####-0302-0000000000"),
-        CachitoMode("设备 07 吸吮", "710007**-8200-####-0100-640000{sx050}02", "710007**-0F00-####-0100-0000000000"),
-        CachitoMode("设备 09 吸吮", "710009**-8200-####-0100-640000{sx050}02", "710004**-0400-####-0302-0000000000"),
-        CachitoMode("设备 0A 吸吮", "71000A**-8200-####-0100-640000{sx050}02", "710004**-0400-####-0302-0000000000"),
-        CachitoMode("设备 0B 吸吮", "71000B**-8200-####-0100-640000{sx050}02", "71000B**-0F00-####-0100-0000000000"),
-        CachitoMode("设备 0C 吸吮", "71000C**-8200-####-0100-640000{sx050}02", "71000C**-0F00-####-0100-0000000000"),
-        CachitoMode("设备 02 震动", "710002**-0400-####-050A-{sx075}00000000", "710002**-0400-####-0601-0000000000"),
-        CachitoMode("设备 07 震动", "710007**-8100-####-0100-0A{pj057}1C0002", "710007**-0100-####-0100-6400000002"),
-        CachitoMode("设备 0B 震动", "71000B**-8100-####-0100-0A{pj057}1C0002", "71000B**-0100-####-0100-6400000002"),
+        CachitoMode("推拉深度", CachitoFunction.ThrustDepth),
+        CachitoMode("伸出速度", CachitoFunction.ExtendSpeed),
+        CachitoMode("缩回速度", CachitoFunction.RetractSpeed),
+        CachitoMode("入体端强度", CachitoFunction.Strength),
+        CachitoMode("加热温度", CachitoFunction.Temperature),
     )
 
     private var deviceId = newDeviceId()
+    private var selectedMode = 1
+    private var depth = 36
+    private var extendSpeed = 8
+    private var retractSpeed = 8
 
     override val status = BleProtocolStatus(
         id = "cachito_advertise",
@@ -64,6 +57,7 @@ internal object CachitoBroadcastProtocol : BleBroadcastProtocol {
         supportsMode = true,
         modeMax = modeTemplates.size,
         controlStyle = ToyControlStyle.CombinedPatternAndIntensity,
+        modeNames = modeTemplates.map { it.name },
         automatic = true,
     )
 
@@ -85,42 +79,62 @@ internal object CachitoBroadcastProtocol : BleBroadcastProtocol {
     override fun commandsFor(action: ToyControlAction): List<BleAdvertiseOperation> =
         when (action) {
             is ToyControlAction.Pattern -> control(action.mode, 100)
-            is ToyControlAction.Intensity -> control(1, action.value)
+            is ToyControlAction.Intensity -> control(selectedMode, action.value)
             is ToyControlAction.Combined -> control(action.mode, action.intensity)
-            ToyControlAction.Stop -> stop(1)
+            ToyControlAction.Stop -> stop()
         }
 
     private fun control(mode: Int, intensity: Int): List<BleAdvertiseOperation> {
         val selected = modeTemplates[(mode - 1).coerceIn(0, modeTemplates.lastIndex)]
-        return listOf(BleAdvertiseOperation(finalUuid(selected.command, intensity.coerceIn(0, 100))))
+        selectedMode = mode.coerceIn(1, modeTemplates.size)
+        val progress = intensity.coerceIn(0, 100)
+        return when (selected.function) {
+            CachitoFunction.ThrustDepth -> {
+                depth = scale(progress, 72)
+                listOf(BleAdvertiseOperation(finalUuid(thrustTemplate(depth, extendSpeed, retractSpeed))))
+            }
+            CachitoFunction.ExtendSpeed -> {
+                extendSpeed = scale(progress, 15)
+                listOf(BleAdvertiseOperation(finalUuid(thrustTemplate(depth, extendSpeed, retractSpeed))))
+            }
+            CachitoFunction.RetractSpeed -> {
+                retractSpeed = scale(progress, 15)
+                listOf(BleAdvertiseOperation(finalUuid(thrustTemplate(depth, extendSpeed, retractSpeed))))
+            }
+            CachitoFunction.Strength ->
+                listOf(BleAdvertiseOperation(finalUuid(strengthTemplate(progress))))
+            CachitoFunction.Temperature ->
+                listOf(BleAdvertiseOperation(finalUuid(temperatureTemplate(scale(progress, 60)))))
+        }
     }
 
-    private fun stop(mode: Int): List<BleAdvertiseOperation> {
-        val selected = modeTemplates[(mode - 1).coerceIn(0, modeTemplates.lastIndex)]
-        return listOf(BleAdvertiseOperation(finalUuid(selected.stop, 0)))
-    }
+    private fun stop(): List<BleAdvertiseOperation> =
+        listOf(
+            BleAdvertiseOperation(finalUuid(thrustTemplate(0, 0, 0))),
+            BleAdvertiseOperation(finalUuid(strengthTemplate(0))),
+            BleAdvertiseOperation(finalUuid(temperatureTemplate(0))),
+        )
 
-    internal fun modeNames(): List<String> = modeTemplates.map { it.name }
-
-    private fun finalUuid(template: String, progress: Int): String {
+    private fun finalUuid(template: String): String {
         val command = template
-            .replace("{sx075}", toHex((progress * 0.75 + 25).toInt()))
-            .replace("{sx050}", toHex((progress * 0.5 + 50).toInt()))
-            .replace("{pj057}", toHex((60 - progress * 0.57f).toInt()))
-            .replace("{rtd}", rtdPayload(progress))
             .replace("####", deviceId)
             .replace("**", newCommandId())
         val checksumSource = command.replace("-", "")
         return command + checksum(checksumSource)
     }
 
-    private fun rtdPayload(progress: Int): String {
-        if (progress <= 0) return "0000000000"
-        val depth = ((progress - 1) * 58 / 99f + 14).toInt().coerceAtLeast(0)
-        val speed = (progress * 0.15f).toInt().coerceAtLeast(2)
-        val delay = (progress * 0.15f).toInt().coerceAtLeast(2)
-        return toHex(depth) + toHex(speed) + toHex(delay) + "0000"
-    }
+    private fun thrustTemplate(depth: Int, extendSpeed: Int, retractSpeed: Int): String =
+        "710003**-8800-####-0000-" +
+            toHex(depth.coerceIn(0, 72)) +
+            toHex(extendSpeed.coerceIn(0, 15)) +
+            toHex(retractSpeed.coerceIn(0, 15)) +
+            "0000"
+
+    private fun strengthTemplate(strength: Int): String =
+        "710003**-0400-####-050A-" + toHex(strength.coerceIn(0, 100)) + "00000000"
+
+    private fun temperatureTemplate(temp: Int): String =
+        "710003**-1F00-####-0000-" + toHex(temp.coerceIn(0, 60)) + "00000000"
 
     private fun checksum(hex: String): String {
         val sum = hex.chunked(2).sumOf { it.toIntOrNull(16) ?: 0 }
@@ -137,9 +151,19 @@ internal object CachitoBroadcastProtocol : BleBroadcastProtocol {
     private fun toHex(value: Int): String =
         (value and 0xff).toString(16).uppercase().padStart(2, '0')
 
+    private fun scale(progress: Int, max: Int): Int =
+        (progress.coerceIn(0, 100) * max / 100f).toInt().coerceIn(0, max)
+
     private data class CachitoMode(
         val name: String,
-        val command: String,
-        val stop: String,
+        val function: CachitoFunction,
     )
+
+    private enum class CachitoFunction {
+        ThrustDepth,
+        ExtendSpeed,
+        RetractSpeed,
+        Strength,
+        Temperature,
+    }
 }

@@ -17,7 +17,6 @@ import androidx.lifecycle.viewModelScope
 import com.funny.aitoy.ble.AndroidBleController
 import com.funny.aitoy.ble.BleConnectionState
 import com.funny.aitoy.ble.BleProtocolStatus
-import com.funny.aitoy.ble.CachitoBroadcastProtocol
 import com.funny.aitoy.ble.ProtocolAttemptStatus
 import com.funny.aitoy.ble.ProtocolTemplate
 import com.funny.aitoy.ble.ScannedBleDevice
@@ -1135,6 +1134,7 @@ class BridgeViewModel : ViewModel() {
                     mode = if (isCurrent) mode else deviceModes[address] ?: 1,
                     intensityMax = status.intensityMax,
                     modeMax = status.modeMax,
+                    modeNames = status.modeNames,
                     controlStyle = status.controlStyle.name,
                 )
             }
@@ -1468,15 +1468,7 @@ class BridgeViewModel : ViewModel() {
     fun modeLabelForAddress(address: String): String {
         val status = protocolStatusFor(address)
         val targetMode = modeForAddress(address)
-        if (status.id == "cachito_advertise") {
-            val name = CachitoBroadcastProtocol.modeNames().getOrNull(targetMode - 1)
-            return if (name.isNullOrBlank()) "模板 ${targetMode}" else "模板 ${targetMode}：$name"
-        }
-        if (status.id == "kisstoy_gatt") {
-            val name = listOf("主电机", "第二电机", "抽插", "双通道").getOrNull(targetMode - 1)
-            return if (name.isNullOrBlank()) "节奏 ${targetMode}" else "节奏 ${targetMode}：$name"
-        }
-        return "节奏 ${targetMode}"
+        return modeLabel(status, targetMode)
     }
 
     private fun protocolStatusFor(address: String): BleProtocolStatus =
@@ -1501,15 +1493,13 @@ class BridgeViewModel : ViewModel() {
     }
 
     fun currentModeLabel(): String {
-        if (protocolStatus.id == "cachito_advertise") {
-            val name = CachitoBroadcastProtocol.modeNames().getOrNull(mode - 1)
-            return if (name.isNullOrBlank()) "模板 ${mode}" else "模板 ${mode}：$name"
-        }
-        if (protocolStatus.id == "kisstoy_gatt") {
-            val name = listOf("主电机", "第二电机", "抽插", "双通道").getOrNull(mode - 1)
-            return if (name.isNullOrBlank()) "节奏 ${mode}" else "节奏 ${mode}：$name"
-        }
-        return "节奏 ${mode}"
+        return modeLabel(protocolStatus, mode)
+    }
+
+    private fun modeLabel(status: BleProtocolStatus, targetMode: Int): String {
+        val base = status.modeLabel.ifBlank { "模式" }
+        val name = status.modeNames.getOrNull(targetMode - 1)
+        return if (name.isNullOrBlank()) "$base $targetMode" else "$base $targetMode：$name"
     }
 
     private fun patternAction(nextMode: Int): ToyControlAction =
@@ -1532,14 +1522,11 @@ class BridgeViewModel : ViewModel() {
         nextIntensity: Int,
         status: BleProtocolStatus,
     ): ToyControlAction =
-        when {
-            status.id == "kisstoy_gatt" -> ToyControlAction.Combined(currentMode, nextIntensity)
-            status.controlStyle == ToyControlStyle.PatternOnly -> ToyControlAction.Pattern(currentMode)
-            status.controlStyle == ToyControlStyle.IntensityOnly ||
-                    status.controlStyle == ToyControlStyle.ExclusivePatternOrIntensity ||
-                    status.controlStyle == ToyControlStyle.CombinedPatternAndIntensity ->
-                ToyControlAction.Intensity(nextIntensity)
-            else -> ToyControlAction.Intensity(nextIntensity)
+        when (status.controlStyle) {
+            ToyControlStyle.PatternOnly -> ToyControlAction.Pattern(currentMode)
+            ToyControlStyle.CombinedPatternAndIntensity -> ToyControlAction.Combined(currentMode, nextIntensity)
+            ToyControlStyle.IntensityOnly,
+            ToyControlStyle.ExclusivePatternOrIntensity -> ToyControlAction.Intensity(nextIntensity)
         }
 
     private fun scheduleControlTrial(action: ToyControlAction) {
