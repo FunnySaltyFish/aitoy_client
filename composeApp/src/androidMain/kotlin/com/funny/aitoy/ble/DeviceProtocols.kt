@@ -64,6 +64,7 @@ internal object BleProtocolRegistry {
                 listOf(
                     AnkniYwtdProtocol,
                     KissToyProtocol,
+                    WeVibeSyncLiteProtocol,
                     SistalkMonsterPartyProtocol,
                     SistalkMixPwmProtocol,
                     SistalkMonsterPubMultiMotorProtocol,
@@ -85,6 +86,52 @@ internal object BleProtocolRegistry {
 
     fun resolveAll(fingerprint: BleGattFingerprint): List<BleDeviceProtocol> =
         protocols.filter { it.matches(fingerprint) }
+}
+
+private object WeVibeSyncLiteProtocol : BleDeviceProtocol {
+    private val serviceUuid = uuid("f000bb03-0451-4000-b000-000000000000")
+    private val txUuid = uuid("f000c000-0451-4000-b000-000000000000")
+    private val rxUuid = uuid("f000b000-0451-4000-b000-000000000000")
+
+    override val status = BleProtocolStatus(
+        id = "wevibe_sync_lite",
+        displayName = "We-Vibe Sync Lite",
+        controllable = true,
+        intensityMax = 30,
+        supportsMode = false,
+        controlStyle = ToyControlStyle.IntensityOnly,
+        automatic = true,
+    )
+
+    override fun matches(fingerprint: BleGattFingerprint): Boolean {
+        val isSyncLite = fingerprint.name.normalizedDeviceName() == "synclite"
+        return isSyncLite &&
+                fingerprint.serviceUuids.contains(serviceUuid) &&
+                fingerprint.characteristicUuids.contains(txUuid) &&
+                fingerprint.characteristicUuids.contains(rxUuid)
+    }
+
+    override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
+        when (action) {
+            is ToyControlAction.Intensity -> listOf(command(action.value))
+            is ToyControlAction.Combined -> listOf(command(action.intensity))
+            is ToyControlAction.Pattern -> emptyList()
+            ToyControlAction.Stop -> listOf(command(0))
+        }
+
+    private fun command(intensity: Int): BleProtocolOperation.Write {
+        val speed = intensity.coerceIn(0, status.intensityMax)
+        val payload = if (speed == 0) {
+            bytes(0x0F, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00)
+        } else {
+            bytes(0x0F, 0x03, 0x00, speed, speed, 0x03, 0x00, 0x00)
+        }
+        return BleProtocolOperation.Write(
+            characteristicUuid = txUuid,
+            bytes = payload,
+            withResponse = true,
+        )
+    }
 }
 
 private object SistalkMixPwmProtocol : BleDeviceProtocol {
