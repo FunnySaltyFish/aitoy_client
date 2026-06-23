@@ -58,26 +58,27 @@ internal interface BleDeviceProtocol {
 }
 
 internal object BleProtocolRegistry {
-    private val protocols = listOf(
-        AnkniProtocol,
-        AnkniTqjDProtocol,
-        AnkniYwtdProtocol,
-        KissToyProtocol,
-        SistalkMonsterPartyProtocol,
-        SistalkMonsterPubMultiMotorProtocol,
-        SistalkMonsterPubDualMotorProtocol,
-        SistalkMonsterPubSingleMotorProtocol,
-        SistalkMixPwmProtocol,
-        SvakomQhSx045Protocol,
-        MizzzeeXhtkjProtocol,
-        SenseeCcpa10S2Protocol,
-        LovenseProtocol,
-        SatisfyerProtocol,
-        OhMiBodEsca2Protocol,
-        PinkPunchProtocol,
-        LovenutsProtocol,
-        JeJoueNuoProtocol,
-    )
+    private val protocols =
+        listOf(AnkniProtocol) +
+                ankniDdddProfileProtocols +
+                listOf(
+                    AnkniYwtdProtocol,
+                    KissToyProtocol,
+                    SistalkMonsterPartyProtocol,
+                    SistalkMixPwmProtocol,
+                    SistalkMonsterPubMultiMotorProtocol,
+                    SistalkMonsterPubDualMotorProtocol,
+                    SistalkMonsterPubSingleMotorProtocol,
+                    SvakomQhSx045Protocol,
+                    MizzzeeXhtkjProtocol,
+                    SenseeCcpa10S2Protocol,
+                    LovenseProtocol,
+                    SatisfyerProtocol,
+                    OhMiBodEsca2Protocol,
+                    PinkPunchProtocol,
+                    LovenutsProtocol,
+                    JeJoueNuoProtocol,
+                )
 
     fun resolve(fingerprint: BleGattFingerprint): BleDeviceProtocol? =
         protocols.firstOrNull { it.matches(fingerprint) }
@@ -91,9 +92,6 @@ private object SistalkMixPwmProtocol : BleDeviceProtocol {
     private val sistalkV2ServiceUuid = uuid("00009000-0000-1000-8000-00805f9b34fb")
     private val sistalkV2OpUuid = uuid("00009001-0000-1000-8000-00805f9b34fb")
     private val sistalkV2FunctionUuid = uuid("00009002-0000-1000-8000-00805f9b34fb")
-    private val monsterPubServiceUuid = uuid("00006000-0000-1000-8000-00805f9b34fb")
-    private val monsterPubRunUuid = uuid("00006001-0000-1000-8000-00805f9b34fb")
-    private val monsterPubStopUuid = uuid("00006002-0000-1000-8000-00805f9b34fb")
     private val currentPwm = IntArray(2)
 
     override val status = BleProtocolStatus(
@@ -111,9 +109,7 @@ private object SistalkMixPwmProtocol : BleDeviceProtocol {
 
     override fun matches(fingerprint: BleGattFingerprint): Boolean =
         fingerprint.characteristicUuids.contains(pwmUuid) &&
-                !fingerprint.hasSistalkV2Gatt() &&
-                !fingerprint.hasMonsterPubGatt() &&
-                !fingerprint.hasSistalkScanManufacturer()
+                !fingerprint.hasSistalkV2Gatt()
 
     override fun initialize(fingerprint: BleGattFingerprint): List<BleProtocolOperation> {
         currentPwm.fill(0)
@@ -160,10 +156,6 @@ private object SistalkMixPwmProtocol : BleDeviceProtocol {
                 characteristicUuids.contains(sistalkV2OpUuid) &&
                 characteristicUuids.contains(sistalkV2FunctionUuid)
 
-    private fun BleGattFingerprint.hasMonsterPubGatt(): Boolean =
-        serviceUuids.contains(monsterPubServiceUuid) &&
-                characteristicUuids.contains(monsterPubRunUuid) &&
-                characteristicUuids.contains(monsterPubStopUuid)
 }
 
 private object SistalkMonsterPartyProtocol : BleDeviceProtocol {
@@ -1036,73 +1028,156 @@ private object AnkniProtocol : BleDeviceProtocol {
     }
 }
 
-private object AnkniTqjDProtocol : BleDeviceProtocol {
-    private val serviceUuid = uuid("0000dddd-0000-1000-8000-00805f9b34fb")
+private val ankniDdddProfileProtocols: List<BleDeviceProtocol> = listOf(
+    AnkniDdddProfileProtocol(AnkniDdddProfile.tqjD()),
+    AnkniDdddProfileProtocol(AnkniDdddProfile.classic("ankni_0001", "ANKNI 0001", 0x0A, 1, 10, listOf("安可尼0001", "ankni0001", "ankeni0001", "intung", "intang"))),
+    AnkniDdddProfileProtocol(AnkniDdddProfile.classic("ankni_0002", "ANKNI 0002", 0x0A, 1, 8, listOf("安可尼0002", "ankni0002", "ankeni0002"))),
+    AnkniDdddProfileProtocol(AnkniDdddProfile.classic("ankni_0003", "ANKNI 0003", 0x0A, 1, 10, listOf("安可尼0003", "ankni0003", "ankeni0003", "tanghe"))),
+    AnkniDdddProfileProtocol(AnkniDdddProfile.classic("ankni_0005", "ANKNI 0005", 0x0A, 1, 10, listOf("安可尼0005", "ankni0005", "ankeni0005", "xiaoshuidi"))),
+    AnkniDdddProfileProtocol(AnkniDdddProfile.classic("ankni_0007", "ANKNI 0007", 0x0F, 2, 10, listOf("安可尼0007", "ankni0007", "ankeni0007", "taoxinxiong"))),
+    AnkniDdddProfileProtocol(AnkniDdddProfile.classic("ankni_0009", "ANKNI 0009", 0x0F, 2, 10, listOf("安可尼0009", "ankni0009", "ankeni0009", "mitaobaicha"))),
+)
+
+private data class AnkniDdddProfile(
+    val id: String,
+    val displayName: String,
+    val aliases: List<String>,
+    val modeMax: Int,
+    val intensityMax: Int,
+    val controlStyle: ToyControlStyle,
+    val modeLabel: String,
+    val modeNames: List<String>,
+    val intensityLabel: String,
+    val behavior: Behavior,
+    val modeCommand: Int = 0,
+    val motorNum: Int = 0,
+) {
+    enum class Behavior {
+        Classic,
+        TqjD,
+    }
+
+    companion object {
+        fun classic(
+            id: String,
+            displayName: String,
+            modeCommand: Int,
+            motorNum: Int,
+            modeMax: Int,
+            aliases: List<String>,
+        ) = AnkniDdddProfile(
+            id = id,
+            displayName = displayName,
+            aliases = aliases,
+            modeMax = modeMax,
+            intensityMax = 100,
+            controlStyle = ToyControlStyle.ExclusivePatternOrIntensity,
+            modeLabel = "预设节奏",
+            modeNames = emptyList(),
+            intensityLabel = "滑动强度",
+            behavior = Behavior.Classic,
+            modeCommand = modeCommand,
+            motorNum = motorNum,
+        )
+
+        fun tqjD() = AnkniDdddProfile(
+            id = "ankni_tqj_d",
+            displayName = "ANKNI TQJ-D",
+            aliases = listOf("tqjd", "anknitqjd", "ankeni_tqjd"),
+            modeMax = 3,
+            intensityMax = 10,
+            controlStyle = ToyControlStyle.CombinedPatternAndIntensity,
+            modeLabel = "功能",
+            modeNames = listOf("吮吸", "震动", "电击"),
+            intensityLabel = "强度",
+            behavior = Behavior.TqjD,
+        )
+    }
+}
+
+private class AnkniDdddProfileProtocol(
+    private val profile: AnkniDdddProfile,
+) : BleDeviceProtocol {
     private val writeUuid = uuid("0000ddd1-0000-1000-8000-00805f9b34fb")
-    private val notifyUuid = uuid("0000ddd2-0000-1000-8000-00805f9b34fb")
-    private const val MODE_COMMAND = 0x06
-    private const val SLIDE_COMMAND = 0x08
-    private const val SLIDE_DURATION = 0x00C8
+    private val slideCommand = 0x08
 
     override val status = BleProtocolStatus(
-        id = "ankni_tqj_d",
-        displayName = "ANKNI TQJ-D",
+        id = profile.id,
+        displayName = profile.displayName,
         controllable = true,
-        intensityMax = 10,
+        intensityMax = profile.intensityMax,
         supportsMode = true,
-        modeMax = 3,
-        controlStyle = ToyControlStyle.CombinedPatternAndIntensity,
-        modeLabel = "功能",
-        modeNames = listOf("吮吸", "震动", "电击"),
-        intensityLabel = "强度",
+        modeMax = profile.modeMax,
+        controlStyle = profile.controlStyle,
+        modeLabel = profile.modeLabel,
+        modeNames = profile.modeNames,
+        intensityLabel = profile.intensityLabel,
         automatic = true,
     )
 
     override fun matches(fingerprint: BleGattFingerprint): Boolean {
-        val name = fingerprint.name.lowercase()
-            .replace(" ", "")
-            .replace("_", "")
-            .replace("-", "")
-        return name.contains("tqjd") &&
-                fingerprint.serviceUuids.contains(serviceUuid) &&
-                fingerprint.characteristicUuids.contains(writeUuid) &&
-                fingerprint.characteristicUuids.contains(notifyUuid)
+        if (!fingerprint.hasAnkniDdddGatt()) return false
+        val name = fingerprint.name.normalizedDeviceName()
+        return profile.aliases.any { alias -> name.contains(alias.normalizedDeviceName()) }
     }
 
     override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
-        when (action) {
-            is ToyControlAction.Pattern ->
-                control(action.mode, status.intensityMax)
-            is ToyControlAction.Intensity ->
-                control(1, action.value)
-            is ToyControlAction.Combined ->
-                control(action.mode, action.intensity)
-            ToyControlAction.Stop ->
-                listOf(
-                    write(ankniAaFrame(MODE_COMMAND, 0, 0, 0, 0, 0)),
-                    write(ankniAaFrame(SLIDE_COMMAND, 0, 0, 0, 0, 0, 0)),
-                )
+        when (profile.behavior) {
+            AnkniDdddProfile.Behavior.Classic -> classicCommandsFor(action)
+            AnkniDdddProfile.Behavior.TqjD -> tqjDCommandsFor(action)
         }
 
-    private fun control(mode: Int, intensity: Int): List<BleProtocolOperation> {
-        val channelValues = IntArray(4)
-        val channelIndex = when (mode.coerceIn(1, status.modeMax)) {
-            1 -> 2
-            2 -> 1
-            else -> 0
+    private fun classicCommandsFor(action: ToyControlAction): List<BleProtocolOperation> {
+        return when (action) {
+            is ToyControlAction.Pattern ->
+                listOf(write(ankniAaFrame(profile.modeCommand, *classicModeValues(action.mode, profile.motorNum))))
+            is ToyControlAction.Intensity ->
+                listOf(write(ankniAaFrame(slideCommand, *classicSlideValues(action.value, profile.motorNum))))
+            is ToyControlAction.Combined ->
+                listOf(write(ankniAaFrame(profile.modeCommand, *classicModeValues(action.mode, profile.motorNum))))
+            ToyControlAction.Stop ->
+                listOf(
+                    write(ankniAaFrame(profile.modeCommand, *IntArray(profile.motorNum))),
+                    write(ankniAaFrame(slideCommand, *IntArray(profile.motorNum + 1))),
+                )
         }
+    }
+
+    private fun tqjDCommandsFor(action: ToyControlAction): List<BleProtocolOperation> =
+        when (action) {
+            is ToyControlAction.Pattern ->
+                tqjDControl(action.mode, status.intensityMax)
+            is ToyControlAction.Intensity ->
+                tqjDControl(1, action.value)
+            is ToyControlAction.Combined ->
+                tqjDControl(action.mode, action.intensity)
+            ToyControlAction.Stop ->
+                listOf(write(ankniAaFrame(slideCommand, 0, 0, 0, 0)))
+        }
+
+    private fun tqjDControl(mode: Int, intensity: Int): List<BleProtocolOperation> {
+        val channelValues = IntArray(status.modeMax)
+        val channelIndex = mode.coerceIn(1, status.modeMax) - 1
         channelValues[channelIndex] = (intensity.coerceIn(0, status.intensityMax) * 10).coerceIn(0, 100)
-        return listOf(
-            write(ankniAaFrame(MODE_COMMAND, *channelValues.map { if (it > 0) 1 else 0 }.toIntArray(), 0)),
-            write(ankniAaFrame(SLIDE_COMMAND, *channelValues, SLIDE_DURATION and 0xff, (SLIDE_DURATION ushr 8) and 0xff)),
-        )
+        val duration = channelValues.maxOrNull() ?: 0
+        return listOf(write(ankniAaFrame(slideCommand, *channelValues, duration)))
+    }
+
+    private fun classicModeValues(mode: Int, motorNum: Int): IntArray {
+        val value = mode.coerceIn(1, status.modeMax)
+        return IntArray(motorNum) { value }
+    }
+
+    private fun classicSlideValues(intensity: Int, motorNum: Int): IntArray {
+        val value = intensity.coerceIn(0, status.intensityMax)
+        return IntArray(motorNum) { value } + 0xC8
     }
 
     private fun write(bytes: ByteArray): BleProtocolOperation.Write =
         BleProtocolOperation.Write(
             characteristicUuid = writeUuid,
             bytes = bytes,
-            withResponse = false,
+            withResponse = true,
         )
 }
 
@@ -1164,7 +1239,12 @@ private fun ankniAaFrame(command: Int, vararg payload: Int): ByteArray {
 }
 
 private fun String.normalizedDeviceName(): String =
-    lowercase().replace("_", "").replace(" ", "")
+    lowercase().replace("_", "").replace("-", "").replace(" ", "")
+
+private fun BleGattFingerprint.hasAnkniDdddGatt(): Boolean =
+    serviceUuids.contains(uuid("0000dddd-0000-1000-8000-00805f9b34fb")) &&
+            characteristicUuids.contains(uuid("0000ddd1-0000-1000-8000-00805f9b34fb")) &&
+            characteristicUuids.contains(uuid("0000ddd2-0000-1000-8000-00805f9b34fb"))
 
 private fun String.firstManufacturerByte(): Int? {
     val payload = substringAfter(':', missingDelimiterValue = this)
@@ -1175,9 +1255,6 @@ private fun String.firstManufacturerByte(): Int? {
         ?.takeIf { it.length in 1..2 && it.all { ch -> ch.isDigit() || ch.lowercaseChar() in 'a'..'f' } }
         ?.toIntOrNull(16)
 }
-
-private fun BleGattFingerprint.hasSistalkScanManufacturer(): Boolean =
-    manufacturerData.startsWith("0x2512:", ignoreCase = true)
 
 private fun IntArray.toByteArrayForSistalkV1(): ByteArray =
     if (size > 2) {
