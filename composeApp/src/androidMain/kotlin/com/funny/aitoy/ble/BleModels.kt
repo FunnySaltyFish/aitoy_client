@@ -76,6 +76,12 @@ data class ProtocolAttemptStatus(
     val currentIndex: Int = 0,
     val total: Int = 0,
     val failedNames: List<String> = emptyList(),
+    val exhausted: Boolean = false,
+)
+
+data class ProtocolFallbackResult(
+    val failedProtocol: BleProtocolStatus,
+    val switchedToNext: Boolean,
 )
 
 fun parseHexTemplate(template: String, mode: Int, intensity: Int): ByteArray {

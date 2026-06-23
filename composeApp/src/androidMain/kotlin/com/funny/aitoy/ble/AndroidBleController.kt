@@ -311,6 +311,55 @@ class AndroidBleController(
 
     fun stopDevice() = sendAction(ToyControlAction.Stop)
 
+    fun reportCurrentProtocolNoResponse(): ProtocolFallbackResult? {
+        val failed = activeProtocol?.status ?: activeBroadcastProtocol?.status ?: return null
+        failed.displayName
+            .takeIf { it.isNotBlank() && it !in failedProtocolNames }
+            ?.let(failedProtocolNames::add)
+        trace(
+            "协议适配反馈 event=protocol_adapter_feedback result=no_response " +
+                "protocol=${failed.id} name=${failed.displayName}",
+            error = true,
+        )
+        activeBroadcastProtocol?.let {
+            protocolReady = false
+            activeBroadcastProtocol = null
+            activeProtocol = null
+            finishUnsupportedAfterUserFeedback()
+            return ProtocolFallbackResult(failed, switchedToNext = false)
+        }
+        val currentGatt = gatt
+        val currentTemplate = template
+        if (currentGatt == null || currentTemplate == null || protocolCandidates.isEmpty()) {
+            protocolReady = false
+            activeProtocol = null
+            finishUnsupportedAfterUserFeedback()
+            return ProtocolFallbackResult(failed, switchedToNext = false)
+        }
+        val hasNext = protocolCandidateIndex + 1 < protocolCandidates.size
+        protocolReady = false
+        operationQueue.clear()
+        operationInProgress = false
+        val fingerprint = BleGattFingerprint(
+            name = connectedName,
+            manufacturerData = connectedManufacturerData,
+            scanRecordHex = connectedScanRecordHex,
+            serviceUuids = currentGatt.services.map { it.uuid }.toSet(),
+            characteristicUuids = currentGatt.services
+                .flatMap { it.characteristics }
+                .map { it.uuid }
+                .toSet(),
+        )
+        tryNextProtocol(
+            fingerprint = fingerprint,
+            gatt = currentGatt,
+            config = currentTemplate,
+            reason = "用户反馈 ${failed.displayName} 没有反应，切换下一个候选协议",
+            exhaustedByUserFeedback = true,
+        )
+        return ProtocolFallbackResult(failed, switchedToNext = hasNext)
+    }
+
     private fun write(operation: BleProtocolOperation.Write) {
         val currentGatt = gatt ?: run {
             handleProtocolOperationFailed("设备尚未连接")
@@ -417,11 +466,16 @@ class AndroidBleController(
         gatt: BluetoothGatt,
         config: ProtocolTemplate,
         reason: String = "",
+        exhaustedByUserFeedback: Boolean = false,
     ) {
         if (reason.isNotBlank()) trace(reason, error = true)
         protocolCandidateIndex += 1
         val protocol = protocolCandidates.getOrNull(protocolCandidateIndex)
         if (protocol == null) {
+            if (exhaustedByUserFeedback) {
+                finishUnsupportedAfterUserFeedback()
+                return
+            }
             val allFailed = failedProtocolNames.isNotEmpty() && !config.manualControlEnabled
             finishWithManualOrUnsupported(gatt, config, allCandidatesFailed = allFailed)
             return
@@ -559,6 +613,37 @@ class AndroidBleController(
             return
         }
         updateState(BleConnectionState.Ready)
+    }
+
+    private fun finishUnsupportedAfterUserFeedback() {
+        val failed = failedProtocolNames.toList()
+        val currentGatt = gatt
+        updateProtocolAttempt(
+            ProtocolAttemptStatus(
+                title = "仍未适配成功",
+                message = "已尝试所有协议，目前仍不支持，请加群提交反馈，开发者会尝试支持。",
+                currentIndex = protocolCandidates.size.coerceAtLeast(failed.size),
+                total = protocolCandidates.size,
+                failedNames = failed,
+                exhausted = true,
+            ),
+        )
+        trace(
+            "协议适配反馈 event=protocol_adapter_feedback result=exhausted " +
+                "failed=${failed.joinToString("|")} total=${protocolCandidates.size}",
+            error = true,
+        )
+        activeProtocol = null
+        activeBroadcastProtocol = null
+        protocolReady = false
+        operationQueue.clear()
+        operationInProgress = false
+        onProtocol(BleProtocolStatus())
+        currentGatt?.let {
+            disconnectingAfterProtocolFailure = true
+            updateState(BleConnectionState.Error)
+            it.disconnect()
+        } ?: updateState(BleConnectionState.Error)
     }
 
     private fun closeGatt(target: BluetoothGatt) {

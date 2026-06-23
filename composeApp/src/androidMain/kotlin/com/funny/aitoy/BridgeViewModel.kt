@@ -466,7 +466,11 @@ class BridgeViewModel : ViewModel() {
             }
             BleConnectionState.Error -> {
                 if (address == selectedAddress) {
-                    busyHint = "设备连接不上，请确认设备已开机并靠近手机"
+                    busyHint = if (deviceProtocolAttempts[address]?.exhausted == true) {
+                        "已尝试所有协议，目前仍不支持，请加群提交反馈，开发者会尝试支持。"
+                    } else {
+                        "设备连接不上，请确认设备已开机并靠近手机"
+                    }
                 }
                 syncRelayDevice()
                 autoOfflineWhenNoConnectedSavedDevice()
@@ -654,6 +658,7 @@ class BridgeViewModel : ViewModel() {
 
     fun confirmCurrentDeviceWorks() {
         if (selectedAddress.isBlank()) return
+        recordProtocolAdapterFeedback("success")
         deviceRemarkDraft = rememberedDevices.firstOrNull { it.address == selectedAddress }?.name
             ?: selectedName.ifBlank { "我的小玩具" }
         editingRemarkAddress = selectedAddress
@@ -662,7 +667,26 @@ class BridgeViewModel : ViewModel() {
     }
 
     fun reportCurrentDeviceNotWorking() {
-        busyHint = "可以继续调整，或到高级工具导入指令"
+        val address = selectedAddress
+        if (address.isBlank()) return
+        mainHandler.removeCallbacks(controlTrial)
+        cancelAutoStop(address)
+        cancelKeepAlive(address)
+        recordProtocolAdapterFeedback("no_response")
+        val fallback = controllers[address]?.reportCurrentProtocolNoResponse()
+        controlTrialStarted = false
+        busyHint = when {
+            fallback == null -> {
+                "已记录反馈，请加群提交设备信息"
+            }
+            fallback.switchedToNext -> {
+                "已切换协议，请从低强度再试一次"
+            }
+            else -> {
+                "已尝试所有协议，目前仍不支持，请加群提交反馈，开发者会尝试支持。"
+            }
+        }
+        syncRelayDevice()
     }
 
     fun editRememberedDevice(toy: RememberedToy) {
@@ -1551,6 +1575,14 @@ class BridgeViewModel : ViewModel() {
         }.onFailure {
             busyHint = it.message ?: "控制失败"
         }
+    }
+
+    private fun recordProtocolAdapterFeedback(result: String) {
+        appendLog(
+            "协议适配反馈 event=protocol_adapter_feedback result=$result " +
+                "deviceName=${selectedName.ifBlank { "<none>" }} address=${selectedAddress.ifBlank { "<none>" }} " +
+                "protocol=${protocolStatus.id.ifBlank { "<none>" }} name=${protocolStatus.displayName}",
+        )
     }
 
     private fun rememberDevice(

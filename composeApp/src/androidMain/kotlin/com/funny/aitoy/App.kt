@@ -776,6 +776,9 @@ private fun ControlRoom(vm: BridgeViewModel, toy: ManagedToy? = null) {
             color = if (status.controllable) TextSoft else Danger,
             style = MaterialTheme.typography.bodyMedium,
         )
+        if (address == vm.selectedAddress && vm.protocolAttemptStatus.title.isNotBlank()) {
+            ProtocolAttemptCard(vm.protocolAttemptStatus)
+        }
         Spacer(Modifier.height(16.dp))
         when (status.controlStyle) {
             ToyControlStyle.ExclusivePatternOrIntensity -> {
