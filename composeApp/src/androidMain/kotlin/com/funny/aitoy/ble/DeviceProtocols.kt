@@ -1225,6 +1225,8 @@ private class AnkniDdddProfileProtocol(
         modeNames = profile.modeNames,
         intensityLabel = profile.intensityLabel,
         automatic = true,
+        // 小程序对 TQJ-D 滑动控制每 200ms 重发一次；不保活时电机会在帧尾时长耗尽后自动停止。
+        repeatIntervalMs = if (profile.behavior == AnkniDdddProfile.Behavior.TqjD) TQJD_KEEP_ALIVE_MS else 0,
     )
 
     override fun matches(fingerprint: BleGattFingerprint): Boolean {
@@ -1275,8 +1277,9 @@ private class AnkniDdddProfileProtocol(
         val channelValues = IntArray(status.modeMax)
         val channelIndex = mode.coerceIn(1, status.modeMax) - 1
         channelValues[channelIndex] = (intensity.coerceIn(0, status.intensityMax) * 10).coerceIn(0, 100)
-        val duration = channelValues.maxOrNull() ?: 0
-        return listOf(write(ankniAaFrame(slideCommand, *channelValues, duration)))
+        // 小程序 makeSlideOrder(200, ...) 把固定的 200(0xC8) 作为帧尾时长位，与强度无关。
+        // 之前误把强度最大值写进时长位，导致低强度时长太短：电机只动一两秒就停、强度小于 4 直接不触发。
+        return listOf(write(ankniAaFrame(slideCommand, *channelValues, TQJD_SLIDE_DURATION)))
     }
 
     private fun classicModeValues(mode: Int, motorNum: Int): IntArray {
@@ -1295,6 +1298,13 @@ private class AnkniDdddProfileProtocol(
             bytes = bytes,
             withResponse = true,
         )
+
+    companion object {
+        // 帧尾固定时长位，来源：醉清风小程序 makeSlideOrder(200, ...)
+        private const val TQJD_SLIDE_DURATION = 0xC8
+        // 与小程序滑动控制 setInterval(200) 保活节奏一致
+        private const val TQJD_KEEP_ALIVE_MS = 200
+    }
 }
 
 private object AnkniYwtdProtocol : BleDeviceProtocol {
