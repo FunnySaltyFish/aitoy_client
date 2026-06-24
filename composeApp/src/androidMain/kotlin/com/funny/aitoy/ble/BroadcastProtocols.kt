@@ -81,6 +81,7 @@ internal object CachitoBroadcastProtocol : BleBroadcastProtocol {
             is ToyControlAction.Pattern -> control(action.mode, 100)
             is ToyControlAction.Intensity -> control(selectedMode, action.value)
             is ToyControlAction.Combined -> control(action.mode, action.intensity)
+            is ToyControlAction.DualMotor -> control(action.mode, action.strongestIntensity(100))
             ToyControlAction.Stop -> stop()
         }
 

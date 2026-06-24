@@ -146,6 +146,7 @@ class BridgeViewModel : ViewModel() {
     private val deviceDisplayNames = mutableStateMapOf<String, String>()
     private val deviceModes = mutableStateMapOf<String, Int>()
     private val deviceIntensities = mutableStateMapOf<String, Int>()
+    private val deviceSecondaryIntensities = mutableStateMapOf<String, Int>()
 
     var connectionState by mutableStateOf(BleConnectionState.Idle)
         private set
@@ -241,6 +242,7 @@ class BridgeViewModel : ViewModel() {
     )
     var mode by mutableStateOf(1)
     var intensity by mutableStateOf(1)
+    var secondaryIntensity by mutableStateOf(1)
     var controlTrialStarted by mutableStateOf(false)
         private set
     var currentDeviceSaved by mutableStateOf(false)
@@ -579,6 +581,7 @@ class BridgeViewModel : ViewModel() {
         protocolAttemptStatus = deviceProtocolAttempts[address] ?: ProtocolAttemptStatus()
         mode = deviceModes[address] ?: 1
         intensity = deviceIntensities[address] ?: 1
+        secondaryIntensity = deviceSecondaryIntensities[address] ?: intensity
         currentDeviceSaved = rememberedDevices.any { it.address == address }
         controlTrialStarted = false
         showDeviceRemarkDialog = false
@@ -628,6 +631,25 @@ class BridgeViewModel : ViewModel() {
     fun updateIntensity(address: String, value: Int) {
         if (address != selectedAddress) selectDevice(address)
         updateIntensity(value)
+    }
+
+    fun updateChannelIntensity(address: String, channelIndex: Int, value: Int) {
+        if (address != selectedAddress) selectDevice(address)
+        val next = value.coerceIn(0, protocolStatus.intensityMax.coerceAtLeast(1))
+        val targetAddress = selectedAddress.ifBlank { address }
+        when (channelIndex) {
+            0 -> {
+                if (intensity == next) return
+                intensity = next
+                deviceIntensities[targetAddress] = next
+            }
+            else -> {
+                if (secondaryIntensity == next) return
+                secondaryIntensity = next
+                deviceSecondaryIntensities[targetAddress] = next
+            }
+        }
+        scheduleControlTrial(dualIntensityAction(mode, intensity, secondaryIntensity, protocolStatus))
     }
 
     fun stopDevice() = runAction {
@@ -1234,8 +1256,19 @@ class BridgeViewModel : ViewModel() {
                     }
                     is RelaySequenceStep.Pattern -> {
                         val durationSec = step.durationSec ?: safeDefaultDuration
-                        val mappedMode = step.mode.coerceIn(1, protocolStatusFor(address).modeMax.coerceAtLeast(1))
-                        sendToyAction(ToyControlAction.Pattern(mappedMode), durationSec, address, scheduleAutoStop = false)
+                        val status = protocolStatusFor(address)
+                        val mappedMode = step.mode.coerceIn(1, status.modeMax.coerceAtLeast(1))
+                        sendToyAction(
+                            patternAction(
+                                nextMode = mappedMode,
+                                currentIntensity = intensityForAddress(address),
+                                currentSecondaryIntensity = secondaryIntensityForAddress(address),
+                                status = status,
+                            ),
+                            durationSec,
+                            address,
+                            scheduleAutoStop = false,
+                        )
                         deviceModes[address] = mappedMode
                         if (address == selectedAddress) mode = mappedMode
                         syncRelayDevice()
@@ -1247,18 +1280,26 @@ class BridgeViewModel : ViewModel() {
                     is RelaySequenceStep.Intensity -> {
                         val durationSec = step.durationSec ?: safeDefaultDuration
                         val mappedIntensity = mapIntensityPercent(step.value, address)
+                        val status = protocolStatusFor(address)
                         sendToyAction(
                             intensityAction(
                                 currentMode = modeForAddress(address),
                                 nextIntensity = mappedIntensity,
-                                status = protocolStatusFor(address),
+                                nextSecondaryIntensity = mappedIntensity,
+                                status = status,
                             ),
                             durationSec,
                             address,
                             scheduleAutoStop = false,
                         )
                         deviceIntensities[address] = mappedIntensity
+                        if (status.controlStyle == ToyControlStyle.PatternAndDualIntensity) {
+                            deviceSecondaryIntensities[address] = mappedIntensity
+                        }
                         if (address == selectedAddress) intensity = mappedIntensity
+                        if (address == selectedAddress && status.controlStyle == ToyControlStyle.PatternAndDualIntensity) {
+                            secondaryIntensity = mappedIntensity
+                        }
                         syncRelayDevice()
                         stopped = false
                         delay(durationSec.coerceIn(1, MaxSequenceDurationSec) * 1_000L)
@@ -1351,13 +1392,21 @@ class BridgeViewModel : ViewModel() {
                 else ToyControlAction.Pattern(mappedMode)
             }
             ToyControlStyle.CombinedPatternAndIntensity -> ToyControlAction.Combined(mappedMode, mappedIntensity)
+            ToyControlStyle.PatternAndDualIntensity ->
+                ToyControlAction.DualMotor(mappedMode, mappedIntensity, mappedIntensity)
         }
         sendToyAction(action, autoStopSec, address, scheduleAutoStop)
         deviceModes[address] = mappedMode
         deviceIntensities[address] = mappedIntensity
+        if (status.controlStyle == ToyControlStyle.PatternAndDualIntensity) {
+            deviceSecondaryIntensities[address] = mappedIntensity
+        }
         if (address == selectedAddress) {
             mode = mappedMode
             intensity = mappedIntensity
+            if (status.controlStyle == ToyControlStyle.PatternAndDualIntensity) {
+                secondaryIntensity = mappedIntensity
+            }
         }
         syncRelayDevice()
     }
@@ -1489,6 +1538,9 @@ class BridgeViewModel : ViewModel() {
     fun intensityForAddress(address: String): Int =
         if (address == selectedAddress) intensity else deviceIntensities[address] ?: 0
 
+    fun secondaryIntensityForAddress(address: String): Int =
+        if (address == selectedAddress) secondaryIntensity else deviceSecondaryIntensities[address] ?: intensityForAddress(address)
+
     fun modeLabelForAddress(address: String): String {
         val status = protocolStatusFor(address)
         val targetMode = modeForAddress(address)
@@ -1501,9 +1553,13 @@ class BridgeViewModel : ViewModel() {
     private fun clampCurrentControlValues() {
         mode = mode.coerceIn(1, protocolStatus.modeMax.coerceAtLeast(1))
         intensity = intensity.coerceIn(0, protocolStatus.intensityMax.coerceAtLeast(1))
+        secondaryIntensity = secondaryIntensity.coerceIn(0, protocolStatus.intensityMax.coerceAtLeast(1))
         if (selectedAddress.isNotBlank()) {
             deviceModes[selectedAddress] = mode
             deviceIntensities[selectedAddress] = intensity
+            if (protocolStatus.controlStyle == ToyControlStyle.PatternAndDualIntensity) {
+                deviceSecondaryIntensities[selectedAddress] = secondaryIntensity
+            }
         }
     }
 
@@ -1527,31 +1583,57 @@ class BridgeViewModel : ViewModel() {
     }
 
     private fun patternAction(nextMode: Int): ToyControlAction =
-        when (protocolStatus.controlStyle) {
-            ToyControlStyle.IntensityOnly -> ToyControlAction.Intensity(intensity)
+        patternAction(nextMode, intensity, secondaryIntensity, protocolStatus)
+
+    private fun patternAction(
+        nextMode: Int,
+        currentIntensity: Int,
+        currentSecondaryIntensity: Int,
+        status: BleProtocolStatus,
+    ): ToyControlAction =
+        when (status.controlStyle) {
+            ToyControlStyle.IntensityOnly -> ToyControlAction.Intensity(currentIntensity)
             ToyControlStyle.PatternOnly,
             ToyControlStyle.ExclusivePatternOrIntensity -> ToyControlAction.Pattern(nextMode)
-            ToyControlStyle.CombinedPatternAndIntensity -> ToyControlAction.Combined(nextMode, intensity)
+            ToyControlStyle.CombinedPatternAndIntensity -> ToyControlAction.Combined(nextMode, currentIntensity)
+            ToyControlStyle.PatternAndDualIntensity ->
+                dualIntensityAction(nextMode, currentIntensity, currentSecondaryIntensity, status)
         }
 
     private fun intensityAction(nextIntensity: Int): ToyControlAction =
         intensityAction(
             currentMode = mode,
             nextIntensity = nextIntensity,
+            nextSecondaryIntensity = nextIntensity,
             status = protocolStatus,
         )
 
     private fun intensityAction(
         currentMode: Int,
         nextIntensity: Int,
+        nextSecondaryIntensity: Int,
         status: BleProtocolStatus,
     ): ToyControlAction =
         when (status.controlStyle) {
             ToyControlStyle.PatternOnly -> ToyControlAction.Pattern(currentMode)
             ToyControlStyle.CombinedPatternAndIntensity -> ToyControlAction.Combined(currentMode, nextIntensity)
+            ToyControlStyle.PatternAndDualIntensity ->
+                dualIntensityAction(currentMode, nextIntensity, nextSecondaryIntensity, status)
             ToyControlStyle.IntensityOnly,
             ToyControlStyle.ExclusivePatternOrIntensity -> ToyControlAction.Intensity(nextIntensity)
         }
+
+    private fun dualIntensityAction(
+        currentMode: Int,
+        primaryIntensity: Int,
+        secondaryIntensity: Int,
+        status: BleProtocolStatus,
+    ): ToyControlAction =
+        ToyControlAction.DualMotor(
+            mode = currentMode.coerceIn(1, status.modeMax.coerceAtLeast(1)),
+            internalIntensity = primaryIntensity.coerceIn(0, status.intensityMax.coerceAtLeast(1)),
+            externalIntensity = secondaryIntensity.coerceIn(0, status.intensityMax.coerceAtLeast(1)),
+        )
 
     private fun scheduleControlTrial(action: ToyControlAction) {
         if (!protocolStatus.controllable || connectionState != BleConnectionState.Ready) return
@@ -1569,6 +1651,9 @@ class BridgeViewModel : ViewModel() {
             controllerFor(address).sendAction(action)
             deviceModes[address] = mode
             deviceIntensities[address] = intensity
+            if (protocolStatus.controlStyle == ToyControlStyle.PatternAndDualIntensity) {
+                deviceSecondaryIntensities[address] = secondaryIntensity
+            }
             syncRelayDevice()
             cancelAutoStop(address)
             startKeepAlive(action, address)

@@ -723,7 +723,8 @@ private fun DeviceRow(
             val hint = when {
                 device.broadcastProtocolName.isNotBlank() -> "已识别：${device.broadcastProtocolName}"
                 device.connectable -> "可连接"
-                else -> "可尝试连接"
+                device.serviceUuids.isNotEmpty() -> "可尝试连接"
+                else -> "暂不支持连接"
             }
             Text(
                 hint,
@@ -748,7 +749,8 @@ private fun DeviceRow(
                     runtimeState == ToyRuntimeState.Connecting -> "连接中"
                     device.broadcastProtocolName.isNotBlank() -> "连接"
                     device.connectable -> "连接"
-                    else -> "尝试连接"
+                    device.serviceUuids.isNotEmpty() -> "尝试连接"
+                    else -> "暂不支持"
                 }
             )
         }
@@ -767,6 +769,8 @@ private fun ControlRoom(vm: BridgeViewModel, toy: ManagedToy? = null) {
                 !status.controllable -> "还没有可用的控制指令。"
                 status.controlStyle == ToyControlStyle.ExclusivePatternOrIntensity ->
                     "节奏和强度是两套独立控制。"
+                status.controlStyle == ToyControlStyle.PatternAndDualIntensity ->
+                    "选择节奏，也可以分别调节两个部位。"
                 status.controlStyle == ToyControlStyle.CombinedPatternAndIntensity ->
                     "选择节奏并调节强度。"
                 status.controlStyle == ToyControlStyle.PatternOnly ->
@@ -790,6 +794,11 @@ private fun ControlRoom(vm: BridgeViewModel, toy: ManagedToy? = null) {
                 PatternSelector(vm, address, status, targetMode)
                 Spacer(Modifier.height(14.dp))
                 IntensityControl(vm, address, status, targetIntensity)
+            }
+            ToyControlStyle.PatternAndDualIntensity -> {
+                PatternSelector(vm, address, status, targetMode)
+                Spacer(Modifier.height(14.dp))
+                DualIntensityControl(vm, address, status)
             }
             ToyControlStyle.PatternOnly -> PatternSelector(vm, address, status, targetMode)
             ToyControlStyle.IntensityOnly -> IntensityControl(vm, address, status, targetIntensity)
@@ -909,6 +918,44 @@ private fun IntensityControl(
         steps = (maxIntensity - 1).coerceAtLeast(0),
         enabled = status.controllable,
     )
+}
+
+@Composable
+private fun DualIntensityControl(
+    vm: BridgeViewModel,
+    address: String,
+    status: BleProtocolStatus,
+) {
+    val names = status.channelNames.ifEmpty { listOf("内侧", "外侧") }
+    val values = listOf(
+        if (address.isBlank()) vm.intensity else vm.intensityForAddress(address),
+        if (address.isBlank()) vm.secondaryIntensity else vm.secondaryIntensityForAddress(address),
+    )
+    val maxIntensity = status.intensityMax.coerceAtLeast(1)
+    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        names.take(2).forEachIndexed { index, name ->
+            Column {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(name, color = TextMain, fontWeight = FontWeight.SemiBold)
+                    Text("${values[index]}/$maxIntensity", color = Rose, fontWeight = FontWeight.Bold)
+                }
+                Slider(
+                    value = values[index].toFloat(),
+                    onValueChange = {
+                        vm.updateChannelIntensity(address, index, it.roundToInt())
+                    },
+                    modifier = Modifier.testTag("channel_${index + 1}_intensity_slider"),
+                    valueRange = 0f..maxIntensity.toFloat(),
+                    steps = (maxIntensity - 1).coerceAtLeast(0),
+                    enabled = status.controllable,
+                )
+            }
+        }
+    }
 }
 
 @Composable

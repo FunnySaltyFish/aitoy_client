@@ -42,14 +42,19 @@ enum class ToyControlStyle {
     PatternOnly,
     ExclusivePatternOrIntensity,
     CombinedPatternAndIntensity,
+    PatternAndDualIntensity,
 }
 
 sealed interface ToyControlAction {
     data class Pattern(val mode: Int) : ToyControlAction
     data class Intensity(val value: Int) : ToyControlAction
     data class Combined(val mode: Int, val intensity: Int) : ToyControlAction
+    data class DualMotor(val mode: Int, val internalIntensity: Int, val externalIntensity: Int) : ToyControlAction
     data object Stop : ToyControlAction
 }
+
+internal fun ToyControlAction.DualMotor.strongestIntensity(maxIntensity: Int): Int =
+    internalIntensity.coerceAtLeast(externalIntensity).coerceIn(0, maxIntensity.coerceAtLeast(1))
 
 data class BleProtocolStatus(
     val id: String = "",
@@ -63,6 +68,7 @@ data class BleProtocolStatus(
     val modeLabel: String = "节奏",
     val modeNames: List<String> = emptyList(),
     val intensityLabel: String = "强度",
+    val channelNames: List<String> = emptyList(),
     val automatic: Boolean = false,
     val repeatIntervalMs: Int = 0,
 )

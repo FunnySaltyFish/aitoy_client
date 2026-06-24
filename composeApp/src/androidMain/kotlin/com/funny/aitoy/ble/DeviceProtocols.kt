@@ -92,14 +92,23 @@ private object WeVibeSyncLiteProtocol : BleDeviceProtocol {
     private val serviceUuid = uuid("f000bb03-0451-4000-b000-000000000000")
     private val txUuid = uuid("f000c000-0451-4000-b000-000000000000")
     private val rxUuid = uuid("f000b000-0451-4000-b000-000000000000")
+    private val patternCodes = intArrayOf(0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x0E, 0x0F, 0x10, 0x11)
+    private var currentPattern = 1
+    private var currentInternalIntensity = 0
+    private var currentExternalIntensity = 0
 
     override val status = BleProtocolStatus(
         id = "wevibe_sync_lite",
         displayName = "We-Vibe Sync Lite",
         controllable = true,
         intensityMax = 30,
-        supportsMode = false,
-        controlStyle = ToyControlStyle.IntensityOnly,
+        supportsMode = true,
+        modeMax = patternCodes.size,
+        controlStyle = ToyControlStyle.PatternAndDualIntensity,
+        modeLabel = "预设节奏",
+        modeNames = listOf("长振", "峰值", "脉冲", "回响", "波浪", "潮汐", "冲浪", "弹跳", "按摩", "挑逗"),
+        intensityLabel = "整体强度",
+        channelNames = listOf("内侧", "外侧"),
         automatic = true,
     )
 
@@ -111,20 +120,49 @@ private object WeVibeSyncLiteProtocol : BleDeviceProtocol {
                 fingerprint.characteristicUuids.contains(rxUuid)
     }
 
+    override fun initialize(fingerprint: BleGattFingerprint): List<BleProtocolOperation> {
+        currentPattern = 1
+        currentInternalIntensity = 0
+        currentExternalIntensity = 0
+        return emptyList()
+    }
+
     override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
         when (action) {
-            is ToyControlAction.Intensity -> listOf(command(action.value))
-            is ToyControlAction.Combined -> listOf(command(action.intensity))
-            is ToyControlAction.Pattern -> emptyList()
-            ToyControlAction.Stop -> listOf(command(0))
+            is ToyControlAction.Intensity -> listOf(command(currentPattern, action.value, action.value))
+            is ToyControlAction.Combined -> listOf(command(action.mode, action.intensity, action.intensity))
+            is ToyControlAction.DualMotor -> listOf(
+                command(action.mode, action.internalIntensity, action.externalIntensity),
+            )
+            is ToyControlAction.Pattern -> listOf(
+                command(action.mode, currentInternalIntensity, currentExternalIntensity),
+            )
+            ToyControlAction.Stop -> listOf(stopCommand())
         }
 
-    private fun command(intensity: Int): BleProtocolOperation.Write {
-        val speed = intensity.coerceIn(0, status.intensityMax)
-        val payload = if (speed == 0) {
-            bytes(0x0F, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00)
+    private fun command(mode: Int, internalIntensity: Int, externalIntensity: Int): BleProtocolOperation.Write {
+        currentPattern = mode.coerceIn(1, patternCodes.size)
+        currentInternalIntensity = internalIntensity.coerceIn(0, status.intensityMax)
+        currentExternalIntensity = externalIntensity.coerceIn(0, status.intensityMax)
+        val motorBits = when {
+            currentInternalIntensity > 0 && currentExternalIntensity > 0 -> 0x03
+            currentInternalIntensity > 0 -> 0x02
+            currentExternalIntensity > 0 -> 0x01
+            else -> 0x00
+        }
+        val payload = if (motorBits == 0) {
+            stopPayload()
         } else {
-            bytes(0x0F, 0x03, 0x00, speed, speed, 0x03, 0x00, 0x00)
+            bytes(
+                0x0F,
+                patternCodes[currentPattern - 1],
+                0x00,
+                currentInternalIntensity,
+                currentExternalIntensity,
+                motorBits,
+                0x00,
+                0x00,
+            )
         }
         return BleProtocolOperation.Write(
             characteristicUuid = txUuid,
@@ -132,6 +170,18 @@ private object WeVibeSyncLiteProtocol : BleDeviceProtocol {
             withResponse = true,
         )
     }
+
+    private fun stopCommand(): BleProtocolOperation.Write {
+        currentInternalIntensity = 0
+        currentExternalIntensity = 0
+        return BleProtocolOperation.Write(
+            characteristicUuid = txUuid,
+            bytes = stopPayload(),
+            withResponse = true,
+        )
+    }
+
+    private fun stopPayload(): ByteArray = bytes(0x0F, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00)
 }
 
 private object SistalkMixPwmProtocol : BleDeviceProtocol {
@@ -167,6 +217,7 @@ private object SistalkMixPwmProtocol : BleDeviceProtocol {
         when (action) {
             is ToyControlAction.Intensity -> listOf(updateAllChannels(action.value))
             is ToyControlAction.Combined -> listOf(updateChannel(action.mode, action.intensity))
+            is ToyControlAction.DualMotor -> listOf(updateAllChannels(action.strongestIntensity(status.intensityMax)))
             is ToyControlAction.Pattern -> listOf(updateChannel(action.mode, status.intensityMax.coerceAtLeast(1)))
             ToyControlAction.Stop -> stop()?.let(::listOf).orEmpty()
         }
@@ -245,6 +296,7 @@ private object SistalkMonsterPartyProtocol : BleDeviceProtocol {
         when (action) {
             is ToyControlAction.Intensity -> listOf(updateAllChannels(action.value))
             is ToyControlAction.Combined -> listOf(updateChannel(action.mode, action.intensity))
+            is ToyControlAction.DualMotor -> listOf(updateAllChannels(action.strongestIntensity(status.intensityMax)))
             is ToyControlAction.Pattern -> listOf(updateChannel(action.mode, status.intensityMax.coerceAtLeast(1)))
             ToyControlAction.Stop -> stop()?.let(::listOf).orEmpty()
         }
@@ -377,6 +429,7 @@ private sealed class SistalkMonsterPubProtocolBase(
         when (action) {
             is ToyControlAction.Intensity -> listOf(updateAllChannels(action.value))
             is ToyControlAction.Combined -> listOf(updateChannel(action.mode, action.intensity))
+            is ToyControlAction.DualMotor -> listOf(updateAllChannels(action.strongestIntensity(status.intensityMax)))
             is ToyControlAction.Pattern -> listOf(updateChannel(action.mode, status.intensityMax.coerceAtLeast(1)))
             ToyControlAction.Stop -> stop()?.let(::listOf).orEmpty()
         }
@@ -439,6 +492,7 @@ private object SvakomQhSx045Protocol : BleDeviceProtocol {
         when (action) {
             is ToyControlAction.Intensity -> listOf(command(0x01, action.value.coerceIn(0, status.intensityMax)))
             is ToyControlAction.Combined -> listOf(command(0x01, action.intensity.coerceIn(0, status.intensityMax)))
+            is ToyControlAction.DualMotor -> listOf(command(0x01, action.strongestIntensity(status.intensityMax)))
             is ToyControlAction.Pattern -> emptyList()
             ToyControlAction.Stop -> listOf(command(0x00, 0x00))
         }
@@ -482,6 +536,7 @@ private object MizzzeeXhtkjProtocol : BleDeviceProtocol {
         when (action) {
             is ToyControlAction.Intensity -> listOf(command(action.value.coerceIn(0, status.intensityMax)))
             is ToyControlAction.Combined -> listOf(command(action.intensity.coerceIn(0, status.intensityMax)))
+            is ToyControlAction.DualMotor -> listOf(command(action.strongestIntensity(status.intensityMax)))
             is ToyControlAction.Pattern -> emptyList()
             ToyControlAction.Stop -> listOf(command(0))
         }
@@ -567,6 +622,7 @@ private object SenseeCcpa10S2Protocol : BleDeviceProtocol {
         when (action) {
             is ToyControlAction.Combined -> listOf(command(action.mode, action.intensity))
             is ToyControlAction.Intensity -> listOf(command(2, action.value))
+            is ToyControlAction.DualMotor -> listOf(command(action.mode, action.strongestIntensity(status.intensityMax)))
             is ToyControlAction.Pattern -> listOf(command(action.mode, status.intensityMax.coerceAtLeast(1)))
             ToyControlAction.Stop -> listOf(write(suctionOff), write(vibrationOff))
         }
@@ -637,6 +693,7 @@ private object KissToyProtocol : BleDeviceProtocol {
         when (action) {
             is ToyControlAction.Combined -> run(action.mode, action.intensity)
             is ToyControlAction.Intensity -> run(1, action.value)
+            is ToyControlAction.DualMotor -> run(action.mode, action.strongestIntensity(status.intensityMax))
             is ToyControlAction.Pattern -> run(action.mode, 30)
             ToyControlAction.Stop -> stop()
         }
@@ -750,6 +807,7 @@ internal class ManualBleProtocol(
             is ToyControlAction.Pattern -> template.commandBytes(action.mode, 1)
             is ToyControlAction.Intensity -> template.commandBytes(1, action.value)
             is ToyControlAction.Combined -> template.commandBytes(action.mode, action.intensity)
+            is ToyControlAction.DualMotor -> template.commandBytes(action.mode, action.strongestIntensity(status.intensityMax))
             ToyControlAction.Stop -> template.stopBytes()
         }
         return listOf(BleProtocolOperation.Write(writeUuid, bytes, template.writeWithResponse))
@@ -778,6 +836,7 @@ private object SatisfyerProtocol : BleDeviceProtocol {
         when (action) {
             is ToyControlAction.Intensity -> run(action.value)
             is ToyControlAction.Combined -> run(action.intensity)
+            is ToyControlAction.DualMotor -> run(action.strongestIntensity(status.intensityMax))
             is ToyControlAction.Pattern -> emptyList()
             ToyControlAction.Stop -> listOf(speedCommand(0), BleProtocolOperation.Write(controlUuid, byteArrayOf(0x07), withResponse = true))
         }
@@ -815,6 +874,7 @@ private object OhMiBodEsca2Protocol : BleDeviceProtocol {
         when (action) {
             is ToyControlAction.Intensity -> listOf(command(action.value))
             is ToyControlAction.Combined -> listOf(command(action.intensity))
+            is ToyControlAction.DualMotor -> listOf(command(action.strongestIntensity(status.intensityMax)))
             is ToyControlAction.Pattern -> emptyList()
             ToyControlAction.Stop -> listOf(command(0))
         }
@@ -849,6 +909,7 @@ private object PinkPunchProtocol : BleDeviceProtocol {
         when (action) {
             is ToyControlAction.Intensity -> listOf(command(0x09, action.value))
             is ToyControlAction.Combined -> listOf(command(0x09, action.intensity))
+            is ToyControlAction.DualMotor -> listOf(command(0x09, action.strongestIntensity(status.intensityMax)))
             is ToyControlAction.Pattern -> emptyList()
             ToyControlAction.Stop -> listOf(command(0x09, 0))
         }
@@ -881,6 +942,7 @@ private object LovenutsProtocol : BleDeviceProtocol {
         when (action) {
             is ToyControlAction.Intensity -> listOf(patternCommand(action.value.coerceIn(0, status.intensityMax)))
             is ToyControlAction.Combined -> listOf(patternCommand(action.intensity.coerceIn(0, status.intensityMax)))
+            is ToyControlAction.DualMotor -> listOf(patternCommand(action.strongestIntensity(status.intensityMax)))
             is ToyControlAction.Pattern -> emptyList()
             ToyControlAction.Stop -> listOf(patternCommand(speed = 0))
         }
@@ -923,6 +985,7 @@ private object JeJoueNuoProtocol : BleDeviceProtocol {
         when (action) {
             is ToyControlAction.Combined -> listOf(command(action.mode.coerceIn(1, status.modeMax), action.intensity.coerceIn(0, status.intensityMax)))
             is ToyControlAction.Intensity -> listOf(command(pattern = 1, speed = action.value.coerceIn(0, status.intensityMax)))
+            is ToyControlAction.DualMotor -> listOf(command(action.mode.coerceIn(1, status.modeMax), action.strongestIntensity(status.intensityMax)))
             is ToyControlAction.Pattern -> listOf(command(pattern = action.mode.coerceIn(1, status.modeMax), speed = status.intensityMax.coerceAtLeast(1)))
             ToyControlAction.Stop -> listOf(command(pattern = 1, speed = 0))
         }
@@ -972,6 +1035,7 @@ private object LovenseProtocol : BleDeviceProtocol {
         when (action) {
             is ToyControlAction.Intensity -> listOf(command("Vibrate:${action.value.coerceIn(0, status.intensityMax)};"))
             is ToyControlAction.Combined -> listOf(command("Vibrate:${action.intensity.coerceIn(0, status.intensityMax)};"))
+            is ToyControlAction.DualMotor -> listOf(command("Vibrate:${action.strongestIntensity(status.intensityMax)};"))
             is ToyControlAction.Pattern -> emptyList()
             ToyControlAction.Stop -> listOf(command("Vibrate:0;"))
         }
@@ -1045,6 +1109,7 @@ private object AnkniProtocol : BleDeviceProtocol {
         when (action) {
             is ToyControlAction.Intensity -> listOf(controlCommand(action.value.coerceIn(1, status.intensityMax)))
             is ToyControlAction.Combined -> listOf(controlCommand(action.intensity.coerceIn(1, status.intensityMax)))
+            is ToyControlAction.DualMotor -> listOf(controlCommand(action.strongestIntensity(status.intensityMax).coerceAtLeast(1)))
             is ToyControlAction.Pattern -> emptyList()
             ToyControlAction.Stop -> listOf(controlCommand(0))
         }
@@ -1182,6 +1247,8 @@ private class AnkniDdddProfileProtocol(
                 listOf(write(ankniAaFrame(slideCommand, *classicSlideValues(action.value, profile.motorNum))))
             is ToyControlAction.Combined ->
                 listOf(write(ankniAaFrame(profile.modeCommand, *classicModeValues(action.mode, profile.motorNum))))
+            is ToyControlAction.DualMotor ->
+                listOf(write(ankniAaFrame(profile.modeCommand, *classicModeValues(action.mode, profile.motorNum))))
             ToyControlAction.Stop ->
                 listOf(
                     write(ankniAaFrame(profile.modeCommand, *IntArray(profile.motorNum))),
@@ -1198,6 +1265,8 @@ private class AnkniDdddProfileProtocol(
                 tqjDControl(1, action.value)
             is ToyControlAction.Combined ->
                 tqjDControl(action.mode, action.intensity)
+            is ToyControlAction.DualMotor ->
+                tqjDControl(action.mode, action.strongestIntensity(status.intensityMax))
             ToyControlAction.Stop ->
                 listOf(write(ankniAaFrame(slideCommand, 0, 0, 0, 0)))
         }
@@ -1261,6 +1330,8 @@ private object AnkniYwtdProtocol : BleDeviceProtocol {
             is ToyControlAction.Intensity ->
                 listOf(write(ankniAaFrame(SLIDE_COMMAND, action.value.coerceIn(0, status.intensityMax), SLIDE_DURATION)))
             is ToyControlAction.Combined ->
+                listOf(write(ankniAaFrame(MODE_COMMAND, action.mode.coerceIn(1, status.modeMax))))
+            is ToyControlAction.DualMotor ->
                 listOf(write(ankniAaFrame(MODE_COMMAND, action.mode.coerceIn(1, status.modeMax))))
             ToyControlAction.Stop ->
                 listOf(write(ankniAaFrame(MODE_COMMAND, 0)))
