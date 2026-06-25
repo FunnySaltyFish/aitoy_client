@@ -189,6 +189,16 @@ private object SistalkMixPwmProtocol : BleDeviceProtocol {
     private val sistalkV2ServiceUuid = uuid("00009000-0000-1000-8000-00805f9b34fb")
     private val sistalkV2OpUuid = uuid("00009001-0000-1000-8000-00805f9b34fb")
     private val sistalkV2FunctionUuid = uuid("00009002-0000-1000-8000-00805f9b34fb")
+
+    // MonsterPub V1 Hub 的电机服务/特征。这类设备同样会暴露 2b12，但向 2b12 写入会让其在 ~4 秒后掉电关机
+    // （2026-06-24 23:35 白夜魔炮 Trace：写 2b12 → status=8 链路超时）。因此只要存在 6000 电机服务就禁用 Mix PWM，
+    // 改走官方 6003/600a/6001 路线。
+    private val sistalkMotorServiceUuid = uuid("00006000-0000-1000-8000-00805f9b34fb")
+    private val sistalkMotorWriteUuids = setOf(
+        uuid("0000600a-0000-1000-8000-00805f9b34fb"),
+        uuid("00006003-0000-1000-8000-00805f9b34fb"),
+        uuid("00006001-0000-1000-8000-00805f9b34fb"),
+    )
     private val currentPwm = IntArray(2)
 
     override val status = BleProtocolStatus(
@@ -206,7 +216,8 @@ private object SistalkMixPwmProtocol : BleDeviceProtocol {
 
     override fun matches(fingerprint: BleGattFingerprint): Boolean =
         fingerprint.characteristicUuids.contains(pwmUuid) &&
-                !fingerprint.hasSistalkV2Gatt()
+                !fingerprint.hasSistalkV2Gatt() &&
+                !fingerprint.hasSistalkMotorService()
 
     override fun initialize(fingerprint: BleGattFingerprint): List<BleProtocolOperation> {
         currentPwm.fill(0)
@@ -253,6 +264,10 @@ private object SistalkMixPwmProtocol : BleDeviceProtocol {
         serviceUuids.contains(sistalkV2ServiceUuid) &&
                 characteristicUuids.contains(sistalkV2OpUuid) &&
                 characteristicUuids.contains(sistalkV2FunctionUuid)
+
+    private fun BleGattFingerprint.hasSistalkMotorService(): Boolean =
+        serviceUuids.contains(sistalkMotorServiceUuid) ||
+                characteristicUuids.any { it in sistalkMotorWriteUuids }
 
 }
 
@@ -352,6 +367,9 @@ private object SistalkMonsterPubDualMotorProtocol : SistalkMonsterPubProtocolBas
     writeUuid = uuid("00006003-0000-1000-8000-00805f9b34fb"),
     channelCount = 2,
     intensityMax = 100,
+    // 白夜魔炮等双电机 Hub：吮吸 + 震动两个模式，各有档位。
+    // 通道顺序（字节0=吮吸 / 字节1=震动）以真机反馈为准，如反了把这里两项对调即可。
+    channelNames = listOf("吮吸", "震动"),
 )
 
 private object SistalkMonsterPubSingleMotorProtocol : SistalkMonsterPubProtocolBase(
@@ -370,8 +388,14 @@ private sealed class SistalkMonsterPubProtocolBase(
     private val channelCount: Int,
     private val intensityMax: Int,
     private val useLegacyLevelMap: Boolean = false,
+    channelNames: List<String>? = null,
 ) : BleDeviceProtocol {
     private val motorServiceUuid = uuid("00006000-0000-1000-8000-00805f9b34fb")
+    // 官方 BleDeviceV1._fetchInfo 在连接后会订阅心跳(600b)与读取电量(6051)等通知通道，
+    // 让设备认定为合法 App 会话。缺少该握手是历史「6000 路线无反应」的主要原因。
+    private val heartbeatUuid = uuid("0000600b-0000-1000-8000-00805f9b34fb")
+    private val batteryNotifyUuid = uuid("00006051-0000-1000-8000-00805f9b34fb")
+    private val resolvedChannelNames = channelNames
     private val currentPwm = IntArray(channelCount)
     private val levelMap = intArrayOf(
         0,
@@ -410,7 +434,7 @@ private sealed class SistalkMonsterPubProtocolBase(
             ToyControlStyle.IntensityOnly
         },
         modeLabel = "部位",
-        modeNames = (1..channelCount).map { "部位 $it" },
+        modeNames = resolvedChannelNames ?: (1..channelCount).map { "部位 $it" },
         automatic = true,
     )
 
@@ -422,7 +446,15 @@ private sealed class SistalkMonsterPubProtocolBase(
 
     override fun initialize(fingerprint: BleGattFingerprint): List<BleProtocolOperation> {
         currentPwm.fill(0)
-        return emptyList()
+        // 还原官方 V1 连接握手：订阅设备实际存在的心跳/电量通知通道，再开始电机写入。
+        return buildList {
+            if (fingerprint.characteristicUuids.contains(heartbeatUuid)) {
+                add(BleProtocolOperation.SubscribeNotify(heartbeatUuid))
+            }
+            if (fingerprint.characteristicUuids.contains(batteryNotifyUuid)) {
+                add(BleProtocolOperation.SubscribeNotify(batteryNotifyUuid))
+            }
+        }
     }
 
     override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
