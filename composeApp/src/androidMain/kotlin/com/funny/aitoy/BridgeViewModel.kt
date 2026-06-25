@@ -118,6 +118,13 @@ private sealed interface RelaySequenceStep {
         val durationSec: Int?,
     ) : RelaySequenceStep
 
+    data class Dual(
+        val mode: Int,
+        val internalIntensity: Int,
+        val externalIntensity: Int,
+        val durationSec: Int?,
+    ) : RelaySequenceStep
+
     data class Pattern(val mode: Int, val durationSec: Int?) : RelaySequenceStep
 
     data class Intensity(val value: Int, val durationSec: Int?) : RelaySequenceStep
@@ -1236,62 +1243,79 @@ class BridgeViewModel : ViewModel() {
         defaultDurationSec: Int?,
     ) {
         val safeDefaultDuration = (defaultDurationSec ?: 30).coerceIn(1, MaxSequenceDurationSec)
-        var stopped = false
+        var running = false
         try {
             steps.forEach { step ->
                 when (step) {
                     is RelaySequenceStep.Set -> {
                         val durationSec = step.durationSec ?: safeDefaultDuration
-                        sendToySet(
+                        delayControlWarmup(address)
+                        val action = sendToySet(
                             intensityPercent = step.intensity,
                             requestedMode = step.mode,
                             autoStopSec = durationSec,
                             address = address,
                             scheduleAutoStop = false,
                         )
-                        stopped = false
+                        running = actionKeepsDeviceRunning(action)
                         delay(durationSec.coerceIn(1, MaxSequenceDurationSec) * 1_000L)
-                        sendToyStop(address)
-                        stopped = true
+                    }
+                    is RelaySequenceStep.Dual -> {
+                        val durationSec = step.durationSec ?: safeDefaultDuration
+                        val status = protocolStatusFor(address)
+                        val mappedMode = step.mode.coerceIn(1, status.modeMax.coerceAtLeast(1))
+                        val mappedInternalIntensity = mapIntensityPercent(step.internalIntensity, address)
+                        val mappedExternalIntensity = mapIntensityPercent(step.externalIntensity, address)
+                        val action = dualIntensityAction(
+                            currentMode = mappedMode,
+                            primaryIntensity = mappedInternalIntensity,
+                            secondaryIntensity = mappedExternalIntensity,
+                            status = status,
+                        )
+                        delayControlWarmup(address)
+                        sendToyAction(action, durationSec, address, scheduleAutoStop = false)
+                        deviceModes[address] = mappedMode
+                        deviceIntensities[address] = mappedInternalIntensity
+                        deviceSecondaryIntensities[address] = mappedExternalIntensity
+                        if (address == selectedAddress) {
+                            mode = mappedMode
+                            intensity = mappedInternalIntensity
+                            secondaryIntensity = mappedExternalIntensity
+                        }
+                        syncRelayDevice()
+                        running = actionKeepsDeviceRunning(action)
+                        delay(durationSec.coerceIn(1, MaxSequenceDurationSec) * 1_000L)
                     }
                     is RelaySequenceStep.Pattern -> {
                         val durationSec = step.durationSec ?: safeDefaultDuration
                         val status = protocolStatusFor(address)
                         val mappedMode = step.mode.coerceIn(1, status.modeMax.coerceAtLeast(1))
-                        sendToyAction(
-                            patternAction(
-                                nextMode = mappedMode,
-                                currentIntensity = intensityForAddress(address),
-                                currentSecondaryIntensity = secondaryIntensityForAddress(address),
-                                status = status,
-                            ),
-                            durationSec,
-                            address,
-                            scheduleAutoStop = false,
+                        val action = patternAction(
+                            nextMode = mappedMode,
+                            currentIntensity = intensityForAddress(address),
+                            currentSecondaryIntensity = secondaryIntensityForAddress(address),
+                            status = status,
                         )
+                        delayControlWarmup(address)
+                        sendToyAction(action, durationSec, address, scheduleAutoStop = false)
                         deviceModes[address] = mappedMode
                         if (address == selectedAddress) mode = mappedMode
                         syncRelayDevice()
-                        stopped = false
+                        running = actionKeepsDeviceRunning(action)
                         delay(durationSec.coerceIn(1, MaxSequenceDurationSec) * 1_000L)
-                        sendToyStop(address)
-                        stopped = true
                     }
                     is RelaySequenceStep.Intensity -> {
                         val durationSec = step.durationSec ?: safeDefaultDuration
                         val mappedIntensity = mapIntensityPercent(step.value, address)
                         val status = protocolStatusFor(address)
-                        sendToyAction(
-                            intensityAction(
-                                currentMode = modeForAddress(address),
-                                nextIntensity = mappedIntensity,
-                                nextSecondaryIntensity = mappedIntensity,
-                                status = status,
-                            ),
-                            durationSec,
-                            address,
-                            scheduleAutoStop = false,
+                        val action = intensityAction(
+                            currentMode = modeForAddress(address),
+                            nextIntensity = mappedIntensity,
+                            nextSecondaryIntensity = mappedIntensity,
+                            status = status,
                         )
+                        delayControlWarmup(address)
+                        sendToyAction(action, durationSec, address, scheduleAutoStop = false)
                         deviceIntensities[address] = mappedIntensity
                         if (status.controlStyle == ToyControlStyle.PatternAndDualIntensity) {
                             deviceSecondaryIntensities[address] = mappedIntensity
@@ -1301,20 +1325,18 @@ class BridgeViewModel : ViewModel() {
                             secondaryIntensity = mappedIntensity
                         }
                         syncRelayDevice()
-                        stopped = false
+                        running = actionKeepsDeviceRunning(action)
                         delay(durationSec.coerceIn(1, MaxSequenceDurationSec) * 1_000L)
-                        sendToyStop(address)
-                        stopped = true
                     }
                     is RelaySequenceStep.Sleep -> delay(step.durationSec.coerceIn(0, 300) * 1_000L)
                     RelaySequenceStep.Stop -> {
                         sendToyStop(address)
-                        stopped = true
+                        running = false
                     }
                 }
             }
         } finally {
-            if (!stopped) sendToyStop(address)
+            if (running) sendToyStop(address)
         }
     }
 
@@ -1341,6 +1363,17 @@ class BridgeViewModel : ViewModel() {
                     val intensity = args["intensity"]?.coerceIn(0, 100) ?: throw SequenceScriptFormatException()
                     val duration = args["duration"]?.coerceIn(1, MaxSequenceDurationSec)
                     RelaySequenceStep.Set(mode = mode, intensity = intensity, durationSec = duration)
+                }
+                part.startsWith("dual(") && part.endsWith(")") -> {
+                    val args = parseSequenceArguments(part.removePrefix("dual(").removeSuffix(")"))
+                    RelaySequenceStep.Dual(
+                        mode = args["mode"]?.coerceAtLeast(1) ?: throw SequenceScriptFormatException(),
+                        internalIntensity = args["internal"]?.coerceIn(0, 100)
+                            ?: throw SequenceScriptFormatException(),
+                        externalIntensity = args["external"]?.coerceIn(0, 100)
+                            ?: throw SequenceScriptFormatException(),
+                        durationSec = args["duration"]?.coerceIn(1, MaxSequenceDurationSec),
+                    )
                 }
                 part.startsWith("pattern(") && part.endsWith(")") -> {
                     val args = parseSequenceArguments(part.removePrefix("pattern(").removeSuffix(")"))
@@ -1380,7 +1413,7 @@ class BridgeViewModel : ViewModel() {
         autoStopSec: Int,
         address: String = selectedAddress,
         scheduleAutoStop: Boolean = true,
-    ) {
+    ): ToyControlAction {
         val status = protocolStatusFor(address)
         val mappedIntensity = mapIntensityPercent(intensityPercent, address)
         val mappedMode = requestedMode.coerceIn(1, status.modeMax.coerceAtLeast(1))
@@ -1409,6 +1442,7 @@ class BridgeViewModel : ViewModel() {
             }
         }
         syncRelayDevice()
+        return action
     }
 
     private fun mapIntensityPercent(intensityPercent: Int, address: String = selectedAddress): Int {
@@ -1462,6 +1496,13 @@ class BridgeViewModel : ViewModel() {
         cancelAutoStop(address)
         cancelKeepAlive(address)
         controllers[address]?.stopDevice()
+    }
+
+    private suspend fun delayControlWarmup(address: String) {
+        val warmupMs = controllers[address]?.controlWarmupMs() ?: 0L
+        if (warmupMs <= 0L) return
+        appendLog("等待 BLE 通道稳定 ${warmupMs}ms address=$address")
+        delay(warmupMs)
     }
 
     private fun startKeepAlive(action: ToyControlAction, address: String, autoStopSec: Int? = null) {
@@ -1634,6 +1675,15 @@ class BridgeViewModel : ViewModel() {
             internalIntensity = primaryIntensity.coerceIn(0, status.intensityMax.coerceAtLeast(1)),
             externalIntensity = secondaryIntensity.coerceIn(0, status.intensityMax.coerceAtLeast(1)),
         )
+
+    private fun actionKeepsDeviceRunning(action: ToyControlAction): Boolean =
+        when (action) {
+            is ToyControlAction.Intensity -> action.value > 0
+            is ToyControlAction.Combined -> action.intensity > 0
+            is ToyControlAction.DualMotor -> action.internalIntensity > 0 || action.externalIntensity > 0
+            is ToyControlAction.Pattern -> true
+            ToyControlAction.Stop -> false
+        }
 
     private fun scheduleControlTrial(action: ToyControlAction) {
         if (!protocolStatus.controllable || connectionState != BleConnectionState.Ready) return

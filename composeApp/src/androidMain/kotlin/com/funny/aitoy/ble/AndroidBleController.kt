@@ -39,6 +39,7 @@ class AndroidBleController(
     private var activeProtocol: BleDeviceProtocol? = null
     private var activeBroadcastProtocol: BleBroadcastProtocol? = null
     private var protocolReady = false
+    private var gattReadyAtMs = 0L
     private var protocolCandidates = emptyList<BleDeviceProtocol>()
     private var broadcastProtocolCandidates = emptyList<BleBroadcastProtocol>()
     private var protocolCandidateIndex = -1
@@ -249,6 +250,7 @@ class AndroidBleController(
         activeProtocol = null
         activeBroadcastProtocol = null
         protocolReady = false
+        gattReadyAtMs = 0L
         protocolCandidates = emptyList()
         broadcastProtocolCandidates = emptyList()
         protocolCandidateIndex = -1
@@ -305,11 +307,27 @@ class AndroidBleController(
         }
         val protocol = activeProtocol ?: error("当前设备尚无可用的内置协议")
         val commands = protocol.commandsFor(action)
+        val warmupMs = gattControlWarmupMs()
+        if (warmupMs > 0) {
+            trace("GATT 通道刚就绪，延后 ${warmupMs}ms 发送控制 action=$action protocol=${protocol.status.id}")
+            mainHandler.postDelayed(
+                {
+                    if (activeProtocol === protocol && protocolReady) {
+                        trace("GATT 控制 action=$action protocol=${protocol.status.id} operations=${commands.size}")
+                        enqueue(commands)
+                    }
+                },
+                warmupMs,
+            )
+            return
+        }
         trace("GATT 控制 action=$action protocol=${protocol.status.id} operations=${commands.size}")
         enqueue(commands)
     }
 
     fun stopDevice() = sendAction(ToyControlAction.Stop)
+
+    fun controlWarmupMs(): Long = gattControlWarmupMs()
 
     fun reportCurrentProtocolNoResponse(): ProtocolFallbackResult? {
         val failed = activeProtocol?.status ?: activeBroadcastProtocol?.status ?: return null
@@ -504,6 +522,7 @@ class AndroidBleController(
         enqueue(protocol.initialize(fingerprint))
         if (operationQueue.isEmpty()) {
             protocolReady = true
+            gattReadyAtMs = System.currentTimeMillis()
             updateProtocolAttempt(
                 ProtocolAttemptStatus(
                     success = true,
@@ -582,6 +601,7 @@ class AndroidBleController(
         if (config.manualControlEnabled) {
             activeProtocol = ManualBleProtocol(resolvedWriteCharacteristic!!.uuid, config)
             protocolReady = true
+            gattReadyAtMs = System.currentTimeMillis()
             onProtocol(activeProtocol!!.status)
             updateProtocolAttempt(
                 ProtocolAttemptStatus(
@@ -636,6 +656,7 @@ class AndroidBleController(
         activeProtocol = null
         activeBroadcastProtocol = null
         protocolReady = false
+        gattReadyAtMs = 0L
         operationQueue.clear()
         operationInProgress = false
         onProtocol(BleProtocolStatus())
@@ -667,6 +688,7 @@ class AndroidBleController(
         if (operation == null) {
             if (!protocolReady && connectionStateNeedsReady()) {
                 protocolReady = true
+                gattReadyAtMs = System.currentTimeMillis()
                 activeProtocol?.status?.let { status ->
                     updateProtocolAttempt(
                         ProtocolAttemptStatus(
@@ -809,6 +831,12 @@ class AndroidBleController(
     private fun connectionStateNeedsReady(): Boolean =
         activeProtocol != null
 
+    private fun gattControlWarmupMs(): Long {
+        if (gattReadyAtMs <= 0L) return 0L
+        val elapsedMs = System.currentTimeMillis() - gattReadyAtMs
+        return (GATT_CONTROL_WARMUP_MS - elapsedMs).coerceAtLeast(0L)
+    }
+
     private fun updateState(state: BleConnectionState) {
         mainHandler.post { onState(state) }
     }
@@ -856,6 +884,7 @@ class AndroidBleController(
 
     companion object {
         const val TAG = "AiToyBle"
+        private const val GATT_CONTROL_WARMUP_MS = 1_200L
         private val CLIENT_CHARACTERISTIC_CONFIG_UUID =
             UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
     }
