@@ -1,0 +1,185 @@
+---
+defaults:
+  name: Lelo Tiani Harmony
+  features:
+  - id: 0cf2b478-2235-4f83-897c-d8bbebb822e8
+    output:
+      vibrate:
+        value:
+        - 0
+        - 100
+    index: 0
+  - id: 0c89262b-0fcd-48c9-9492-a79758da781f
+    output:
+      vibrate:
+        value:
+        - 0
+        - 100
+    index: 1
+  id: 3bde5251-e810-418a-9ebf-8c3a50684d9a
+configurations:
+- identifier:
+  - IdaWave
+  - Ida Wave
+  name: Lelo Ida Wave
+  features:
+  - id: c887327d-e635-4086-83dc-2f21286f485c
+    output:
+      vibrate:
+        value:
+        - 0
+        - 100
+    index: 0
+  - id: 5bd48a1d-992e-4c69-ae74-ed94505eec58
+    output:
+      rotate:
+        value:
+        - 0
+        - 100
+    index: 1
+  id: a9de3981-7e0d-4b07-b8a9-10031bb6ddae
+- identifier:
+  - TOR3
+  name: Lelo Tor 3
+  features:
+  - id: d0c39af5-62b4-4bfe-a0bb-71f5c2e86c99
+    output:
+      vibrate:
+        value:
+        - 0
+        - 100
+    index: 0
+  id: e0104054-fba7-4ba2-b51f-0f3d95aee1ba
+- identifier:
+  - Hugo2
+  name: Lelo Hugo 2
+  id: 7d302aee-23cd-4681-b9fc-1275250e8a03
+- identifier:
+  - DoubleSonic
+  name: Lelo Enigma Double Sonic
+  features:
+  - id: 8a9d2c49-1486-4515-a0a4-320c9c903ccc
+    output:
+      vibrate:
+        value:
+        - 0
+        - 100
+    index: 0
+  - id: 6fdbe4ae-f0fc-44e0-b0a4-cbb56dee61d8
+    output:
+      rotate:
+        value:
+        - 0
+        - 100
+    index: 1
+  id: c6bf86e6-1054-4c14-a3bb-d415edf81834
+- identifier:
+  - GIGI3
+  name: Lelo Gigi 3
+  features:
+  - id: ea1ca70a-b3e9-41ba-8863-3f74156fef87
+    output:
+      vibrate:
+        value:
+        - 0
+        - 100
+    index: 0
+  id: e722ba98-5c2d-4f77-a56d-ac72b213ed53
+- identifier:
+    - LIV3
+  name: Lelo Liv 3
+  features:
+    - id: 1599b3d9-055d-4c9b-a1fe-7cef1fac4c9e
+      output:
+        vibrate:
+          value:
+            - 0
+            - 100
+      index: 0
+  id: 0daa8498-172c-47bc-b6c4-57414589509b
+- identifier:
+    - SONA3 Cruise
+  name: Lelo Sona 3 Cruise
+  features:
+    - id: ae6da200-6f51-446c-bda7-c0fb733b000a
+      output:
+        vibrate:
+          value:
+            - 0
+            - 100
+      index: 0
+  id: 9d143dc1-654b-4363-bbc8-633210752e6e
+- identifier:
+    - Switch
+  name: Lelo Switch
+  features:
+    - id: 111e5f86-8937-45da-b311-bc254db23d79
+      output:
+        vibrate:
+          value:
+            - 0
+            - 100
+      index: 0
+    - id: aba790a5-43bd-4826-8fd3-731d71e95e48
+      output:
+        vibrate:
+          value:
+            - 0
+            - 100
+      index: 1
+  id: 7f5680f0-e5e2-49f2-b265-db7aad110526
+- identifier:
+    - F2
+  name: Lelo F2S
+  id: d8f3c009-6712-4a2e-98f6-a75170fa4112
+- identifier:
+    - Tiani Twist
+  name: Lelo Tiani Twist
+  features:
+    - id: ea48d476-6d05-475b-bb0e-6bff3952ccaa
+      output:
+        vibrate:
+          value:
+            - 0
+            - 100
+      index: 0
+  id: d8cf8c64-863c-4080-8dd5-98255eca9a7c
+- identifier:
+    - SURFER2
+  name: Lelo Surfer 2
+  features:
+    - id: f9d5ea43-e233-4b7e-8348-7ff95439e7a9
+      output:
+        vibrate:
+          value:
+            - 0
+            - 100
+      index: 0
+  id: 2add7033-66ad-4c69-a63d-8a35b012e958
+- identifier:
+    - Boomerang
+  name: Lelo Boomerang
+  id: 8f386409-748f-4bff-a863-3b9475c4b528
+communication:
+- btle:
+    names:
+    - IdaWave
+    - Ida Wave
+    - TianiHarmony
+    - Tiani Harmony
+    - Tiani Twist
+    - TOR3
+    - Hugo2
+    - DoubleSonic
+    - GIGI3
+    - LIV3
+    - SONA3 Cruise
+    - Switch
+    - SURFER2
+    - F2
+    - Boomerang
+    services:
+      0000fff0-0000-1000-8000-00805f9b34fb:
+        command: 0000fff1-0000-1000-8000-00805f9b34fb
+        tx: 0000fff2-0000-1000-8000-00805f9b34fb
+        whitelist: 00000a11-0000-1000-8000-00805f9b34fb
