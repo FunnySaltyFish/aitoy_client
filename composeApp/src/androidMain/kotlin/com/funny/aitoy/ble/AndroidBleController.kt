@@ -17,6 +17,11 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import com.funny.aitoy.core.platform.AndroidPlatformInit
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import java.util.ArrayDeque
 import java.util.UUID
 
@@ -31,6 +36,7 @@ class AndroidBleController(
     private val context: Context = AndroidPlatformInit.appContext
     private val adapter = context.getSystemService(BluetoothManager::class.java).adapter
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var gatt: BluetoothGatt? = null
     private var template: ProtocolTemplate? = null
     private var connectedName = ""
@@ -152,15 +158,20 @@ class AndroidBleController(
                     .map { it.uuid }
                     .toSet(),
             )
-            protocolCandidates = BleProtocolRegistry.resolveAll(fingerprint)
-            protocolCandidateIndex = -1
-            failedProtocolNames.clear()
-            if (protocolCandidates.isNotEmpty()) {
-                trace("找到 ${protocolCandidates.size} 个候选协议，开始依次确认")
-                tryNextProtocol(fingerprint, gatt, config)
-                return
+            val discoveryOperationId = operationId
+            val discoveredGatt = gatt
+            scope.launch {
+                if (this@AndroidBleController.gatt !== discoveredGatt || operationId != discoveryOperationId) return@launch
+                protocolCandidates = BleProtocolRegistry.resolveAll(fingerprint)
+                protocolCandidateIndex = -1
+                failedProtocolNames.clear()
+                if (protocolCandidates.isNotEmpty()) {
+                    trace("找到 ${protocolCandidates.size} 个候选协议，开始依次确认")
+                    tryNextProtocol(fingerprint, discoveredGatt, config)
+                    return@launch
+                }
+                finishWithManualOrUnsupported(discoveredGatt, config)
             }
-            finishWithManualOrUnsupported(gatt, config)
         }
 
         override fun onCharacteristicWrite(
@@ -440,6 +451,7 @@ class AndroidBleController(
         stopScan()
         advertiser.stop()
         gatt?.let(::closeGatt)
+        scope.cancel()
     }
 
     private fun subscribeNotify(gatt: BluetoothGatt, config: ProtocolTemplate) {
@@ -507,6 +519,26 @@ class AndroidBleController(
                 "${protocol.status.displayName} id=${protocol.status.id} candidates=" +
                 protocolCandidates.joinToString { it.status.id },
         )
+        if (!protocol.status.controllable) {
+            protocol.status.displayName
+                .takeIf { it.isNotBlank() && it !in failedProtocolNames }
+                ?.let(failedProtocolNames::add)
+            trace("已识别 ${protocol.status.displayName}，但当前版本还没有可执行的本地控制器")
+            updateProtocolAttempt(
+                ProtocolAttemptStatus(
+                    active = true,
+                    title = "已识别 ${protocol.status.displayName}",
+                    message = "当前版本还不能直接控制这台设备，正在检查其它可用协议",
+                    protocolName = protocol.status.displayName,
+                    currentIndex = protocolCandidateIndex + 1,
+                    total = protocolCandidates.size,
+                    failedNames = failedProtocolNames.toList(),
+                ),
+            )
+            activeProtocol = null
+            tryNextProtocol(fingerprint, gatt, config, exhaustedByUserFeedback = exhaustedByUserFeedback)
+            return
+        }
         updateProtocolAttempt(
             ProtocolAttemptStatus(
                 active = true,

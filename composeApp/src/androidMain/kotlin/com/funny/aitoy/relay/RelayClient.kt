@@ -37,6 +37,15 @@ data class RelayDevice(
     val modeMax: Int,
     val modeNames: List<String> = emptyList(),
     val controlStyle: String,
+    val features: List<RelayDeviceFeature> = emptyList(),
+)
+
+data class RelayDeviceFeature(
+    val type: String,
+    val min: Int,
+    val max: Int,
+    val index: Int,
+    val label: String = "",
 )
 
 class RelayClient(
@@ -176,6 +185,21 @@ class RelayClient(
                                 .put("modeMax", device.modeMax)
                                 .put("modeNames", JSONArray(device.modeNames))
                                 .put("controlStyle", device.controlStyle)
+                                .put(
+                                    "features",
+                                    JSONArray().apply {
+                                        device.features.forEach { feature ->
+                                            put(
+                                                JSONObject()
+                                                    .put("type", feature.type)
+                                                    .put("min", feature.min)
+                                                    .put("max", feature.max)
+                                                    .put("index", feature.index)
+                                                    .put("label", feature.label),
+                                            )
+                                        }
+                                    },
+                                )
                                 .put("adapterType", "template_ble")
                                 .put("capabilities", JSONArray(listOf("sequence"))),
                         )

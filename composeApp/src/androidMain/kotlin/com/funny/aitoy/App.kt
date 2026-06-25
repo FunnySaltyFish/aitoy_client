@@ -769,6 +769,8 @@ private fun ControlRoom(vm: BridgeViewModel, toy: ManagedToy? = null) {
                 !status.controllable -> "还没有可用的控制指令。"
                 status.controlStyle == ToyControlStyle.ExclusivePatternOrIntensity ->
                     "节奏和强度是两套独立控制。"
+                status.controlStyle == ToyControlStyle.DualIntensityOnly ->
+                    "分别调节两个部位。"
                 status.controlStyle == ToyControlStyle.PatternAndDualIntensity ->
                     "选择节奏，也可以分别调节两个部位。"
                 status.controlStyle == ToyControlStyle.CombinedPatternAndIntensity ->
@@ -785,6 +787,7 @@ private fun ControlRoom(vm: BridgeViewModel, toy: ManagedToy? = null) {
         }
         Spacer(Modifier.height(16.dp))
         when (status.controlStyle) {
+            ToyControlStyle.DualIntensityOnly -> DualIntensityControl(vm, address, status)
             ToyControlStyle.ExclusivePatternOrIntensity -> {
                 PatternSelector(vm, address, status, targetMode)
                 Spacer(Modifier.height(18.dp))

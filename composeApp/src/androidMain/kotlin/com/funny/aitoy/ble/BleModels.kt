@@ -39,6 +39,7 @@ data class ProtocolTemplate(
 
 enum class ToyControlStyle {
     IntensityOnly,
+    DualIntensityOnly,
     PatternOnly,
     ExclusivePatternOrIntensity,
     CombinedPatternAndIntensity,
@@ -69,8 +70,19 @@ data class BleProtocolStatus(
     val modeNames: List<String> = emptyList(),
     val intensityLabel: String = "强度",
     val channelNames: List<String> = emptyList(),
+    val features: List<BleProtocolFeature> = emptyList(),
     val automatic: Boolean = false,
     val repeatIntervalMs: Int = 0,
+) {
+    fun supportsDualIntensity(): Boolean = controlStyle == ToyControlStyle.DualIntensityOnly || controlStyle == ToyControlStyle.PatternAndDualIntensity
+}
+
+data class BleProtocolFeature(
+    val type: String,
+    val min: Int,
+    val max: Int,
+    val index: Int,
+    val label: String = "",
 )
 
 data class ProtocolAttemptStatus(

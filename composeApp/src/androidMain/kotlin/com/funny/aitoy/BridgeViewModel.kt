@@ -38,6 +38,7 @@ import com.funny.aitoy.network.api.service.CreateProtocolShareRequest
 import com.funny.aitoy.relay.RelayClient
 import com.funny.aitoy.relay.RelayCommand
 import com.funny.aitoy.relay.RelayDevice
+import com.funny.aitoy.relay.RelayDeviceFeature
 import com.funny.aitoy.update.AppUpdateInstaller
 import com.funny.data_saver.core.mutableDataSaverStateOf
 import kotlinx.coroutines.CancellationException
@@ -1189,6 +1190,15 @@ class BridgeViewModel : ViewModel() {
                     modeMax = status.modeMax,
                     modeNames = status.modeNames,
                     controlStyle = status.controlStyle.name,
+                    features = status.features.map { feature ->
+                        RelayDeviceFeature(
+                            type = feature.type,
+                            min = feature.min,
+                            max = feature.max,
+                            index = feature.index,
+                            label = feature.label,
+                        )
+                    },
                 )
             }
         )
@@ -1317,11 +1327,11 @@ class BridgeViewModel : ViewModel() {
                         delayControlWarmup(address)
                         sendToyAction(action, durationSec, address, scheduleAutoStop = false)
                         deviceIntensities[address] = mappedIntensity
-                        if (status.controlStyle == ToyControlStyle.PatternAndDualIntensity) {
+                        if (status.supportsDualIntensity()) {
                             deviceSecondaryIntensities[address] = mappedIntensity
                         }
                         if (address == selectedAddress) intensity = mappedIntensity
-                        if (address == selectedAddress && status.controlStyle == ToyControlStyle.PatternAndDualIntensity) {
+                        if (address == selectedAddress && status.supportsDualIntensity()) {
                             secondaryIntensity = mappedIntensity
                         }
                         syncRelayDevice()
@@ -1420,6 +1430,7 @@ class BridgeViewModel : ViewModel() {
         val action = when (status.controlStyle) {
             ToyControlStyle.PatternOnly -> ToyControlAction.Pattern(mappedMode)
             ToyControlStyle.IntensityOnly -> ToyControlAction.Intensity(mappedIntensity)
+            ToyControlStyle.DualIntensityOnly -> ToyControlAction.DualMotor(1, mappedIntensity, mappedIntensity)
             ToyControlStyle.ExclusivePatternOrIntensity -> {
                 if (mappedIntensity > 0) ToyControlAction.Intensity(mappedIntensity)
                 else ToyControlAction.Pattern(mappedMode)
@@ -1431,13 +1442,13 @@ class BridgeViewModel : ViewModel() {
         sendToyAction(action, autoStopSec, address, scheduleAutoStop)
         deviceModes[address] = mappedMode
         deviceIntensities[address] = mappedIntensity
-        if (status.controlStyle == ToyControlStyle.PatternAndDualIntensity) {
+        if (status.supportsDualIntensity()) {
             deviceSecondaryIntensities[address] = mappedIntensity
         }
         if (address == selectedAddress) {
             mode = mappedMode
             intensity = mappedIntensity
-            if (status.controlStyle == ToyControlStyle.PatternAndDualIntensity) {
+            if (status.supportsDualIntensity()) {
                 secondaryIntensity = mappedIntensity
             }
         }
@@ -1598,7 +1609,7 @@ class BridgeViewModel : ViewModel() {
         if (selectedAddress.isNotBlank()) {
             deviceModes[selectedAddress] = mode
             deviceIntensities[selectedAddress] = intensity
-            if (protocolStatus.controlStyle == ToyControlStyle.PatternAndDualIntensity) {
+            if (protocolStatus.supportsDualIntensity()) {
                 deviceSecondaryIntensities[selectedAddress] = secondaryIntensity
             }
         }
@@ -1634,6 +1645,8 @@ class BridgeViewModel : ViewModel() {
     ): ToyControlAction =
         when (status.controlStyle) {
             ToyControlStyle.IntensityOnly -> ToyControlAction.Intensity(currentIntensity)
+            ToyControlStyle.DualIntensityOnly ->
+                dualIntensityAction(1, currentIntensity, currentSecondaryIntensity, status)
             ToyControlStyle.PatternOnly,
             ToyControlStyle.ExclusivePatternOrIntensity -> ToyControlAction.Pattern(nextMode)
             ToyControlStyle.CombinedPatternAndIntensity -> ToyControlAction.Combined(nextMode, currentIntensity)
@@ -1657,6 +1670,8 @@ class BridgeViewModel : ViewModel() {
     ): ToyControlAction =
         when (status.controlStyle) {
             ToyControlStyle.PatternOnly -> ToyControlAction.Pattern(currentMode)
+            ToyControlStyle.DualIntensityOnly ->
+                dualIntensityAction(1, nextIntensity, nextSecondaryIntensity, status)
             ToyControlStyle.CombinedPatternAndIntensity -> ToyControlAction.Combined(currentMode, nextIntensity)
             ToyControlStyle.PatternAndDualIntensity ->
                 dualIntensityAction(currentMode, nextIntensity, nextSecondaryIntensity, status)
@@ -1701,7 +1716,7 @@ class BridgeViewModel : ViewModel() {
             controllerFor(address).sendAction(action)
             deviceModes[address] = mode
             deviceIntensities[address] = intensity
-            if (protocolStatus.controlStyle == ToyControlStyle.PatternAndDualIntensity) {
+            if (protocolStatus.supportsDualIntensity()) {
                 deviceSecondaryIntensities[address] = secondaryIntensity
             }
             syncRelayDevice()
