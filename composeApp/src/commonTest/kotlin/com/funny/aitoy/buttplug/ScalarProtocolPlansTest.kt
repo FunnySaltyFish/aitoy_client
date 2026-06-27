@@ -25,18 +25,53 @@ class ScalarProtocolPlansTest {
         assertWrites("nexus-revo", intArrayOf(), command(0, ToyOutputKind.Vibrate, 0x05), "aa 01 01 00 01 05", true)
         assertWrites("nexus-revo", intArrayOf(), command(1, ToyOutputKind.Rotate, 0x01), "aa 01 02 00 03 00", true)
         assertWrites("nexus-revo", intArrayOf(), command(1, ToyOutputKind.Rotate, -0x02), "aa 01 02 00 02 00", true)
+        assertWrites("magic-motion-1", intArrayOf(), command(0, ToyOutputKind.Vibrate, 0x32), "0b ff 04 0a 32 32 00 04 08 32 64 00")
+        assertWrites("magic-motion-2", intArrayOf(0x4B, 0), command(1, ToyOutputKind.Vibrate, 0x32), "10 ff 04 0a 32 0a 00 04 08 4b 64 00 04 08 32 64 01")
         assertWrites("sakuraneko", intArrayOf(), command(0, ToyOutputKind.Vibrate, 0x32), "a1 08 01 00 00 00 64 32 00 64 df 55")
         assertWrites("sakuraneko", intArrayOf(), command(1, ToyOutputKind.Rotate, 0x32), "a2 08 01 00 00 00 64 32 00 32 df 55")
         assertWrites("tryfun-meta2", intArrayOf(), command(0, ToyOutputKind.Oscillate, 0x64), "00 02 00 05 21 05 0b 64 6b")
         assertWrites("tryfun-blackhole", intArrayOf(), command(0, ToyOutputKind.Oscillate, 0x64), "00 02 00 03 0c 64 90")
         assertWrites("utimi", intArrayOf(0, 0, 0, 0, 0), command(1, ToyOutputKind.Oscillate, 0x32), "a0 03 00 32 00 00 00 aa")
+        assertWrites("luvmazer", intArrayOf(), command(0, ToyOutputKind.Vibrate, 0x32), "a0 01 00 00 64 32")
+        assertWrites("luvmazer", intArrayOf(), command(2, ToyOutputKind.Vibrate, 0x32), "a0 0c 00 00 64 32")
+        assertWrites("luvmazer", intArrayOf(), command(1, ToyOutputKind.Oscillate, 0x32), "a0 06 01 00 64 32")
+        assertWrites("luvmazer", intArrayOf(), command(1, ToyOutputKind.Rotate, 0x32), "a0 0f 00 00 64 32")
+        assertWrites("luvmazer", intArrayOf(), command(2, ToyOutputKind.Constrict, 0), "a0 0d 00 00 00 00")
+        assertWrites("luvmazer", intArrayOf(), command(2, ToyOutputKind.Constrict, 0x20), "a0 0d 00 00 14 20")
         assertWrites("sexverse-v2", intArrayOf(), command(1, ToyOutputKind.Oscillate, 0x0A), "aa 03 01 02 64 0a", true)
         assertWrites("sexverse-v3", intArrayOf(), command(1, ToyOutputKind.Rotate, -1), "a1 04 ff 02", true)
         assertWrites("sexverse-lg389", intArrayOf(0x03, 0), command(1, ToyOutputKind.Oscillate, 0x08), "aa 05 03 14 01 00 04 00 08 00", true)
         assertWrites("galaku-pump", intArrayOf(0, 0), command(0, ToyOutputKind.Oscillate, 0x32), "23 81 bb ab d2 9b 44 61 3b a3 3b 44", true)
+        assertWrites("svakom-v3", intArrayOf(), command(0, ToyOutputKind.Vibrate, 3), "55 03 03 00 01 03")
+        assertWrites("svakom-v3", intArrayOf(), command(1, ToyOutputKind.Rotate, 1), "55 08 00 00 01 ff")
+        assertWrites("svakom-avaneo", intArrayOf(), command(1, ToyOutputKind.Oscillate, 1), "55 08 00 00 01 ff")
+        assertWrites("svakom-barnard", intArrayOf(), command(0, ToyOutputKind.Vibrate, 2), "55 03 00 00 02 01")
+        assertWrites("svakom-barnard", intArrayOf(), command(1, ToyOutputKind.Oscillate, 2), "55 08 00 00 02 ff")
+        assertWrites("svakom-jordan", intArrayOf(), command(1, ToyOutputKind.Oscillate, 2), "55 08 00 00 01 02 00")
+        assertWrites("svakom-v5", intArrayOf(5, 0, 0), command(1, ToyOutputKind.Vibrate, 0), "55 03 01 00 01 05")
+        assertWrites("svakom-v5", intArrayOf(), command(2, ToyOutputKind.Oscillate, 3), "55 09 00 00 03 00")
+        assertWrites("svakom-dt250a", intArrayOf(), command(0, ToyOutputKind.Vibrate, 2), "55 03 00 00 02 01")
+        assertWrites("svakom-dt250a", intArrayOf(), command(1, ToyOutputKind.Vibrate, 2), "55 08 00 00 02 01")
+        assertWrites("svakom-dt250a", intArrayOf(), command(2, ToyOutputKind.Constrict, 2), "55 09 00 00 02 00")
+        assertWrites("svakom-sam", intArrayOf(0), command(0, ToyOutputKind.Vibrate, 3), "12 01 03 00 05 03")
+        assertWrites("svakom-sam", intArrayOf(1), command(0, ToyOutputKind.Vibrate, 3), "12 01 03 00 04 03")
+        assertWrites("svakom-sam", intArrayOf(1), command(0, ToyOutputKind.Vibrate, 0), "12 01 03 00 00 00")
+        assertWrites("svakom-sam", intArrayOf(1), command(1, ToyOutputKind.Constrict, 1), "12 06 01 01")
+        assertWrites("svakom-sam2", intArrayOf(), command(0, ToyOutputKind.Vibrate, 3), "55 03 00 00 05 03 00", true)
+        assertWrites("svakom-sam2", intArrayOf(), command(0, ToyOutputKind.Vibrate, 0), "55 03 00 00 00 00 00", true)
+        assertWrites("svakom-sam2", intArrayOf(), command(1, ToyOutputKind.Constrict, 3), "55 09 00 00 01 03 00", true)
+        assertWrites("svakom-sam2", intArrayOf(), command(1, ToyOutputKind.Constrict, 0), "55 09 00 00 00 00 00", true)
 
         assertEquals(100, ScalarProtocolPlans.forProtocolId("sexverse-v3")?.keepaliveIntervalMs)
+        assertEquals(100, ScalarProtocolPlans.forProtocolId("svakom-v3")?.keepaliveIntervalMs)
+        assertEquals(100, ScalarProtocolPlans.forProtocolId("svakom-barnard")?.keepaliveIntervalMs)
+        assertEquals(100, ScalarProtocolPlans.forProtocolId("svakom-jordan")?.keepaliveIntervalMs)
+        assertEquals(100, ScalarProtocolPlans.forProtocolId("svakom-v5")?.keepaliveIntervalMs)
+        assertEquals(100, ScalarProtocolPlans.forProtocolId("svakom-sam")?.keepaliveIntervalMs)
+        assertEquals(100, ScalarProtocolPlans.forProtocolId("svakom-sam2")?.keepaliveIntervalMs)
+        assertEquals("rx", requireNotNull(ScalarProtocolPlans.forProtocolId("svakom-sam")).initSubscriptions.single())
         assertContentEquals(hex("aa 04"), requireNotNull(ScalarProtocolPlans.forProtocolId("sexverse-v2")).initWrites.single().bytes)
+        assertEquals("tx", requireNotNull(ScalarProtocolPlans.forProtocolId("sensee-v2")).initReads.single().endpointRole)
     }
 
     @Test
@@ -74,6 +109,95 @@ class ScalarProtocolPlansTest {
         assertContentEquals(hex("01 02 00 05 21 05 08 64 6e"), tryfunTransport.writeBytesAt(1))
     }
 
+    @Test
+    fun sexverseV1HandlerKeepsTypedMultiOutputState() = runBlocking {
+        val transport = RecordingTransport()
+        val handler = requireNotNull(ScalarProtocolHandlers.forProtocolId("sexverse-v1"))
+        val session = handler.createSession(
+            match(
+                "sexverse-v1",
+                listOf(
+                    ButtplugOutputFeature(OUTPUT_VIBRATE, 0, 255, 0, "Vibrate"),
+                    ButtplugOutputFeature(OUTPUT_CONSTRICT, 0, 255, 1, "Constrict"),
+                    ButtplugOutputFeature(OUTPUT_ROTATE, 0, 255, 2, "Rotate"),
+                ),
+            ),
+            transport,
+        )
+
+        session.handle(ToyOutputCommand.Scalar(featureIndex = 0, kind = ToyOutputKind.Vibrate, value = 0x11))
+        session.handle(ToyOutputCommand.Scalar(featureIndex = 1, kind = ToyOutputKind.Constrict, value = 0x22))
+        session.handle(ToyOutputCommand.Scalar(featureIndex = 2, kind = ToyOutputKind.Rotate, value = 0x33))
+
+        assertContentEquals(hex("23 07 09 81 03 11 82 04 00 83 06 00 bd"), transport.writeBytesAt(0))
+        assertContentEquals(hex("23 07 09 81 03 11 82 04 22 83 06 00 9f"), transport.writeBytesAt(1))
+        assertContentEquals(hex("23 07 09 81 03 11 82 04 22 83 06 33 ac"), transport.writeBytesAt(2))
+    }
+
+    @Test
+    fun senseeV2ReadsDeviceTypeAndKeepsTypedGroups() = runBlocking {
+        val features = listOf(
+            ButtplugOutputFeature(OUTPUT_VIBRATE, 0, 100, 0, "Vibrate"),
+            ButtplugOutputFeature(OUTPUT_OSCILLATE, 0, 100, 1, "Oscillate"),
+            ButtplugOutputFeature(OUTPUT_CONSTRICT, 0, 100, 2, "Constrict"),
+        )
+        val plan = requireNotNull(ScalarProtocolPlans.forProtocolId("sensee-v2"))
+        val state = plan.createState(match("sensee-v2", features))
+
+        val first = plan.writes(state, command(0, ToyOutputKind.Vibrate, 10)).single()
+        assertContentEquals(hex("55 aa f0 02 00 11 65 f1 03 00 01 01 0a 01 01 01 00 02 01 01 00 00 00"), first.bytes)
+
+        plan.onRead?.invoke(state, "tx", byteArrayOf(0, 0, 0, 0, 0, 0, 0x66))
+        val second = plan.writes(state, command(1, ToyOutputKind.Oscillate, 20)).single()
+        val third = plan.writes(state, command(2, ToyOutputKind.Constrict, 30)).single()
+
+        assertContentEquals(hex("55 aa f0 02 00 11 66 f1 03 00 01 01 0a 01 01 01 14 02 01 01 00 00 00"), second.bytes)
+        assertContentEquals(hex("55 aa f0 02 00 11 66 f1 03 00 01 01 0a 01 01 01 14 02 01 01 1e 00 00"), third.bytes)
+    }
+
+    @Test
+    fun scalarHandlerRunsInitReads() = runBlocking {
+        val transport = RecordingTransport(readBytes = byteArrayOf(0, 0, 0, 0, 0, 0, 0x66))
+        val handler = requireNotNull(ScalarProtocolHandlers.forProtocolId("sensee-v2"))
+        val session = handler.createSession(
+            match(
+                "sensee-v2",
+                listOf(ButtplugOutputFeature(OUTPUT_VIBRATE, 0, 100, 0, "Vibrate")),
+            ),
+            transport,
+        )
+
+        session.initialize()
+        session.handle(ToyOutputCommand.Scalar(featureIndex = 0, kind = ToyOutputKind.Vibrate, value = 10))
+
+        assertEquals(HardwareOperation.Read("tx"), transport.operations[0])
+        assertContentEquals(hex("55 aa f0 02 00 09 66 f1 01 00 01 01 0a 00 00"), transport.writeBytesAt(1))
+    }
+
+    @Test
+    fun scalarHandlerRunsInitSubscriptions() = runBlocking {
+        val transport = RecordingTransport()
+        val handler = requireNotNull(ScalarProtocolHandlers.forProtocolId("svakom-sam"))
+        val session = handler.createSession(
+            match(
+                "svakom-sam",
+                listOf(
+                    ButtplugOutputFeature(OUTPUT_VIBRATE, 0, 10, 0, "Vibrate"),
+                    ButtplugOutputFeature(OUTPUT_CONSTRICT, 0, 1, 1, "Constrict"),
+                ),
+                mapOf("tx" to "tx", "rx" to "rx", "txmode" to "txmode"),
+            ),
+            transport,
+        )
+
+        session.initialize()
+        session.handle(ToyOutputCommand.Scalar(featureIndex = 0, kind = ToyOutputKind.Vibrate, value = 3))
+
+        assertEquals(HardwareOperation.Subscribe("rx"), transport.operations[0])
+        assertContentEquals(hex("12 01 03 00 04 03"), transport.writeBytesAt(1))
+    }
+
+
     private fun assertWrites(
         protocolId: String,
         initialState: IntArray,
@@ -96,6 +220,26 @@ class ScalarProtocolPlansTest {
         ScalarProtocolCommand(featureIndex = featureIndex, kind = kind, value = value)
 
     private fun match(protocolId: String): ButtplugDeviceMatch {
+        return match(
+            protocolId,
+            listOf(
+                ButtplugOutputFeature(OUTPUT_VIBRATE, 0, 255, 0, "Vibrate"),
+                ButtplugOutputFeature(OUTPUT_OSCILLATE, 0, 255, 1, "Oscillate"),
+                ButtplugOutputFeature(OUTPUT_ROTATE, -255, 255, 2, "Rotate"),
+                ButtplugOutputFeature(OUTPUT_CONSTRICT, 0, 255, 3, "Constrict"),
+            ),
+        )
+    }
+
+    private fun match(protocolId: String, features: List<ButtplugOutputFeature>): ButtplugDeviceMatch {
+        return match(protocolId, features, mapOf("tx" to "tx"))
+    }
+
+    private fun match(
+        protocolId: String,
+        features: List<ButtplugOutputFeature>,
+        endpointCharacteristics: Map<String, String>,
+    ): ButtplugDeviceMatch {
         val definition = ButtplugProtocolDefinition(
             id = protocolId,
             displayName = protocolId,
@@ -104,17 +248,13 @@ class ScalarProtocolPlansTest {
             endpoints = listOf(
                 ButtplugEndpoint(
                     serviceUuid = "service",
-                    characteristics = mapOf("tx" to "tx"),
+                    characteristics = endpointCharacteristics,
                 ),
             ),
             defaultDevice = ButtplugDeviceDefinition(
                 identifiers = emptyList(),
                 name = protocolId,
-                features = listOf(
-                    ButtplugOutputFeature(OUTPUT_VIBRATE, 0, 255, 0, "Vibrate"),
-                    ButtplugOutputFeature(OUTPUT_OSCILLATE, 0, 255, 1, "Oscillate"),
-                    ButtplugOutputFeature(OUTPUT_ROTATE, -255, 255, 2, "Rotate"),
-                ),
+                features = features,
             ),
             configurations = emptyList(),
         )
@@ -125,11 +265,16 @@ class ScalarProtocolPlansTest {
         )
     }
 
-    private class RecordingTransport : ToyTransport {
+    private class RecordingTransport(
+        private val readBytes: ByteArray = byteArrayOf(),
+    ) : ToyTransport {
         val operations = mutableListOf<HardwareOperation>()
 
         override suspend fun execute(operation: HardwareOperation): HardwareResult {
             operations += operation
+            if (operation is HardwareOperation.Read) {
+                return HardwareResult.ReadResult(readBytes)
+            }
             return HardwareResult.Success
         }
 

@@ -48,6 +48,8 @@ def load_registry(path: Path) -> dict[str, dict[str, str]]:
         ("SimpleVibrateProtocolPlans.kt", "Simple vibrate handler ported from Buttplug protocol_impl"),
         ("StatefulVibrateProtocolPlans.kt", "Stateful vibrate handler ported from Buttplug protocol_impl"),
         ("ScalarProtocolPlans.kt", "Scalar output handler ported from Buttplug protocol_impl"),
+        ("LinearProtocolPlans.kt", "Linear output handler ported from Buttplug protocol_impl"),
+        ("MixedOutputProtocolPlans.kt", "Mixed scalar/linear output handler ported from Buttplug protocol_impl"),
     ]:
         for protocol_id in load_plan_protocol_ids(path.with_name(file_name)):
             entries.setdefault(

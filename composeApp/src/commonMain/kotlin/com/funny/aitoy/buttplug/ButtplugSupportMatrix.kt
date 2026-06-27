@@ -82,6 +82,24 @@ object ButtplugLocalHandlerRegistry {
                 notes = "Scalar output handler ported from Buttplug protocol_impl",
             )
         }.toTypedArray(),
+        *LinearProtocolPlans.protocolIds.map { protocolId ->
+            ButtplugLocalHandlerDescriptor(
+                protocolId = protocolId,
+                source = ButtplugHandlerSource.ButtplugProtocolImpl,
+                supportedOutputKinds = setOf(ToyOutputKind.Linear),
+                status = ButtplugSupportStatus.Controllable,
+                notes = "Linear output handler ported from Buttplug protocol_impl",
+            )
+        }.toTypedArray(),
+        *MixedOutputProtocolPlans.protocolIds.map { protocolId ->
+            ButtplugLocalHandlerDescriptor(
+                protocolId = protocolId,
+                source = ButtplugHandlerSource.ButtplugProtocolImpl,
+                supportedOutputKinds = MixedOutputProtocolPlans.supportedKinds(protocolId),
+                status = ButtplugSupportStatus.Controllable,
+                notes = "Mixed scalar/linear output handler ported from Buttplug protocol_impl",
+            )
+        }.toTypedArray(),
         ButtplugLocalHandlerDescriptor(
             protocolId = "ankni",
             source = ButtplugHandlerSource.NativeSpecialized,

@@ -6,6 +6,10 @@ data class ScalarProtocolWrite(
     val withResponse: Boolean,
 )
 
+data class ScalarProtocolRead(
+    val endpointRole: String = "tx",
+)
+
 data class ScalarProtocolCommand(
     val featureIndex: Int,
     val kind: ToyOutputKind,
@@ -16,8 +20,12 @@ data class ScalarProtocolPlan(
     val protocolId: String,
     val supportedKinds: Set<ToyOutputKind>,
     val stateSize: Int,
+    val initSubscriptions: List<String> = emptyList(),
     val initWrites: List<ScalarProtocolWrite> = emptyList(),
+    val initReads: List<ScalarProtocolRead> = emptyList(),
     val keepaliveIntervalMs: Long = 0L,
+    val initialState: ((ButtplugDeviceMatch) -> IntArray)? = null,
+    val onRead: ((state: IntArray, endpointRole: String, bytes: ByteArray) -> Unit)? = null,
     val writes: (state: IntArray, command: ScalarProtocolCommand) -> List<ScalarProtocolWrite>,
 ) {
     var sequencedWrites: ((state: IntArray, command: ScalarProtocolCommand, packetId: Int) -> List<ScalarProtocolWrite>)? = null
@@ -27,6 +35,9 @@ data class ScalarProtocolPlan(
 
     fun writesFor(state: IntArray, command: ScalarProtocolCommand, packetId: Int): List<ScalarProtocolWrite> =
         sequencedWrites?.invoke(state, command, packetId) ?: writes(state, command)
+
+    fun createState(match: ButtplugDeviceMatch): IntArray =
+        initialState?.invoke(match) ?: IntArray(maxOf(stateSize, match.scalarOutputs.size))
 }
 
 object ScalarProtocolPlans {
@@ -172,6 +183,21 @@ object ScalarProtocolPlans {
             },
         ),
         ScalarProtocolPlan(
+            protocolId = "magic-motion-1",
+            supportedKinds = setOf(ToyOutputKind.Vibrate, ToyOutputKind.Oscillate),
+            stateSize = 1,
+            writes = { _, command -> listOf(write(magicMotionV1Payload(command.value))) },
+        ),
+        ScalarProtocolPlan(
+            protocolId = "magic-motion-2",
+            supportedKinds = setOf(ToyOutputKind.Vibrate, ToyOutputKind.Oscillate),
+            stateSize = 2,
+            writes = { state, command ->
+                state[command.featureIndex.coerceIn(0, 1)] = command.value
+                listOf(write(magicMotionV2Payload(state[0], state[1])))
+            },
+        ),
+        ScalarProtocolPlan(
             protocolId = "sakuraneko",
             supportedKinds = setOf(ToyOutputKind.Vibrate, ToyOutputKind.Rotate),
             stateSize = 2,
@@ -210,6 +236,58 @@ object ScalarProtocolPlans {
             writes = { state, command ->
                 state[command.featureIndex.coerceIn(0, state.lastIndex)] = command.value
                 listOf(write(bytes(0xA0, 0x03, state[0], state[1], state[2], state[3], state[4], 0xAA)))
+            },
+        ),
+        ScalarProtocolPlan(
+            protocolId = "luvmazer",
+            supportedKinds = setOf(ToyOutputKind.Vibrate, ToyOutputKind.Oscillate, ToyOutputKind.Rotate, ToyOutputKind.Constrict),
+            stateSize = 3,
+            writes = { _, command ->
+                when (command.kind) {
+                    ToyOutputKind.Vibrate -> {
+                        if (command.featureIndex == 2) {
+                            listOf(write(bytes(0xA0, 0x0C, 0x00, 0x00, 0x64, command.value)))
+                        } else {
+                            listOf(write(bytes(0xA0, 0x01, 0x00, command.featureIndex, 0x64, command.value)))
+                        }
+                    }
+                    ToyOutputKind.Oscillate -> listOf(write(bytes(0xA0, 0x06, 0x01, 0x00, 0x64, command.value)))
+                    ToyOutputKind.Rotate -> listOf(write(bytes(0xA0, 0x0F, 0x00, 0x00, 0x64, command.value.rawByte())))
+                    ToyOutputKind.Constrict -> listOf(
+                        write(bytes(0xA0, 0x0D, 0x00, 0x00, if (command.value == 0) 0x00 else 0x14, command.value)),
+                    )
+                    else -> unsupported(command)
+                }
+            },
+        ),
+        ScalarProtocolPlan(
+            protocolId = "sexverse-v1",
+            supportedKinds = setOf(ToyOutputKind.Vibrate, ToyOutputKind.Oscillate, ToyOutputKind.Rotate, ToyOutputKind.Constrict),
+            stateSize = SEXVERSE_V1_TYPE_OFFSET * 2,
+            initialState = { match -> sexverseV1InitialState(match) },
+            writes = { state, command ->
+                state[SEXVERSE_V1_SPEED_OFFSET + command.featureIndex] = command.value
+                listOf(write(sexverseV1Payload(state)))
+            },
+        ),
+        ScalarProtocolPlan(
+            protocolId = "sensee-v2",
+            supportedKinds = setOf(ToyOutputKind.Vibrate, ToyOutputKind.Oscillate, ToyOutputKind.Constrict),
+            stateSize = SENSEE_V2_STATE_SIZE,
+            initReads = listOf(read("tx")),
+            initialState = { match -> senseeV2InitialState(match) },
+            onRead = { state, endpointRole, bytes ->
+                if (endpointRole == "tx") {
+                    state[SENSEE_V2_DEVICE_TYPE_INDEX] = if (bytes.size > 6 && bytes[6].toInt() != 0) {
+                        bytes[6].toInt() and 0xFF
+                    } else {
+                        SENSEE_V2_DEFAULT_DEVICE_TYPE
+                    }
+                }
+            },
+            writes = { state, command ->
+                senseeV2SetValue(state, command)
+                listOf(write(senseeV2Payload(state)))
             },
         ),
         ScalarProtocolPlan(
@@ -267,6 +345,141 @@ object ScalarProtocolPlans {
                 listOf(write(galakuPumpPayload(state[0], state[1]), withResponse = true))
             },
         ),
+        ScalarProtocolPlan(
+            protocolId = "svakom-v3",
+            supportedKinds = setOf(ToyOutputKind.Vibrate, ToyOutputKind.Rotate),
+            stateSize = 2,
+            keepaliveIntervalMs = 100,
+            writes = { _, command ->
+                when (command.kind) {
+                    ToyOutputKind.Vibrate -> listOf(write(svakomV3VibratePayload(command.featureIndex, command.value)))
+                    ToyOutputKind.Rotate -> listOf(write(bytes(0x55, 0x08, 0x00, 0x00, command.value.rawByte(), 0xFF)))
+                    else -> unsupported(command)
+                }
+            },
+        ),
+        ScalarProtocolPlan(
+            protocolId = "svakom-avaneo",
+            supportedKinds = setOf(ToyOutputKind.Vibrate, ToyOutputKind.Oscillate),
+            stateSize = 2,
+            writes = { _, command ->
+                when {
+                    command.kind == ToyOutputKind.Vibrate && command.featureIndex == 0 ->
+                        listOf(write(bytes(0x55, 0x03, 0x00, 0x00, if (command.value == 0) 0x00 else 0x01, command.value)))
+                    command.kind == ToyOutputKind.Vibrate ->
+                        listOf(write(bytes(0x55, 0x09, 0x00, 0x00, command.value, 0xFF)))
+                    command.kind == ToyOutputKind.Oscillate && command.featureIndex == 0 ->
+                        listOf(write(bytes(0x55, 0x03, 0x00, 0x00, if (command.value == 0) 0x00 else 0x01, command.value)))
+                    command.kind == ToyOutputKind.Oscillate ->
+                        listOf(write(bytes(0x55, 0x08, 0x00, 0x00, command.value, 0xFF)))
+                    else -> unsupported(command)
+                }
+            },
+        ),
+        ScalarProtocolPlan(
+            protocolId = "svakom-barnard",
+            supportedKinds = setOf(ToyOutputKind.Vibrate, ToyOutputKind.Oscillate),
+            stateSize = 2,
+            keepaliveIntervalMs = 100,
+            writes = { _, command ->
+                when (command.kind) {
+                    ToyOutputKind.Vibrate -> listOf(write(bytes(0x55, 0x03, 0x00, 0x00, command.value, if (command.value == 0) 0x00 else 0x01)))
+                    ToyOutputKind.Oscillate -> listOf(write(bytes(0x55, 0x08, 0x00, 0x00, command.value, if (command.value == 0) 0x00 else 0xFF)))
+                    else -> unsupported(command)
+                }
+            },
+        ),
+        ScalarProtocolPlan(
+            protocolId = "svakom-jordan",
+            supportedKinds = setOf(ToyOutputKind.Vibrate, ToyOutputKind.Oscillate),
+            stateSize = 2,
+            keepaliveIntervalMs = 100,
+            writes = { _, command ->
+                when (command.kind) {
+                    ToyOutputKind.Vibrate -> listOf(write(bytes(0x55, 0x03, 0x00, 0x00, if (command.value == 0) 0x00 else 0x01, command.value, 0x00)))
+                    ToyOutputKind.Oscillate -> listOf(write(bytes(0x55, 0x08, 0x00, 0x00, if (command.value == 0) 0x00 else 0x01, command.value, 0x00)))
+                    else -> unsupported(command)
+                }
+            },
+        ),
+        ScalarProtocolPlan(
+            protocolId = "svakom-v5",
+            supportedKinds = setOf(ToyOutputKind.Vibrate, ToyOutputKind.Oscillate),
+            stateSize = 3,
+            keepaliveIntervalMs = 100,
+            writes = { state, command ->
+                when (command.kind) {
+                    ToyOutputKind.Vibrate -> {
+                        state[command.featureIndex.coerceIn(0, 1)] = command.value
+                        listOf(write(svakomV5VibratePayload(state[0], state[1])))
+                    }
+                    ToyOutputKind.Oscillate -> listOf(write(bytes(0x55, 0x09, 0x00, 0x00, command.value, 0x00)))
+                    else -> unsupported(command)
+                }
+            },
+        ),
+        ScalarProtocolPlan(
+            protocolId = "svakom-dt250a",
+            supportedKinds = setOf(ToyOutputKind.Vibrate, ToyOutputKind.Constrict),
+            stateSize = 3,
+            writes = { _, command ->
+                val mode = when {
+                    command.kind == ToyOutputKind.Constrict -> 0x09
+                    command.featureIndex == 0 -> 0x03
+                    else -> 0x08
+                }
+                listOf(write(bytes(0x55, mode, 0x00, 0x00, command.value, if (command.value == 0 || mode == 0x09) 0x00 else 0x01)))
+            },
+        ),
+        ScalarProtocolPlan(
+            protocolId = "svakom-sam",
+            supportedKinds = setOf(ToyOutputKind.Vibrate, ToyOutputKind.Constrict),
+            stateSize = 1,
+            initSubscriptions = listOf("rx"),
+            keepaliveIntervalMs = 100,
+            initialState = { match ->
+                intArrayOf(
+                    if ("txmode" in match.endpoint.characteristics || "firmware" in match.endpoint.characteristics) 1 else 0,
+                )
+            },
+            writes = { state, command ->
+                when (command.kind) {
+                    ToyOutputKind.Vibrate -> {
+                        val body = if (state[0] == 1) {
+                            bytes(0x12, 0x01, 0x03, 0x00, if (command.value == 0) 0x00 else 0x04, command.value)
+                        } else {
+                            bytes(0x12, 0x01, 0x03, 0x00, 0x05, command.value)
+                        }
+                        listOf(write(body))
+                    }
+                    ToyOutputKind.Constrict -> listOf(write(bytes(0x12, 0x06, 0x01, command.value)))
+                    else -> unsupported(command)
+                }
+            },
+        ),
+        ScalarProtocolPlan(
+            protocolId = "svakom-sam2",
+            supportedKinds = setOf(ToyOutputKind.Vibrate, ToyOutputKind.Constrict),
+            stateSize = 2,
+            keepaliveIntervalMs = 100,
+            writes = { _, command ->
+                when (command.kind) {
+                    ToyOutputKind.Vibrate -> listOf(
+                        write(
+                            bytes(0x55, 0x03, 0x00, 0x00, if (command.value == 0) 0x00 else 0x05, command.value, 0x00),
+                            withResponse = true,
+                        ),
+                    )
+                    ToyOutputKind.Constrict -> listOf(
+                        write(
+                            bytes(0x55, 0x09, 0x00, 0x00, if (command.value == 0) 0x00 else 0x01, command.value, 0x00),
+                            withResponse = true,
+                        ),
+                    )
+                    else -> unsupported(command)
+                }
+            },
+        ),
     ).associateBy { it.protocolId }
 
     val protocolIds: Set<String> = plans.keys
@@ -298,6 +511,30 @@ object ScalarProtocolPlans {
         val crc = body.fold(0) { acc, value -> (acc + value) and 0xFF }
         return bytes(0xAF, *body.toIntArray(), crc, 0xEC)
     }
+
+    private fun magicMotionV1Payload(speed: Int): ByteArray =
+        bytes(0x0B, 0xFF, 0x04, 0x0A, 0x32, 0x32, 0x00, 0x04, 0x08, speed, 0x64, 0x00)
+
+    private fun magicMotionV2Payload(speed0: Int, speed1: Int): ByteArray =
+        bytes(
+            0x10,
+            0xFF,
+            0x04,
+            0x0A,
+            0x32,
+            0x0A,
+            0x00,
+            0x04,
+            0x08,
+            speed0,
+            0x64,
+            0x00,
+            0x04,
+            0x08,
+            speed1,
+            0x64,
+            0x01,
+        )
 
     private fun tryfunMeta2Payload(command: ScalarProtocolCommand, packetId: Int): ByteArray {
         val commandId = when (command.kind) {
@@ -353,6 +590,138 @@ object ScalarProtocolPlans {
         return bytes(*encoded.toIntArray())
     }
 
+    private fun sexverseV1InitialState(match: ButtplugDeviceMatch): IntArray {
+        val features = match.scalarOutputs.sortedBy { it.featureIndex }
+        val state = IntArray(maxOf(SEXVERSE_V1_TYPE_OFFSET * 2, features.size + SEXVERSE_V1_TYPE_OFFSET))
+        state[SEXVERSE_V1_COUNT_INDEX] = features.size
+        for (feature in features) {
+            state[SEXVERSE_V1_TYPE_OFFSET + feature.featureIndex] = sexverseV1MotorType(feature.type.toToyOutputKind())
+        }
+        return state
+    }
+
+    private fun sexverseV1Payload(state: IntArray): ByteArray {
+        val count = state[SEXVERSE_V1_COUNT_INDEX].coerceAtLeast(1)
+        val data = mutableListOf(0x23, 0x07, count * 3)
+        repeat(count) { index ->
+            data += 0x80 or (index + 1)
+            data += state[SEXVERSE_V1_TYPE_OFFSET + index].takeIf { it != 0 } ?: 0x03
+            data += state[SEXVERSE_V1_SPEED_OFFSET + index]
+        }
+        data += data.fold(0) { acc, value -> acc xor (value and 0xFF) }
+        return bytes(*data.toIntArray())
+    }
+
+    private fun sexverseV1MotorType(kind: ToyOutputKind): Int =
+        when (kind) {
+            ToyOutputKind.Rotate -> 0x06
+            ToyOutputKind.Constrict,
+            ToyOutputKind.Oscillate,
+            -> 0x04
+            else -> 0x03
+        }
+
+    private fun senseeV2InitialState(match: ButtplugDeviceMatch): IntArray {
+        val state = IntArray(SENSEE_V2_STATE_SIZE)
+        state[SENSEE_V2_DEVICE_TYPE_INDEX] = SENSEE_V2_DEFAULT_DEVICE_TYPE
+        for (feature in match.scalarOutputs) {
+            val presentOffset = senseeV2PresentOffset(feature.type.toToyOutputKind()) ?: continue
+            state[presentOffset + feature.featureIndex] = 1
+        }
+        return state
+    }
+
+    private fun senseeV2SetValue(state: IntArray, command: ScalarProtocolCommand) {
+        val speedOffset = senseeV2SpeedOffset(command.kind) ?: unsupported(command)
+        state[speedOffset + command.featureIndex] = command.value
+    }
+
+    private fun senseeV2Payload(state: IntArray): ByteArray {
+        val groups = listOf(
+            SenseeV2Group(0, SENSEE_V2_VIBE_PRESENT_OFFSET, SENSEE_V2_VIBE_SPEED_OFFSET),
+            SenseeV2Group(1, SENSEE_V2_THRUST_PRESENT_OFFSET, SENSEE_V2_THRUST_SPEED_OFFSET),
+            SenseeV2Group(2, SENSEE_V2_SUCK_PRESENT_OFFSET, SENSEE_V2_SUCK_SPEED_OFFSET),
+        ).mapNotNull { group ->
+            val values = (0 until SENSEE_V2_MAX_FEATURE_INDEX)
+                .filter { state[group.presentOffset + it] != 0 }
+                .map { state[group.speedOffset + it] }
+            if (values.isEmpty()) null else group.id to values
+        }
+        val data = mutableListOf(groups.size)
+        for ((groupId, values) in groups) {
+            data += groupId
+            data += values.size
+            values.forEachIndexed { index, value ->
+                data += index + 1
+                data += value
+            }
+        }
+        return senseeV2Command(state[SENSEE_V2_DEVICE_TYPE_INDEX], 0xF1, data)
+    }
+
+    private fun senseeV2Command(deviceType: Int, function: Int, body: List<Int>): ByteArray =
+        bytes(
+            0x55,
+            0xAA,
+            0xF0,
+            0x02,
+            0x00,
+            0x04 + body.size,
+            deviceType,
+            function,
+            *body.toIntArray(),
+            0x00,
+            0x00,
+        )
+
+    private fun senseeV2PresentOffset(kind: ToyOutputKind): Int? =
+        when (kind) {
+            ToyOutputKind.Vibrate -> SENSEE_V2_VIBE_PRESENT_OFFSET
+            ToyOutputKind.Oscillate -> SENSEE_V2_THRUST_PRESENT_OFFSET
+            ToyOutputKind.Constrict -> SENSEE_V2_SUCK_PRESENT_OFFSET
+            else -> null
+        }
+
+    private fun senseeV2SpeedOffset(kind: ToyOutputKind): Int? =
+        when (kind) {
+            ToyOutputKind.Vibrate -> SENSEE_V2_VIBE_SPEED_OFFSET
+            ToyOutputKind.Oscillate -> SENSEE_V2_THRUST_SPEED_OFFSET
+            ToyOutputKind.Constrict -> SENSEE_V2_SUCK_SPEED_OFFSET
+            else -> null
+        }
+
+    private data class SenseeV2Group(
+        val id: Int,
+        val presentOffset: Int,
+        val speedOffset: Int,
+    )
+
+    private fun svakomV3VibratePayload(featureIndex: Int, speed: Int): ByteArray =
+        bytes(
+            0x55,
+            if (featureIndex == 0) 0x03 else 0x09,
+            if (featureIndex == 0) 0x03 else 0x00,
+            0x00,
+            if (speed == 0) 0x00 else 0x01,
+            speed,
+        )
+
+    private fun svakomV5VibratePayload(vibe0: Int, vibe1: Int): ByteArray =
+        bytes(
+            0x55,
+            0x03,
+            if ((vibe0 > 0 && vibe1 > 0) || vibe0 == vibe1) {
+                0x00
+            } else if (vibe0 > 0) {
+                0x01
+            } else {
+                0x02
+            },
+            0x00,
+            if (vibe0 == vibe1 && vibe0 == 0) 0x00 else 0x01,
+            maxOf(vibe0, vibe1),
+        )
+
     private fun unsupported(command: ScalarProtocolCommand): Nothing =
         error("${command.kind} is not supported by this scalar protocol")
 
@@ -363,6 +732,9 @@ object ScalarProtocolPlans {
     ): ScalarProtocolWrite =
         ScalarProtocolWrite(endpointRole = endpointRole, bytes = bytes, withResponse = withResponse)
 
+    private fun read(endpointRole: String): ScalarProtocolRead =
+        ScalarProtocolRead(endpointRole = endpointRole)
+
     private fun Int.absoluteByte(): Int =
         kotlin.math.abs(this).coerceIn(0, 0xFF)
 
@@ -371,6 +743,20 @@ object ScalarProtocolPlans {
 
     private fun bytes(vararg values: Int): ByteArray =
         ByteArray(values.size) { index -> values[index].coerceIn(0, 0xFF).toByte() }
+
+    private const val SEXVERSE_V1_COUNT_INDEX = 0
+    private const val SEXVERSE_V1_SPEED_OFFSET = 1
+    private const val SEXVERSE_V1_TYPE_OFFSET = 16
+    private const val SENSEE_V2_DEVICE_TYPE_INDEX = 0
+    private const val SENSEE_V2_DEFAULT_DEVICE_TYPE = 0x65
+    private const val SENSEE_V2_MAX_FEATURE_INDEX = 16
+    private const val SENSEE_V2_VIBE_PRESENT_OFFSET = 1
+    private const val SENSEE_V2_THRUST_PRESENT_OFFSET = 17
+    private const val SENSEE_V2_SUCK_PRESENT_OFFSET = 33
+    private const val SENSEE_V2_VIBE_SPEED_OFFSET = 49
+    private const val SENSEE_V2_THRUST_SPEED_OFFSET = 65
+    private const val SENSEE_V2_SUCK_SPEED_OFFSET = 81
+    private const val SENSEE_V2_STATE_SIZE = 97
 
     private val GALAKU_PUMP_KEY_TABLE = arrayOf(
         intArrayOf(0, 24, 0x98, 0xF7, 0xA5, 61, 13, 41, 37, 80, 68, 70),
@@ -400,7 +786,7 @@ private class ScalarProtocolSession(
     private val transport: ToyTransport,
     private val plan: ScalarProtocolPlan,
 ) : ToyProtocolSession {
-    private val state = IntArray(maxOf(plan.stateSize, match.scalarOutputs.size))
+    private val state = plan.createState(match)
     private var packetId = 0
     private val endpointByRole = match.endpoint.characteristics
     private val features = match.scalarOutputs.associateBy { it.featureIndex }
@@ -409,7 +795,9 @@ private class ScalarProtocolSession(
         ButtplugLocalHandlerRegistry.supportEntryFor(match.protocol)
 
     override suspend fun initialize() {
+        executeSubscriptions(plan.initSubscriptions)
         executeWrites(plan.initWrites)
+        executeReads(plan.initReads)
     }
 
     override suspend fun handle(command: ToyOutputCommand) {
@@ -457,6 +845,33 @@ private class ScalarProtocolSession(
             when (val result = transport.execute(HardwareOperation.Write(endpoint, write.bytes, write.withResponse))) {
                 HardwareResult.Success,
                 is HardwareResult.ReadResult -> Unit
+                is HardwareResult.Failure -> error(result.message)
+            }
+        }
+    }
+
+    private suspend fun executeSubscriptions(endpointRoles: List<String>) {
+        for (endpointRole in endpointRoles) {
+            val endpoint = requireNotNull(endpointByRole[endpointRole]) {
+                "${plan.protocolId} endpoint $endpointRole is missing"
+            }
+            when (val result = transport.execute(HardwareOperation.Subscribe(endpoint))) {
+                HardwareResult.Success,
+                is HardwareResult.ReadResult,
+                -> Unit
+                is HardwareResult.Failure -> error(result.message)
+            }
+        }
+    }
+
+    private suspend fun executeReads(reads: List<ScalarProtocolRead>) {
+        for (read in reads) {
+            val endpoint = requireNotNull(endpointByRole[read.endpointRole]) {
+                "${plan.protocolId} endpoint ${read.endpointRole} is missing"
+            }
+            when (val result = transport.execute(HardwareOperation.Read(endpoint))) {
+                is HardwareResult.ReadResult -> plan.onRead?.invoke(state, read.endpointRole, result.bytes)
+                HardwareResult.Success -> Unit
                 is HardwareResult.Failure -> error(result.message)
             }
         }

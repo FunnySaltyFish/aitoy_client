@@ -4,6 +4,10 @@ import com.funny.aitoy.buttplug.ButtplugConfigRepository
 import com.funny.aitoy.buttplug.ButtplugDeviceFingerprint
 import com.funny.aitoy.buttplug.ButtplugDeviceMatch
 import com.funny.aitoy.buttplug.ButtplugLocalHandlerRegistry
+import com.funny.aitoy.buttplug.LinearProtocolPlan
+import com.funny.aitoy.buttplug.LinearProtocolPlans
+import com.funny.aitoy.buttplug.MixedOutputProtocolPlan
+import com.funny.aitoy.buttplug.MixedOutputProtocolPlans
 import com.funny.aitoy.buttplug.SimpleVibrateProtocolPlan
 import com.funny.aitoy.buttplug.SimpleVibrateProtocolPlans
 import com.funny.aitoy.buttplug.ScalarProtocolPlan
@@ -127,8 +131,12 @@ private object ButtplugBleProtocolFactory {
                 ?.let { ButtplugSimpleVibrateProtocol(match, it) }
                 ?: StatefulVibrateProtocolPlans.forProtocolId(match.protocol.id)
                     ?.let { ButtplugStatefulVibrateProtocol(match, it) }
+                ?: MixedOutputProtocolPlans.forProtocolId(match.protocol.id)
+                    ?.let { ButtplugMixedOutputProtocol(match, it) }
                 ?: ScalarProtocolPlans.forProtocolId(match.protocol.id)
                     ?.let { ButtplugScalarProtocol(match, it) }
+                ?: LinearProtocolPlans.forProtocolId(match.protocol.id)
+                    ?.let { ButtplugLinearProtocol(match, it) }
                 ?: ButtplugUnsupportedProtocol(match)
         }
 }
@@ -386,7 +394,8 @@ private class ButtplugScalarProtocol(
     private val endpointByRole = match.endpoint.characteristics
     private val txUuid: UUID = uuid(match.endpoint.txUuid.orEmpty())
     private val scalarFeatures = match.scalarOutputs.sortedBy { it.featureIndex }
-    private val state = IntArray(maxOf(plan.stateSize, scalarFeatures.size))
+    private val state = plan.createState(match)
+    private val endpointRoleByUuid = endpointByRole.entries.associate { uuid(it.value) to it.key }
     private var packetId = 0
     private val maxValue = scalarFeatures.maxOfOrNull { it.max.coerceAtLeast(1) } ?: 1
 
@@ -400,18 +409,40 @@ private class ButtplugScalarProtocol(
     override fun matches(fingerprint: BleGattFingerprint): Boolean = false
 
     override fun initialize(fingerprint: BleGattFingerprint): List<BleProtocolOperation> =
-        plan.initWrites.map { write ->
-            val endpoint = requireNotNull(endpointByRole[write.endpointRole]) {
-                "${plan.protocolId} endpoint ${write.endpointRole} is missing"
+        buildList {
+            for (endpointRole in plan.initSubscriptions) {
+                val endpoint = requireNotNull(endpointByRole[endpointRole]) {
+                    "${plan.protocolId} endpoint $endpointRole is missing"
+                }
+                add(BleProtocolOperation.SubscribeNotify(uuid(endpoint)))
             }
-            BleProtocolOperation.Write(
-                characteristicUuid = uuid(endpoint),
-                bytes = write.bytes,
-                withResponse = write.withResponse,
-            )
+            for (write in plan.initWrites) {
+                val endpoint = requireNotNull(endpointByRole[write.endpointRole]) {
+                    "${plan.protocolId} endpoint ${write.endpointRole} is missing"
+                }
+                add(
+                    BleProtocolOperation.Write(
+                        characteristicUuid = uuid(endpoint),
+                        bytes = write.bytes,
+                        withResponse = write.withResponse,
+                    ),
+                )
+            }
+            for (read in plan.initReads) {
+                val endpoint = requireNotNull(endpointByRole[read.endpointRole]) {
+                    "${plan.protocolId} endpoint ${read.endpointRole} is missing"
+                }
+                add(BleProtocolOperation.Read(uuid(endpoint)))
+            }
         }
 
     override fun keepaliveIntervalMs(): Long = plan.keepaliveIntervalMs
+
+    override fun onRead(characteristicUuid: UUID, bytes: ByteArray): List<BleProtocolOperation> {
+        val endpointRole = endpointRoleByUuid[characteristicUuid] ?: return emptyList()
+        plan.onRead?.invoke(state, endpointRole, bytes)
+        return emptyList()
+    }
 
     override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
         when (action) {
@@ -462,6 +493,162 @@ private class ButtplugScalarProtocol(
         val current = packetId
         packetId = (packetId + 1) and 0xFF
         return current
+    }
+}
+
+private class ButtplugLinearProtocol(
+    private val match: ButtplugDeviceMatch,
+    private val plan: LinearProtocolPlan,
+) : BleDeviceProtocol {
+    private val endpointByRole = match.endpoint.characteristics
+    private val txUuid: UUID = uuid(match.endpoint.txUuid.orEmpty())
+    private val linearFeatures = match.linearOutputs.sortedBy { it.featureIndex }
+    private val state = IntArray(maxOf(plan.stateSize, linearFeatures.size))
+    private val maxPosition = linearFeatures.maxOfOrNull { it.max.coerceAtLeast(1) } ?: 1
+
+    override val status: BleProtocolStatus = match.toBleStatus(
+        id = "buttplug_${match.protocol.id}",
+        controllable = txUuid.toString().isNotBlank(),
+        supportsMode = false,
+        controlStyle = ToyControlStyle.IntensityOnly,
+    )
+
+    override fun matches(fingerprint: BleGattFingerprint): Boolean = false
+
+    override fun initialize(fingerprint: BleGattFingerprint): List<BleProtocolOperation> =
+        plan.initWrites.map { write ->
+            val endpoint = requireNotNull(endpointByRole[write.endpointRole]) {
+                "${plan.protocolId} endpoint ${write.endpointRole} is missing"
+            }
+            BleProtocolOperation.Write(
+                characteristicUuid = uuid(endpoint),
+                bytes = write.bytes,
+                withResponse = write.withResponse,
+            )
+        }
+
+    override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
+        when (action) {
+            is ToyControlAction.Intensity -> writeAll(action.value)
+            is ToyControlAction.Combined -> writeAll(action.intensity)
+            is ToyControlAction.Pattern -> writeAll(maxPosition)
+            is ToyControlAction.DualMotor -> writeAll(action.strongestIntensity(maxPosition))
+            ToyControlAction.Stop -> linearFeatures.flatMap { writeFeature(it, it.min) }
+        }
+
+    private fun writeAll(value: Int): List<BleProtocolOperation.Write> =
+        linearFeatures.flatMap { feature ->
+            val position = value.coerceIn(feature.min, feature.max)
+            writeFeature(feature, position)
+        }
+
+    private fun writeFeature(
+        feature: com.funny.aitoy.buttplug.ButtplugOutputFeature,
+        position: Int,
+    ): List<BleProtocolOperation.Write> =
+        plan.writes(
+            state,
+            com.funny.aitoy.buttplug.LinearProtocolCommand(
+                featureIndex = feature.featureIndex,
+                position = position.coerceIn(feature.min, feature.max),
+                durationMs = DEFAULT_LINEAR_DURATION_MS,
+            ),
+        ).map { write ->
+            val endpoint = requireNotNull(endpointByRole[write.endpointRole]) {
+                "${plan.protocolId} endpoint ${write.endpointRole} is missing"
+            }
+            BleProtocolOperation.Write(
+                characteristicUuid = uuid(endpoint),
+                bytes = write.bytes,
+                withResponse = write.withResponse,
+            )
+        }
+
+    private companion object {
+        const val DEFAULT_LINEAR_DURATION_MS = 1000
+    }
+}
+
+private class ButtplugMixedOutputProtocol(
+    private val match: ButtplugDeviceMatch,
+    private val plan: MixedOutputProtocolPlan,
+) : BleDeviceProtocol {
+    private val endpointByRole = match.endpoint.characteristics
+    private val txUuid: UUID = uuid(match.endpoint.txUuid.orEmpty())
+    private val scalarFeatures = match.scalarOutputs.sortedBy { it.featureIndex }
+    private val linearFeatures = match.linearOutputs.sortedBy { it.featureIndex }
+    private val state = plan.createState(match)
+    private val maxValue = (scalarFeatures + linearFeatures).maxOfOrNull { it.max.coerceAtLeast(1) } ?: 1
+
+    override val status: BleProtocolStatus = match.toBleStatus(
+        id = "buttplug_${match.protocol.id}",
+        controllable = txUuid.toString().isNotBlank(),
+        supportsMode = false,
+        controlStyle = if (scalarFeatures.size > 1) ToyControlStyle.DualIntensityOnly else ToyControlStyle.IntensityOnly,
+    )
+
+    override fun matches(fingerprint: BleGattFingerprint): Boolean = false
+
+    override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
+        when (action) {
+            is ToyControlAction.Intensity -> writeAll(action.value)
+            is ToyControlAction.Combined -> writeAll(action.intensity)
+            is ToyControlAction.Pattern -> writeAll(maxValue)
+            is ToyControlAction.DualMotor -> {
+                if (scalarFeatures.size > 1) {
+                    buildList {
+                        addAll(writeScalarFeature(scalarFeatures[0], action.internalIntensity))
+                        addAll(writeScalarFeature(scalarFeatures[1], action.externalIntensity))
+                    }
+                } else {
+                    writeAll(action.strongestIntensity(maxValue))
+                }
+            }
+            ToyControlAction.Stop -> buildList {
+                for (feature in scalarFeatures) addAll(writeScalarFeature(feature, 0))
+                for (feature in linearFeatures) addAll(writeLinearFeature(feature, feature.min))
+            }
+        }
+
+    private fun writeAll(value: Int): List<BleProtocolOperation.Write> =
+        buildList {
+            for (feature in scalarFeatures) addAll(writeScalarFeature(feature, value))
+            for (feature in linearFeatures) addAll(writeLinearFeature(feature, value))
+        }
+
+    private fun writeScalarFeature(feature: com.funny.aitoy.buttplug.ButtplugOutputFeature, value: Int): List<BleProtocolOperation.Write> {
+        val kind = feature.type.toToyOutputKind()
+        val coerced = value.coerceIn(feature.min, feature.max)
+        return plan.scalarWrites(
+            state,
+            com.funny.aitoy.buttplug.ScalarProtocolCommand(feature.featureIndex, kind, coerced),
+        ).toBleWrites()
+    }
+
+    private fun writeLinearFeature(feature: com.funny.aitoy.buttplug.ButtplugOutputFeature, value: Int): List<BleProtocolOperation.Write> =
+        plan.linearWrites(
+            state,
+            com.funny.aitoy.buttplug.LinearProtocolCommand(
+                featureIndex = feature.featureIndex,
+                position = value.coerceIn(feature.min, feature.max),
+                durationMs = DEFAULT_LINEAR_DURATION_MS,
+            ),
+        ).toBleWrites()
+
+    private fun List<com.funny.aitoy.buttplug.MixedOutputProtocolWrite>.toBleWrites(): List<BleProtocolOperation.Write> =
+        map { write ->
+            val endpoint = requireNotNull(endpointByRole[write.endpointRole]) {
+                "${plan.protocolId} endpoint ${write.endpointRole} is missing"
+            }
+            BleProtocolOperation.Write(
+                characteristicUuid = uuid(endpoint),
+                bytes = write.bytes,
+                withResponse = write.withResponse,
+            )
+        }
+
+    private companion object {
+        const val DEFAULT_LINEAR_DURATION_MS = 1000
     }
 }
 
