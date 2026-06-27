@@ -31,6 +31,7 @@ data class ButtplugDeviceDefinition(
 data class ButtplugProtocolDefinition(
     val id: String,
     val displayName: String,
+    val communicationTypes: Set<String>,
     val communicationNames: List<String>,
     val endpoints: List<ButtplugEndpoint>,
     val defaultDevice: ButtplugDeviceDefinition,
@@ -60,6 +61,9 @@ data class ButtplugDeviceMatch(
     val device: ButtplugDeviceDefinition,
     val endpoint: ButtplugEndpoint,
 ) {
+    val outputTypes: Set<String>
+        get() = device.features.map { it.type }.toSet()
+
     val vibrateOutputs: List<ButtplugOutputFeature>
         get() = device.features.filter { it.type == OUTPUT_VIBRATE || it.type == OUTPUT_OSCILLATE }
 
@@ -71,6 +75,17 @@ data class ButtplugDeviceMatch(
 
 const val OUTPUT_VIBRATE = "vibrate"
 const val OUTPUT_OSCILLATE = "oscillate"
+const val OUTPUT_ROTATE = "rotate"
+const val OUTPUT_CONSTRICT = "constrict"
+const val OUTPUT_INFLATE = "inflate"
+const val OUTPUT_POSITION = "position"
+const val OUTPUT_HW_POSITION_WITH_DURATION = "hw_position_with_duration"
+const val OUTPUT_HEATER = "heater"
+const val OUTPUT_LED = "led"
+
+const val COMMUNICATION_BTLE = "btle"
+const val COMMUNICATION_HID = "hid"
+const val COMMUNICATION_SERIAL = "serial"
 
 fun String.normalizedButtplugName(): String =
     lowercase().replace("_", "").replace("-", "").replace(" ", "")

@@ -47,8 +47,11 @@ object ButtplugConfigRepository {
 private fun YamlMap.toProtocolDefinition(id: String): ButtplugProtocolDefinition {
     val defaults = mapValue("defaults")?.asMap()
     val defaultFeatures = defaults?.featureNodes().orEmpty()
-    val btleNodes = listValue("communication")
-        .mapNotNull { it.asMap()?.mapValue("btle")?.asMap() }
+    val communicationNodes = listValue("communication").mapNotNull { it.asMap() }
+    val communicationTypes = communicationNodes
+        .flatMap { node -> node.entries.entries.map { (type, _) -> type.content.lowercase() } }
+        .toSet()
+    val btleNodes = communicationNodes.mapNotNull { it.mapValue(COMMUNICATION_BTLE)?.asMap() }
     val endpoints = btleNodes.flatMap { btle ->
         btle.mapValue("services")
             ?.asMap()
@@ -72,6 +75,7 @@ private fun YamlMap.toProtocolDefinition(id: String): ButtplugProtocolDefinition
     return ButtplugProtocolDefinition(
         id = id,
         displayName = defaultDevice.name.ifBlank { id },
+        communicationTypes = communicationTypes,
         communicationNames = btleNodes.flatMap { it.stringListValue("names") }.distinct(),
         endpoints = endpoints,
         defaultDevice = defaultDevice,

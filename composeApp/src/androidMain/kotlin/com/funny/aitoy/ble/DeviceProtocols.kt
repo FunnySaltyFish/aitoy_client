@@ -3,6 +3,10 @@ package com.funny.aitoy.ble
 import com.funny.aitoy.buttplug.ButtplugConfigRepository
 import com.funny.aitoy.buttplug.ButtplugDeviceFingerprint
 import com.funny.aitoy.buttplug.ButtplugDeviceMatch
+import com.funny.aitoy.buttplug.ButtplugLocalHandlerRegistry
+import com.funny.aitoy.buttplug.SimpleVibrateProtocolPlan
+import com.funny.aitoy.buttplug.SimpleVibrateProtocolPlans
+import com.funny.aitoy.buttplug.WeVibeProtocolPlans
 import com.funny.aitoy.buttplug.normalizedUuidText
 import java.util.UUID
 
@@ -105,11 +109,13 @@ internal object BleProtocolRegistry {
 
 private object ButtplugBleProtocolFactory {
     fun create(match: ButtplugDeviceMatch): BleDeviceProtocol? =
-        when (match.protocol.id) {
+        when (match.protocol.id.takeIf(ButtplugLocalHandlerRegistry.controllableButtplugHandlerIds::contains)) {
             "wevibe" -> ButtplugWeVibePackedProtocol(match)
             "wevibe-8bit" -> ButtplugWeVibe8BitProtocol(match)
             "wevibe-chorus" -> ButtplugWeVibeChorusProtocol(match)
-            else -> ButtplugUnsupportedProtocol(match)
+            else -> SimpleVibrateProtocolPlans.forProtocolId(match.protocol.id)
+                ?.let { ButtplugSimpleVibrateProtocol(match, it) }
+                ?: ButtplugUnsupportedProtocol(match)
         }
 }
 
@@ -166,9 +172,6 @@ private abstract class ButtplugVibrateProtocol(
 
     protected abstract fun payloadFor(internalIntensity: Int, externalIntensity: Int): ByteArray
 
-    protected fun motorBits(internalIntensity: Int, externalIntensity: Int): Int =
-        (if (externalIntensity > 0) 0x02 else 0x00) or (if (internalIntensity > 0) 0x01 else 0x00)
-
     private fun setAll(value: Int) {
         val next = value.coerceIn(0, maxIntensity)
         intensities[0] = next
@@ -183,100 +186,112 @@ private abstract class ButtplugVibrateProtocol(
         )
 }
 
+private class ButtplugSimpleVibrateProtocol(
+    private val match: ButtplugDeviceMatch,
+    private val plan: SimpleVibrateProtocolPlan,
+) : BleDeviceProtocol {
+    private val txUuid: UUID = uuid(match.endpoint.txUuid.orEmpty())
+    private val vibrateFeatures = match.vibrateOutputs.sortedBy { it.featureIndex }
+    private val channelCount = vibrateFeatures.size.coerceAtLeast(1)
+    private val maxIntensity = vibrateFeatures.maxOfOrNull { it.max }?.coerceAtLeast(1) ?: 1
+
+    override val status: BleProtocolStatus = match.toBleStatus(
+        id = "buttplug_${match.protocol.id}",
+        controllable = txUuid.toString().isNotBlank(),
+        supportsMode = false,
+        controlStyle = if (channelCount > 1) ToyControlStyle.DualIntensityOnly else ToyControlStyle.IntensityOnly,
+    )
+
+    override fun matches(fingerprint: BleGattFingerprint): Boolean = false
+
+    override fun initialize(fingerprint: BleGattFingerprint): List<BleProtocolOperation> =
+        plan.initPayloads.map { payload ->
+            BleProtocolOperation.Write(
+                characteristicUuid = txUuid,
+                bytes = payload,
+                withResponse = plan.withResponse,
+            )
+        }
+
+    override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
+        when (action) {
+            is ToyControlAction.Intensity -> writeAll(action.value)
+            is ToyControlAction.Combined -> writeAll(action.intensity)
+            is ToyControlAction.Pattern -> writeAll(maxIntensity)
+            is ToyControlAction.DualMotor -> {
+                if (channelCount > 1) {
+                    listOf(
+                        write(featureIndex = 0, speed = action.internalIntensity),
+                        write(featureIndex = 1, speed = action.externalIntensity),
+                    )
+                } else {
+                    writeAll(action.strongestIntensity(maxIntensity))
+                }
+            }
+            ToyControlAction.Stop -> writeAll(0)
+        }
+
+    private fun writeAll(speed: Int): List<BleProtocolOperation.Write> =
+        (0 until channelCount).map { index -> write(index, speed) }
+
+    private fun write(featureIndex: Int, speed: Int): BleProtocolOperation.Write =
+        BleProtocolOperation.Write(
+            characteristicUuid = txUuid,
+            bytes = plan.payload(featureIndex, speed.coerceIn(0, maxIntensity)),
+            withResponse = plan.withResponse,
+        )
+}
+
 private class ButtplugWeVibePackedProtocol(
     match: ButtplugDeviceMatch,
 ) : ButtplugVibrateProtocol(match) {
-    private val patternCodes = intArrayOf(0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x0E, 0x0F, 0x10, 0x11)
     private var currentPattern = 1
 
     override val status: BleProtocolStatus = match.toBleStatus(
         id = "buttplug_wevibe",
         controllable = true,
         supportsMode = true,
-        modeMax = patternCodes.size,
+        modeMax = WeVibeProtocolPlans.packedPatternCodes.size,
         controlStyle = if (channelCount > 1) {
             ToyControlStyle.PatternAndDualIntensity
         } else {
             ToyControlStyle.CombinedPatternAndIntensity
         },
-        modeNames = listOf("长振", "峰值", "脉冲", "回响", "波浪", "潮汐", "冲浪", "弹跳", "按摩", "挑逗"),
+        modeNames = WeVibeProtocolPlans.packedPatternNames,
     )
 
     override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> {
         when (action) {
-            is ToyControlAction.Pattern -> currentPattern = action.mode.coerceIn(1, patternCodes.size)
-            is ToyControlAction.Combined -> currentPattern = action.mode.coerceIn(1, patternCodes.size)
-            is ToyControlAction.DualMotor -> currentPattern = action.mode.coerceIn(1, patternCodes.size)
+            is ToyControlAction.Pattern -> currentPattern = action.mode.coerceIn(1, WeVibeProtocolPlans.packedPatternCodes.size)
+            is ToyControlAction.Combined -> currentPattern = action.mode.coerceIn(1, WeVibeProtocolPlans.packedPatternCodes.size)
+            is ToyControlAction.DualMotor -> currentPattern = action.mode.coerceIn(1, WeVibeProtocolPlans.packedPatternCodes.size)
             else -> Unit
         }
         return super.commandsFor(action)
     }
 
     override fun payloadFor(internalIntensity: Int, externalIntensity: Int): ByteArray =
-        if (internalIntensity == 0 && externalIntensity == 0) {
-            stopWeVibePayload()
-        } else {
-            bytes(
-                0x0F,
-                patternCodes[currentPattern - 1],
-                0x00,
-                ((internalIntensity.coerceIn(0, 0x0F) shl 4) or externalIntensity.coerceIn(0, 0x0F)),
-                0x00,
-                packedMotorBits(internalIntensity, externalIntensity).takeIf { it != 0 } ?: 0x03,
-                0x00,
-                0x00,
-            )
-        }
-
-    private fun packedMotorBits(internalIntensity: Int, externalIntensity: Int): Int =
-        (if (internalIntensity > 0) 0x02 else 0x00) or (if (externalIntensity > 0) 0x01 else 0x00)
+        WeVibeProtocolPlans.packedPatternPayload(currentPattern, internalIntensity, externalIntensity)
 }
 
 private class ButtplugWeVibe8BitProtocol(
     match: ButtplugDeviceMatch,
 ) : ButtplugVibrateProtocol(match) {
     override fun payloadFor(internalIntensity: Int, externalIntensity: Int): ByteArray =
-        if (internalIntensity == 0 && externalIntensity == 0) {
-            stopWeVibePayload()
-        } else {
-            bytes(
-                0x0F,
-                0x03,
-                0x00,
-                (externalIntensity + 3).coerceIn(0, 0xFF),
-                (internalIntensity + 3).coerceIn(0, 0xFF),
-                motorBits(internalIntensity, externalIntensity),
-                0x00,
-                0x00,
-            )
-        }
+        WeVibeProtocolPlans.eightBitPayload(channelCount, internalIntensity, externalIntensity)
 }
 
 private class ButtplugWeVibeChorusProtocol(
     match: ButtplugDeviceMatch,
 ) : ButtplugVibrateProtocol(match) {
     override fun payloadFor(internalIntensity: Int, externalIntensity: Int): ByteArray =
-        if (internalIntensity == 0 && externalIntensity == 0) {
-            stopWeVibePayload()
-        } else {
-            bytes(
-                0x0F,
-                0x03,
-                0x00,
-                internalIntensity,
-                externalIntensity,
-                motorBits(internalIntensity, externalIntensity),
-                0x00,
-                0x00,
-            )
-        }
+        WeVibeProtocolPlans.chorusPayload(channelCount, internalIntensity, externalIntensity)
 }
 
 private object WeVibeSyncLiteProtocol : BleDeviceProtocol {
     private val serviceUuid = uuid("f000bb03-0451-4000-b000-000000000000")
     private val txUuid = uuid("f000c000-0451-4000-b000-000000000000")
     private val rxUuid = uuid("f000b000-0451-4000-b000-000000000000")
-    private val patternCodes = intArrayOf(0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x0E, 0x0F, 0x10, 0x11)
     private var currentPattern = 1
     private var currentInternalIntensity = 0
     private var currentExternalIntensity = 0
@@ -287,10 +302,10 @@ private object WeVibeSyncLiteProtocol : BleDeviceProtocol {
         controllable = true,
         intensityMax = 15,
         supportsMode = true,
-        modeMax = patternCodes.size,
+        modeMax = WeVibeProtocolPlans.packedPatternCodes.size,
         controlStyle = ToyControlStyle.PatternAndDualIntensity,
         modeLabel = "预设节奏",
-        modeNames = listOf("长振", "峰值", "脉冲", "回响", "波浪", "潮汐", "冲浪", "弹跳", "按摩", "挑逗"),
+        modeNames = WeVibeProtocolPlans.packedPatternNames,
         intensityLabel = "整体强度",
         channelNames = listOf("内侧", "外侧"),
         automatic = true,
@@ -325,32 +340,16 @@ private object WeVibeSyncLiteProtocol : BleDeviceProtocol {
         }
 
     private fun command(mode: Int, internalIntensity: Int, externalIntensity: Int): BleProtocolOperation.Write {
-        currentPattern = mode.coerceIn(1, patternCodes.size)
+        currentPattern = mode.coerceIn(1, WeVibeProtocolPlans.packedPatternCodes.size)
         currentInternalIntensity = internalIntensity.coerceIn(0, status.intensityMax)
         currentExternalIntensity = externalIntensity.coerceIn(0, status.intensityMax)
-        val motorBits = when {
-            currentInternalIntensity > 0 && currentExternalIntensity > 0 -> 0x03
-            currentInternalIntensity > 0 -> 0x02
-            currentExternalIntensity > 0 -> 0x01
-            else -> 0x00
-        }
-        val payload = if (motorBits == 0) {
-            stopPayload()
-        } else {
-            bytes(
-                0x0F,
-                patternCodes[currentPattern - 1],
-                0x00,
-                (currentInternalIntensity shl 4) or currentExternalIntensity,
-                0x00,
-                motorBits,
-                0x00,
-                0x00,
-            )
-        }
         return BleProtocolOperation.Write(
             characteristicUuid = txUuid,
-            bytes = payload,
+            bytes = WeVibeProtocolPlans.packedPatternPayload(
+                currentPattern,
+                currentInternalIntensity,
+                currentExternalIntensity,
+            ),
             withResponse = true,
         )
     }
@@ -360,12 +359,10 @@ private object WeVibeSyncLiteProtocol : BleDeviceProtocol {
         currentExternalIntensity = 0
         return BleProtocolOperation.Write(
             characteristicUuid = txUuid,
-            bytes = stopPayload(),
+            bytes = WeVibeProtocolPlans.stopPayload(),
             withResponse = true,
         )
     }
-
-    private fun stopPayload(): ByteArray = bytes(0x0F, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00)
 }
 
 private object SistalkMixPwmProtocol : BleDeviceProtocol {
@@ -1575,9 +1572,6 @@ private fun uuid(value: String): UUID = UUID.fromString(value)
 
 private fun bytes(vararg values: Int): ByteArray =
     values.map { (it and 0xff).toByte() }.toByteArray()
-
-private fun stopWeVibePayload(): ByteArray =
-    bytes(0x0F, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00)
 
 private fun BleGattFingerprint.toButtplugFingerprint(): ButtplugDeviceFingerprint =
     ButtplugDeviceFingerprint(
