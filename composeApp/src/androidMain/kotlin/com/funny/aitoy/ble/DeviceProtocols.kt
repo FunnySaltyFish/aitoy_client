@@ -94,6 +94,7 @@ internal object BleProtocolRegistry {
                     SistalkMonsterPubMultiMotorProtocol,
                     SistalkMonsterPubDualMotorProtocol,
                     SistalkMonsterPubSingleMotorProtocol,
+                    SvakomSt419Protocol,
                     SvakomQhSx045Protocol,
                     MizzzeeXhtkjProtocol,
                     SenseeCcpa10S2Protocol,
@@ -1135,6 +1136,72 @@ private object SvakomQhSx045Protocol : BleDeviceProtocol {
     )
 }
 
+private object SvakomSt419Protocol : BleDeviceProtocol {
+    private val serviceUuid = uuid("0000ffe0-0000-1000-8000-00805f9b34fb")
+    private val writeUuid = uuid("0000ffe1-0000-1000-8000-00805f9b34fb")
+    private val notifyUuid = uuid("0000ffe2-0000-1000-8000-00805f9b34fb")
+
+    override val status = BleProtocolStatus(
+        id = "svakom_st419",
+        displayName = "SVAKOM ST419",
+        controllable = true,
+        intensityMax = 10,
+        supportsMode = true,
+        modeMax = 11,
+        controlStyle = ToyControlStyle.CombinedPatternAndIntensity,
+        modeLabel = "节奏",
+        intensityLabel = "强度",
+        features = listOf(
+            BleProtocolFeature(
+                type = "vibrate",
+                min = 0,
+                max = 10,
+                index = 0,
+                label = "强度",
+            ),
+        ),
+        automatic = true,
+    )
+
+    override fun matches(fingerprint: BleGattFingerprint): Boolean {
+        val name = fingerprint.name.normalizedDeviceName()
+        val hasSvakomGatt = fingerprint.serviceUuids.contains(serviceUuid) &&
+                fingerprint.characteristicUuids.contains(writeUuid) &&
+                fingerprint.characteristicUuids.contains(notifyUuid)
+        val isSt419 = name == "st419" || name.contains("st419")
+        return isSt419 && hasSvakomGatt && fingerprint.hasSvakomManufacturerData()
+    }
+
+    override fun initialize(fingerprint: BleGattFingerprint): List<BleProtocolOperation> =
+        listOf(
+            BleProtocolOperation.SubscribeNotify(notifyUuid),
+            BleProtocolOperation.Sleep(240),
+            command(mode = 0, intensity = 0),
+        )
+
+    override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
+        when (action) {
+            is ToyControlAction.Pattern -> listOf(command(action.mode, status.intensityMax))
+            is ToyControlAction.Intensity -> listOf(command(mode = 1, intensity = action.value))
+            is ToyControlAction.Combined -> listOf(command(action.mode, action.intensity))
+            is ToyControlAction.DualMotor -> listOf(command(action.mode, action.strongestIntensity(status.intensityMax)))
+            ToyControlAction.Stop -> listOf(command(mode = 0, intensity = 0))
+        }
+
+    private fun command(mode: Int, intensity: Int) = BleProtocolOperation.Write(
+        characteristicUuid = writeUuid,
+        bytes = bytes(
+            0x55,
+            0x03,
+            0x00,
+            0x00,
+            mode.coerceIn(0, status.modeMax),
+            intensity.coerceIn(0, status.intensityMax),
+        ),
+        withResponse = false,
+    )
+}
+
 private object MizzzeeXhtkjProtocol : BleDeviceProtocol {
     private val serviceUuid = uuid("0000ff10-0000-1000-8000-00805f9b34fb")
     private val writeUuid = uuid("0000ff12-0000-1000-8000-00805f9b34fb")
@@ -2039,6 +2106,12 @@ private fun ankniAaFrame(command: Int, vararg payload: Int): ByteArray {
 
 private fun String.normalizedDeviceName(): String =
     lowercase().replace("_", "").replace("-", "").replace(" ", "")
+
+private fun BleGattFingerprint.hasSvakomManufacturerData(): Boolean =
+    manufacturerData.substringAfter(':', missingDelimiterValue = manufacturerData)
+        .trim()
+        .uppercase()
+        .startsWith("53 56 41")
 
 private fun BleGattFingerprint.hasAnkniDdddGatt(): Boolean =
     serviceUuids.contains(uuid("0000dddd-0000-1000-8000-00805f9b34fb")) &&
