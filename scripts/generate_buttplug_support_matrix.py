@@ -44,19 +44,24 @@ def load_registry(path: Path) -> dict[str, dict[str, str]]:
             "support_status": enum_value(block, "status") or "",
             "notes": string_value(block, "notes") or "",
         }
-    for protocol_id in load_simple_vibrate_ids(path.with_name("SimpleVibrateProtocolPlans.kt")):
-        entries.setdefault(
-            protocol_id,
-            {
-                "handler_source": "ButtplugProtocolImpl",
-                "support_status": "Controllable",
-                "notes": "Simple vibrate handler ported from Buttplug protocol_impl",
-            },
-        )
+    for file_name, notes in [
+        ("SimpleVibrateProtocolPlans.kt", "Simple vibrate handler ported from Buttplug protocol_impl"),
+        ("StatefulVibrateProtocolPlans.kt", "Stateful vibrate handler ported from Buttplug protocol_impl"),
+        ("ScalarProtocolPlans.kt", "Scalar output handler ported from Buttplug protocol_impl"),
+    ]:
+        for protocol_id in load_plan_protocol_ids(path.with_name(file_name)):
+            entries.setdefault(
+                protocol_id,
+                {
+                    "handler_source": "ButtplugProtocolImpl",
+                    "support_status": "Controllable",
+                    "notes": notes,
+                },
+            )
     return entries
 
 
-def load_simple_vibrate_ids(path: Path) -> list[str]:
+def load_plan_protocol_ids(path: Path) -> list[str]:
     if not path.exists():
         return []
     text = path.read_text(encoding="utf-8")

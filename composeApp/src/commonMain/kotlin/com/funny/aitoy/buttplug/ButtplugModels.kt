@@ -67,6 +67,15 @@ data class ButtplugDeviceMatch(
     val vibrateOutputs: List<ButtplugOutputFeature>
         get() = device.features.filter { it.type == OUTPUT_VIBRATE || it.type == OUTPUT_OSCILLATE }
 
+    val scalarOutputs: List<ButtplugOutputFeature>
+        get() = device.features.filter {
+            it.type == OUTPUT_VIBRATE ||
+                it.type == OUTPUT_OSCILLATE ||
+                it.type == OUTPUT_ROTATE ||
+                it.type == OUTPUT_CONSTRICT ||
+                it.type == OUTPUT_INFLATE
+        }
+
     val hasOnlyVibrateOutputs: Boolean
         get() = device.features.isNotEmpty() && device.features.all {
             it.type == OUTPUT_VIBRATE || it.type == OUTPUT_OSCILLATE

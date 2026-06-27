@@ -55,6 +55,9 @@ class AndroidBleController(
     private val operationQueue = ArrayDeque<BleProtocolOperation>()
     private var operationInProgress = false
     private var operationId = 0L
+    private var keepaliveRunnable: Runnable? = null
+    private var keepaliveProtocol: BleDeviceProtocol? = null
+    private var keepaliveOperations: List<BleProtocolOperation> = emptyList()
     private val scanSignatures = mutableMapOf<String, String>()
     private val advertiser = AndroidBleAdvertiser(::trace)
 
@@ -268,6 +271,7 @@ class AndroidBleController(
         failedProtocolNames.clear()
         disconnectingAfterProtocolFailure = false
         resolvedWriteCharacteristic = null
+        cancelProtocolKeepalive()
         operationQueue.clear()
         operationInProgress = false
         onProtocol(BleProtocolStatus())
@@ -326,6 +330,7 @@ class AndroidBleController(
                     if (activeProtocol === protocol && protocolReady) {
                         trace("GATT 控制 action=$action protocol=${protocol.status.id} operations=${commands.size}")
                         enqueue(commands)
+                        updateProtocolKeepalive(protocol, action, commands)
                     }
                 },
                 warmupMs,
@@ -334,6 +339,7 @@ class AndroidBleController(
         }
         trace("GATT 控制 action=$action protocol=${protocol.status.id} operations=${commands.size}")
         enqueue(commands)
+        updateProtocolKeepalive(protocol, action, commands)
     }
 
     fun stopDevice() = sendAction(ToyControlAction.Stop)
@@ -367,6 +373,7 @@ class AndroidBleController(
         }
         val hasNext = protocolCandidateIndex + 1 < protocolCandidates.size
         protocolReady = false
+        cancelProtocolKeepalive()
         operationQueue.clear()
         operationInProgress = false
         val fingerprint = BleGattFingerprint(
@@ -434,6 +441,7 @@ class AndroidBleController(
 
     fun disconnect() {
         advertiser.stop()
+        cancelProtocolKeepalive()
         gatt?.let {
             updateState(BleConnectionState.Disconnecting)
             trace("主动断开 address=${it.device.address}")
@@ -450,6 +458,7 @@ class AndroidBleController(
     fun close() {
         stopScan()
         advertiser.stop()
+        cancelProtocolKeepalive()
         gatt?.let(::closeGatt)
         scope.cancel()
     }
@@ -512,6 +521,7 @@ class AndroidBleController(
         }
         activeProtocol = protocol
         protocolReady = false
+        cancelProtocolKeepalive()
         operationQueue.clear()
         operationInProgress = false
         trace(
@@ -590,6 +600,7 @@ class AndroidBleController(
             trace(message, error = true)
             activeProtocol = null
             protocolReady = false
+            cancelProtocolKeepalive()
             operationQueue.clear()
             operationInProgress = false
             disconnectingAfterProtocolFailure = true
@@ -688,6 +699,7 @@ class AndroidBleController(
         activeProtocol = null
         activeBroadcastProtocol = null
         protocolReady = false
+        cancelProtocolKeepalive()
         gattReadyAtMs = 0L
         operationQueue.clear()
         operationInProgress = false
@@ -702,7 +714,44 @@ class AndroidBleController(
     private fun closeGatt(target: BluetoothGatt) {
         target.close()
         if (gatt === target) gatt = null
+        cancelProtocolKeepalive()
         trace("GATT 资源已释放")
+    }
+
+    private fun updateProtocolKeepalive(
+        protocol: BleDeviceProtocol,
+        action: ToyControlAction,
+        operations: List<BleProtocolOperation>,
+    ) {
+        val intervalMs = protocol.keepaliveIntervalMs()
+        if (action == ToyControlAction.Stop || intervalMs <= 0 || operations.isEmpty()) {
+            cancelProtocolKeepalive()
+            return
+        }
+        keepaliveProtocol = protocol
+        keepaliveOperations = operations
+        scheduleProtocolKeepalive(intervalMs)
+    }
+
+    private fun scheduleProtocolKeepalive(intervalMs: Long) {
+        keepaliveRunnable?.let(mainHandler::removeCallbacks)
+        val protocol = keepaliveProtocol ?: return
+        val runnable = Runnable {
+            if (activeProtocol === protocol && protocolReady && keepaliveOperations.isNotEmpty()) {
+                trace("GATT keepalive protocol=${protocol.status.id} operations=${keepaliveOperations.size}")
+                enqueue(keepaliveOperations)
+                scheduleProtocolKeepalive(intervalMs)
+            }
+        }
+        keepaliveRunnable = runnable
+        mainHandler.postDelayed(runnable, intervalMs)
+    }
+
+    private fun cancelProtocolKeepalive() {
+        keepaliveRunnable?.let(mainHandler::removeCallbacks)
+        keepaliveRunnable = null
+        keepaliveProtocol = null
+        keepaliveOperations = emptyList()
     }
 
     private fun enqueue(operations: List<BleProtocolOperation>) {
@@ -789,6 +838,13 @@ class AndroidBleController(
                     handleProtocolOperationFailed("提交 Notify 描述符失败：$descriptorResult")
                     return
                 }
+            }
+            is BleProtocolOperation.Sleep -> {
+                trace("等待协议初始化 ${operation.millis}ms")
+                mainHandler.postDelayed({
+                    operationInProgress = false
+                    executeNextOperation()
+                }, operation.millis.coerceAtLeast(0))
             }
             is BleProtocolOperation.Write -> write(operation)
         }
@@ -886,6 +942,7 @@ class AndroidBleController(
         when (this) {
             is BleProtocolOperation.Read -> "Read uuid=$characteristicUuid"
             is BleProtocolOperation.SubscribeNotify -> "SubscribeNotify uuid=$characteristicUuid"
+            is BleProtocolOperation.Sleep -> "Sleep millis=$millis"
             is BleProtocolOperation.Write ->
                 "Write uuid=$characteristicUuid withResponse=$withResponse bytes=${bytes.toHexString()}"
         }

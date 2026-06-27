@@ -16,16 +16,24 @@ class SimpleVibrateProtocolPlansTest {
         assertPayload("amorelie-joy", 0, 7, false, "01 01 07")
         assertPayload("aneros", 1, 8, false, "f2 08")
         assertPayload("cupido", 0, 9, false, "b0 03 00 00 00 09 aa")
+        assertPayload("cowgirl-cone", 0, 50, false, "f1 01 32 00")
         assertPayload("deepsire", 0, 10, false, "55 04 01 00 00 0a aa")
         assertPayload("fox", 0, 3, false, "03 01 01 fe 03")
+        assertPayload("foreo", 0, 5, true, "01 00 05")
+        assertPayload("hgod", 0, 9, false, "55 04 00 00 00 09")
         assertPayload("kiiroo-prowand", 0, 9, false, "00 00 64 ff 09 09")
         assertPayload("kiiroo-prowand", 0, 0, false, "00 00 64 00 00 00")
         assertPayload("kiiroo-spot", 0, 9, false, "00 ff 00 00 00 09")
+        assertPayload("leten", 0, 9, true, "02 09")
         assertPayload("lovedistance", 0, 9, false, "f3 00 09")
+        assertPayload("lioness", 0, 50, false, "02 aa bb cc cc 32")
         assertPayload("magic-motion-3", 0, 9, false, "0b ff 04 0a 46 46 00 04 08 09 64 00")
         assertPayload("mannuo", 0, 3, true, "aa 55 06 01 01 01 03 fa 01")
         assertPayload("maxpro", 0, 9, false, "55 04 07 ff ff 3f 09 5f 09 0e")
         assertPayload("meese", 1, 3, true, "01 80 02 03")
+        assertPayload("mizzzee-v2", 0, 9, false, "69 96 04 02 09 2c 09")
+        assertPayload("mizzzee-v3", 0, 0, true, "03 12 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00")
+        assertPayload("mizzzee-v3", 0, 500, true, "03 12 f3 00 fc 00 fe 40 01 3c a6 00 fc 00 fe 40 01 3c a6 00")
         assertPayload("mymuselinkplus", 0, 0, false, "aa 55 06 aa 00 00 00 00")
         assertPayload("mymuselinkplus", 0, 3, false, "aa 55 06 01 01 01 03 ff")
         assertPayload("nobra", 0, 0, false, "70")
@@ -53,7 +61,23 @@ class SimpleVibrateProtocolPlansTest {
         assertPayload("wetoy", 0, 0, true, "80 03")
         assertPayload("wetoy", 0, 9, true, "b2 08")
         assertPayload("xiuxiuda", 0, 9, false, "00 00 00 00 65 3a 30 09 64")
+        assertPayload("xuanhuan", 0, 9, true, "03 02 00 09")
         assertPayload("youcups", 0, 9, false, "24 53 59 53 2c 39 3f")
+
+        assertEquals(100, SimpleVibrateProtocolPlans.forProtocolId("hgod")?.keepaliveIntervalMs)
+        assertEquals(1000, SimpleVibrateProtocolPlans.forProtocolId("leten")?.keepaliveIntervalMs)
+        assertEquals(200, SimpleVibrateProtocolPlans.forProtocolId("mizzzee-v3")?.keepaliveIntervalMs)
+        assertEquals(300, SimpleVibrateProtocolPlans.forProtocolId("xuanhuan")?.keepaliveIntervalMs)
+    }
+
+    @Test
+    fun foreoPayloadUsesDeviceNameMode() {
+        val plan = requireNotNull(SimpleVibrateProtocolPlans.forProtocolId("foreo"))
+
+        assertContentEquals(hex("01 01 05"), plan.payloadFor("Foreo LUNA fofo", 0, 5))
+        assertContentEquals(hex("01 01 05"), plan.payloadFor("Foreo UFO 2", 0, 5))
+        assertContentEquals(hex("01 03 05"), plan.payloadFor("Foreo LUNA play smart 2", 0, 5))
+        assertContentEquals(hex("01 00 05"), plan.payloadFor("Foreo LUNA 3", 0, 5))
     }
 
     @Test
@@ -80,6 +104,24 @@ class SimpleVibrateProtocolPlansTest {
 
         assertContentEquals(hex("f3 00 00"), transport.writeBytesAt(0))
         assertContentEquals(hex("f4 01"), transport.writeBytesAt(1))
+    }
+
+    @Test
+    fun simpleHandlerRunsStructuredInitOperations() = runBlocking {
+        val cowgirlTransport = RecordingTransport()
+        val cowgirl = requireNotNull(SimpleVibrateProtocolHandlers.forProtocolId("cowgirl-cone"))
+        cowgirl.createSession(match("cowgirl-cone", channels = 1), cowgirlTransport).initialize()
+
+        assertContentEquals(hex("aa 56 00 00"), cowgirlTransport.writeBytesAt(0))
+        assertEquals(HardwareOperation.Sleep(3000), cowgirlTransport.operations[1])
+
+        val lionessTransport = RecordingTransport()
+        val lioness = requireNotNull(SimpleVibrateProtocolHandlers.forProtocolId("lioness"))
+        lioness.createSession(match("lioness", channels = 1), lionessTransport).initialize()
+
+        assertEquals(HardwareOperation.Subscribe("rx"), lionessTransport.operations[0])
+        assertContentEquals(hex("01 aa aa bb cc 10"), lionessTransport.writeBytesAt(1))
+        assertTrue((lionessTransport.operations[1] as HardwareOperation.Write).withResponse)
     }
 
     private fun assertPayload(
@@ -114,7 +156,7 @@ class SimpleVibrateProtocolPlansTest {
             endpoints = listOf(
                 ButtplugEndpoint(
                     serviceUuid = "service",
-                    characteristics = mapOf("tx" to "tx"),
+                    characteristics = mapOf("tx" to "tx", "rx" to "rx"),
                 ),
             ),
             defaultDevice = ButtplugDeviceDefinition(

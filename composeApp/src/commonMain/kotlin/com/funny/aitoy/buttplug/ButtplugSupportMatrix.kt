@@ -64,6 +64,24 @@ object ButtplugLocalHandlerRegistry {
                 notes = "Simple vibrate handler ported from Buttplug protocol_impl",
             )
         }.toTypedArray(),
+        *StatefulVibrateProtocolPlans.protocolIds.map { protocolId ->
+            ButtplugLocalHandlerDescriptor(
+                protocolId = protocolId,
+                source = ButtplugHandlerSource.ButtplugProtocolImpl,
+                supportedOutputKinds = setOf(ToyOutputKind.Vibrate),
+                status = ButtplugSupportStatus.Controllable,
+                notes = "Stateful vibrate handler ported from Buttplug protocol_impl",
+            )
+        }.toTypedArray(),
+        *ScalarProtocolPlans.protocolIds.map { protocolId ->
+            ButtplugLocalHandlerDescriptor(
+                protocolId = protocolId,
+                source = ButtplugHandlerSource.ButtplugProtocolImpl,
+                supportedOutputKinds = ScalarProtocolPlans.supportedKinds(protocolId),
+                status = ButtplugSupportStatus.Controllable,
+                notes = "Scalar output handler ported from Buttplug protocol_impl",
+            )
+        }.toTypedArray(),
         ButtplugLocalHandlerDescriptor(
             protocolId = "ankni",
             source = ButtplugHandlerSource.NativeSpecialized,
