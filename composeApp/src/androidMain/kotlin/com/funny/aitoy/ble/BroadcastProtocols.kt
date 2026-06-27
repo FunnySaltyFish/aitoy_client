@@ -4,6 +4,8 @@ import kotlin.random.Random
 
 internal data class BleAdvertiseOperation(
     val serviceUuid: String = "",
+    val serviceDataUuid: String = "",
+    val serviceData: ByteArray = byteArrayOf(),
     val manufacturerId: Int? = null,
     val manufacturerData: ByteArray = byteArrayOf(),
 )
@@ -18,6 +20,7 @@ internal interface BleBroadcastProtocol {
 
 internal object BleBroadcastProtocolRegistry {
     private val protocols = listOf(
+        AnkniQd1BroadcastProtocol,
         CachitoShikong2BroadcastProtocol,
         CachitoDaxiuBroadcastProtocol,
     )
@@ -27,6 +30,68 @@ internal object BleBroadcastProtocolRegistry {
 
     fun resolveFirstName(device: ScannedBleDevice): String =
         resolveAll(device).firstOrNull()?.status?.displayName.orEmpty()
+}
+
+/**
+ * ANKNI QD1 扫描包只暴露 FEFF 广播 UUID，GATT 连接后没有玩具控制服务。
+ * 控制帧复用醉清风小程序的 ANKNI 滑动强度封包：makeHexStr("08", makeSlideOrder(200, value, ...))。
+ */
+internal object AnkniQd1BroadcastProtocol : BleBroadcastProtocol {
+    private const val SERVICE_DATA_UUID = "0000feff-0000-1000-8000-00805f9b34fb"
+
+    override val status = BleProtocolStatus(
+        id = "ankni_qd1_advertise",
+        displayName = "ANKNI QD1",
+        controllable = true,
+        intensityMax = 100,
+        supportsMode = false,
+        controlStyle = ToyControlStyle.IntensityOnly,
+        intensityLabel = "强度",
+        automatic = true,
+    )
+
+    override fun matches(device: ScannedBleDevice): Boolean {
+        val name = device.name.normalizedBroadcastDeviceName()
+        val hasQd1Name = name.contains("ankniqd1") || name.contains("ankniqd01")
+        val hasQd1Broadcast = device.serviceUuids.any { it.equals(SERVICE_DATA_UUID, ignoreCase = true) } ||
+            device.scanRecordHex.contains("03 02 FF FE", ignoreCase = true)
+        return hasQd1Name && hasQd1Broadcast
+    }
+
+    override fun commandsFor(action: ToyControlAction): List<BleAdvertiseOperation> =
+        when (action) {
+            is ToyControlAction.Intensity -> listOf(command(action.value))
+            is ToyControlAction.Combined -> listOf(command(action.intensity))
+            is ToyControlAction.DualMotor -> listOf(command(action.strongestIntensity(status.intensityMax)))
+            is ToyControlAction.Pattern -> listOf(command(status.intensityMax))
+            ToyControlAction.Stop -> listOf(command(0))
+        }
+
+    private fun command(intensity: Int): BleAdvertiseOperation =
+        BleAdvertiseOperation(
+            serviceDataUuid = SERVICE_DATA_UUID,
+            serviceData = slideFrame(intensity.coerceIn(0, status.intensityMax)),
+        )
+
+    private fun slideFrame(intensity: Int): ByteArray {
+        val duration = if (intensity > 0) SLIDE_DURATION else 0
+        val values = intArrayOf(intensity, duration)
+        return ankniFrame(0x08, values)
+    }
+
+    private fun ankniFrame(command: Int, values: IntArray): ByteArray {
+        val bytes = ByteArray(values.size + 4)
+        bytes[0] = 0xaa.toByte()
+        bytes[1] = command.toByte()
+        bytes[2] = values.size.toByte()
+        values.forEachIndexed { index, value ->
+            bytes[index + 3] = value.coerceIn(0, 255).toByte()
+        }
+        bytes[bytes.lastIndex] = (bytes.dropLast(1).sumOf { it.toInt() and 0xff } and 0xff).toByte()
+        return bytes
+    }
+
+    private const val SLIDE_DURATION = 0xC8
 }
 
 /**
@@ -275,3 +340,6 @@ private object CachitoBroadcastCodec {
     fun toHex(value: Int): String =
         (value and 0xff).toString(16).uppercase().padStart(2, '0')
 }
+
+private fun String.normalizedBroadcastDeviceName(): String =
+    lowercase().filter { it.isLetterOrDigit() }

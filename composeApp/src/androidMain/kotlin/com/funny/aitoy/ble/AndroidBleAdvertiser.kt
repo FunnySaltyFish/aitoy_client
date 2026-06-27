@@ -34,6 +34,13 @@ internal class AndroidBleAdvertiser(
                     return
                 }
         }
+        val serviceDataUuid = operation.serviceDataUuid.takeIf { it.isNotBlank() }?.let { serviceUuid ->
+            runCatching { ParcelUuid.fromString(serviceUuid) }
+                .getOrElse {
+                    onLog("广播指令格式不正确：$serviceUuid")
+                    return
+                }
+        }
         val currentAdvertiser = advertiser
         if (currentAdvertiser == null) {
             onLog("当前手机不支持 BLE 广播发送")
@@ -43,11 +50,13 @@ internal class AndroidBleAdvertiser(
         handler.postDelayed({
             val dataBuilder = AdvertiseData.Builder().setIncludeDeviceName(false)
             uuid?.let(dataBuilder::addServiceUuid)
+            serviceDataUuid?.let { dataBuilder.addServiceData(it, operation.serviceData) }
             operation.manufacturerId?.let { id ->
                 dataBuilder.addManufacturerData(id, operation.manufacturerData)
             }
             val data = dataBuilder.build()
             val summary = uuid?.uuid?.toString()
+                ?: serviceDataUuid?.let { "serviceData=${it.uuid} bytes=${operation.serviceData.toHexString()}" }
                 ?: operation.manufacturerId?.let { "manufacturer=0x${it.toString(16)}" }
                 ?: "<empty>"
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
