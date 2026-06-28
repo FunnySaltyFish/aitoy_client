@@ -50,6 +50,11 @@ def load_registry(path: Path) -> dict[str, dict[str, str]]:
         ("ScalarProtocolPlans.kt", "Scalar output handler ported from Buttplug protocol_impl"),
         ("LinearProtocolPlans.kt", "Linear output handler ported from Buttplug protocol_impl"),
         ("MixedOutputProtocolPlans.kt", "Mixed scalar/linear output handler ported from Buttplug protocol_impl"),
+        ("LeloProtocolPlans.kt", "Lelo security handshake and output handler ported from Buttplug protocol_impl"),
+        ("HoneyPlayBoxProtocolPlans.kt", "HoneyPlayBox signed frame handler ported from Buttplug protocol_impl"),
+        ("VibCrafterProtocolPlans.kt", "VibCrafter AES authentication handler ported from Buttplug protocol_impl"),
+        ("FlufferProtocolPlans.kt", "Fluffer AES authentication and scalar handler ported from Buttplug protocol_impl"),
+        ("HandyProtocolPlans.kt", "The Handy protobuf handler ported from Buttplug protocol_impl"),
     ]:
         for protocol_id in load_plan_protocol_ids(path.with_name(file_name)):
             entries.setdefault(
@@ -67,7 +72,10 @@ def load_plan_protocol_ids(path: Path) -> list[str]:
     if not path.exists():
         return []
     text = path.read_text(encoding="utf-8")
-    return re.findall(r'protocolId\s*=\s*"([^"]+)"', text)
+    ids = re.findall(r'protocolId\s*=\s*"([^"]+)"', text)
+    for block in re.findall(r'protocolIds[^=]*=\s*setOf\((.*?)\)', text, flags=re.S):
+        ids.extend(re.findall(r'"([^"]+)"', block))
+    return ids
 
 
 def descriptor_blocks(text: str) -> list[str]:

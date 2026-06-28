@@ -77,6 +77,10 @@ private fun YamlMap.toProtocolDefinition(id: String): ButtplugProtocolDefinition
         displayName = defaultDevice.name.ifBlank { id },
         communicationTypes = communicationTypes,
         communicationNames = btleNodes.flatMap { it.stringListValue("names") }.distinct(),
+        manufacturerDataCompanies = btleNodes
+            .flatMap { it.listValue("manufacturer_data") }
+            .mapNotNull { it.asMap()?.intValue("company") }
+            .toSet(),
         endpoints = endpoints,
         defaultDevice = defaultDevice,
         configurations = configurations,

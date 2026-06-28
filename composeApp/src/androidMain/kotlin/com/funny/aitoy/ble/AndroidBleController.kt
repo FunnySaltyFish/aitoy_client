@@ -54,6 +54,8 @@ class AndroidBleController(
     private var resolvedWriteCharacteristic: BluetoothGattCharacteristic? = null
     private val operationQueue = ArrayDeque<BleProtocolOperation>()
     private var operationInProgress = false
+    private var waitingForProtocolReady = false
+    private var protocolReadyTimeoutRunnable: Runnable? = null
     private var operationId = 0L
     private var keepaliveRunnable: Runnable? = null
     private var keepaliveProtocol: BleDeviceProtocol? = null
@@ -274,6 +276,7 @@ class AndroidBleController(
         disconnectingAfterProtocolFailure = false
         resolvedWriteCharacteristic = null
         cancelProtocolKeepalive()
+        cancelProtocolReadyWait()
         operationQueue.clear()
         operationInProgress = false
         onProtocol(BleProtocolStatus())
@@ -383,6 +386,7 @@ class AndroidBleController(
         val hasNext = protocolCandidateIndex + 1 < protocolCandidates.size
         protocolReady = false
         cancelProtocolKeepalive()
+        cancelProtocolReadyWait()
         operationQueue.clear()
         operationInProgress = false
         val fingerprint = BleGattFingerprint(
@@ -451,6 +455,7 @@ class AndroidBleController(
     fun disconnect() {
         advertiser.stop()
         cancelProtocolKeepalive()
+        cancelProtocolReadyWait()
         gatt?.let {
             updateState(BleConnectionState.Disconnecting)
             trace("主动断开 address=${it.device.address}")
@@ -531,6 +536,7 @@ class AndroidBleController(
         activeProtocol = protocol
         protocolReady = false
         cancelProtocolKeepalive()
+        cancelProtocolReadyWait()
         operationQueue.clear()
         operationInProgress = false
         trace(
@@ -610,6 +616,7 @@ class AndroidBleController(
             activeProtocol = null
             protocolReady = false
             cancelProtocolKeepalive()
+            cancelProtocolReadyWait()
             operationQueue.clear()
             operationInProgress = false
             disconnectingAfterProtocolFailure = true
@@ -709,6 +716,7 @@ class AndroidBleController(
         activeBroadcastProtocol = null
         protocolReady = false
         cancelProtocolKeepalive()
+        cancelProtocolReadyWait()
         gattReadyAtMs = 0L
         operationQueue.clear()
         operationInProgress = false
@@ -724,6 +732,7 @@ class AndroidBleController(
         target.close()
         if (gatt === target) gatt = null
         cancelProtocolKeepalive()
+        cancelProtocolReadyWait()
         trace("GATT 资源已释放")
     }
 
@@ -767,6 +776,12 @@ class AndroidBleController(
         keepaliveRunnable = null
         keepaliveProtocol = null
         keepaliveOperations = emptyList()
+    }
+
+    private fun cancelProtocolReadyWait() {
+        protocolReadyTimeoutRunnable?.let(mainHandler::removeCallbacks)
+        protocolReadyTimeoutRunnable = null
+        waitingForProtocolReady = false
     }
 
     private fun enqueue(operations: List<BleProtocolOperation>) {
@@ -891,6 +906,21 @@ class AndroidBleController(
                     executeNextOperation()
                 }, operation.millis.coerceAtLeast(0))
             }
+            is BleProtocolOperation.WaitForProtocolReady -> {
+                if (activeProtocol?.isProtocolReady() == true) {
+                    operationInProgress = false
+                    executeNextOperation()
+                } else {
+                    trace("等待协议通知完成初始化 timeout=${operation.timeoutMs}ms")
+                    waitingForProtocolReady = true
+                    protocolReadyTimeoutRunnable = Runnable {
+                        if (waitingForProtocolReady) {
+                            operationInProgress = false
+                            handleProtocolOperationFailed("等待协议通知超时")
+                        }
+                    }.also { mainHandler.postDelayed(it, operation.timeoutMs.coerceAtLeast(1_000L)) }
+                }
+            }
             is BleProtocolOperation.Write -> write(operation)
         }
     }
@@ -913,18 +943,42 @@ class AndroidBleController(
 
     private fun handleCharacteristicNotify(uuid: UUID, bytes: ByteArray) {
         runCatching {
-            activeProtocol?.onNotify(uuid, bytes)?.let { operations ->
-                if (operations.isNotEmpty()) {
-                    operationQueue.addAll(operations)
-                    executeNextOperation()
+            val protocol = activeProtocol
+            val operations = protocol?.onNotify(uuid, bytes).orEmpty()
+            if (waitingForProtocolReady) {
+                when {
+                    protocol?.isProtocolReady() == true -> {
+                        cancelProtocolReadyWait()
+                        operationInProgress = false
+                        if (operations.isNotEmpty()) {
+                            enqueueFirst(operations)
+                        }
+                        executeNextOperation()
+                    }
+                    operations.isNotEmpty() -> {
+                        cancelProtocolReadyWait()
+                        operationInProgress = false
+                        enqueueFirst(operations)
+                        executeNextOperation()
+                    }
                 }
+            } else if (operations.isNotEmpty()) {
+                operationQueue.addAll(operations)
+                executeNextOperation()
             }
         }.onFailure {
             handleProtocolOperationFailed("协议通知处理失败：${it.message}")
         }
     }
 
+    private fun enqueueFirst(operations: List<BleProtocolOperation>) {
+        for (operation in operations.asReversed()) {
+            operationQueue.addFirst(operation)
+        }
+    }
+
     private fun handleProtocolOperationFailed(reason: String) {
+        cancelProtocolReadyWait()
         operationQueue.clear()
         if (protocolReady) {
             trace(reason, error = true)
@@ -1002,6 +1056,7 @@ class AndroidBleController(
             is BleProtocolOperation.SubscribeNotify -> "SubscribeNotify uuid=$characteristicUuid"
             is BleProtocolOperation.UnsubscribeNotify -> "UnsubscribeNotify uuid=$characteristicUuid"
             is BleProtocolOperation.Sleep -> "Sleep millis=$millis"
+            is BleProtocolOperation.WaitForProtocolReady -> "WaitForProtocolReady timeoutMs=$timeoutMs"
             is BleProtocolOperation.Write ->
                 "Write uuid=$characteristicUuid withResponse=$withResponse bytes=${bytes.toHexString()}"
         }

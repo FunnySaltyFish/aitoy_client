@@ -464,6 +464,21 @@ object ScalarProtocolPlans {
             },
         ),
         ScalarProtocolPlan(
+            protocolId = "galaku",
+            supportedKinds = setOf(ToyOutputKind.Vibrate, ToyOutputKind.Oscillate, ToyOutputKind.Constrict, ToyOutputKind.Rotate),
+            stateSize = GALAKU_STATE_SIZE,
+            initialState = { match ->
+                IntArray(maxOf(GALAKU_STATE_SIZE, match.scalarOutputs.size)).also { state ->
+                    state[GALAKU_OUTPUT_COUNT_INDEX] = match.scalarOutputs.size
+                    state[GALAKU_CAIPING_PUMP_FLAG_INDEX] = if (match.device.name == "AC695X_1(BLE)") 1 else 0
+                }
+            },
+            writes = { state, command ->
+                val speed = if (command.kind == ToyOutputKind.Rotate) command.value.absoluteByte() else command.value.coerceIn(0, 0xFF)
+                listOf(write(galakuPayload(state, command.featureIndex, speed)))
+            },
+        ),
+        ScalarProtocolPlan(
             protocolId = "galaku-pump",
             supportedKinds = setOf(ToyOutputKind.Oscillate, ToyOutputKind.Vibrate),
             stateSize = 2,
@@ -770,8 +785,23 @@ object ScalarProtocolPlans {
         }
     }
 
-    private fun galakuPumpPayload(oscillate: Int, vibrate: Int): ByteArray {
-        val data = mutableListOf(0x23, 0x5A, 0x00, 0x00, 0x01, 0x60, 0x03, oscillate, vibrate, 0x00, 0x00)
+    private fun galakuPumpPayload(oscillate: Int, vibrate: Int): ByteArray =
+        galakuEncodedPayload(0x5A, 0x00, 0x00, 0x01, 0x60, 0x03, oscillate, vibrate, 0x00, 0x00)
+
+    private fun galakuPayload(state: IntArray, featureIndex: Int, speed: Int): ByteArray {
+        val outputCount = state.getOrElse(GALAKU_OUTPUT_COUNT_INDEX) { 1 }
+        if (outputCount == 1) {
+            if (state.getOrElse(GALAKU_CAIPING_PUMP_FLAG_INDEX) { 0 } == 1) {
+                return bytes(0xAA, 0x01, 0x0A, 0x03, speed, if (speed == 0) 0x00 else 0x01, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+            }
+            return galakuEncodedPayload(0x5A, 0x00, 0x00, 0x01, 0x31, speed, 0x00, 0x00, 0x00, 0x00)
+        }
+        state[featureIndex.coerceIn(0, 1)] = speed
+        return galakuEncodedPayload(0x5A, 0x00, 0x00, 0x01, 0x40, 0x03, state[0], state[1], 0x00, 0x00)
+    }
+
+    private fun galakuEncodedPayload(vararg payload: Int): ByteArray {
+        val data = mutableListOf(0x23, *payload.toTypedArray())
         data += data.fold(0) { acc, value -> (acc + value) and 0xFF }
         val encoded = mutableListOf(0x23)
         for (index in 1 until data.size) {
@@ -963,6 +993,9 @@ object ScalarProtocolPlans {
     private const val HISMITH_MINI_DUAL_VIBE_INDEX = 0
     private const val HISMITH_MINI_SECOND_CONSTRICT_INDEX = 1
     private const val HISMITH_MINI_STATE_SIZE = 2
+    private const val GALAKU_CAIPING_PUMP_FLAG_INDEX = 8
+    private const val GALAKU_OUTPUT_COUNT_INDEX = 9
+    private const val GALAKU_STATE_SIZE = 10
     private const val FREDORCH_ROTARY_CURRENT_SPEED_INDEX = 0
     private const val FREDORCH_ROTARY_TARGET_SPEED_INDEX = 1
     private const val FREDORCH_ROTARY_STATE_SIZE = 2

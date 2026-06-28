@@ -101,6 +101,51 @@ object ButtplugLocalHandlerRegistry {
                 notes = "Mixed scalar/linear output handler ported from Buttplug protocol_impl",
             )
         }.toTypedArray(),
+        *LeloProtocolPlans.protocolIds.map { protocolId ->
+            ButtplugLocalHandlerDescriptor(
+                protocolId = protocolId,
+                source = ButtplugHandlerSource.ButtplugProtocolImpl,
+                supportedOutputKinds = LeloProtocolPlans.supportedKinds(protocolId),
+                status = ButtplugSupportStatus.Controllable,
+                notes = "Lelo security handshake and output handler ported from Buttplug protocol_impl",
+            )
+        }.toTypedArray(),
+        *HoneyPlayBoxProtocolPlans.protocolIds.map { protocolId ->
+            ButtplugLocalHandlerDescriptor(
+                protocolId = protocolId,
+                source = ButtplugHandlerSource.ButtplugProtocolImpl,
+                supportedOutputKinds = HoneyPlayBoxProtocolPlans.supportedKinds,
+                status = ButtplugSupportStatus.Controllable,
+                notes = "HoneyPlayBox signed frame handler ported from Buttplug protocol_impl",
+            )
+        }.toTypedArray(),
+        *VibCrafterProtocolPlans.protocolIds.map { protocolId ->
+            ButtplugLocalHandlerDescriptor(
+                protocolId = protocolId,
+                source = ButtplugHandlerSource.ButtplugProtocolImpl,
+                supportedOutputKinds = VibCrafterProtocolPlans.supportedKinds,
+                status = ButtplugSupportStatus.Controllable,
+                notes = "VibCrafter AES authentication handler ported from Buttplug protocol_impl",
+            )
+        }.toTypedArray(),
+        *FlufferProtocolPlans.protocolIds.map { protocolId ->
+            ButtplugLocalHandlerDescriptor(
+                protocolId = protocolId,
+                source = ButtplugHandlerSource.ButtplugProtocolImpl,
+                supportedOutputKinds = FlufferProtocolPlans.supportedKinds,
+                status = ButtplugSupportStatus.Controllable,
+                notes = "Fluffer AES authentication and scalar handler ported from Buttplug protocol_impl",
+            )
+        }.toTypedArray(),
+        *HandyProtocolPlans.protocolIds.map { protocolId ->
+            ButtplugLocalHandlerDescriptor(
+                protocolId = protocolId,
+                source = ButtplugHandlerSource.ButtplugProtocolImpl,
+                supportedOutputKinds = HandyProtocolPlans.supportedKinds,
+                status = ButtplugSupportStatus.Controllable,
+                notes = "The Handy protobuf handler ported from Buttplug protocol_impl",
+            )
+        }.toTypedArray(),
         ButtplugLocalHandlerDescriptor(
             protocolId = "ankni",
             source = ButtplugHandlerSource.NativeSpecialized,

@@ -4,6 +4,7 @@ data class ButtplugDeviceFingerprint(
     val name: String,
     val serviceUuids: Set<String>,
     val characteristicUuids: Set<String>,
+    val manufacturerData: Map<Int, ByteArray> = emptyMap(),
 )
 
 data class ButtplugEndpoint(
@@ -33,6 +34,7 @@ data class ButtplugProtocolDefinition(
     val displayName: String,
     val communicationTypes: Set<String>,
     val communicationNames: List<String>,
+    val manufacturerDataCompanies: Set<Int> = emptySet(),
     val endpoints: List<ButtplugEndpoint>,
     val defaultDevice: ButtplugDeviceDefinition,
     val configurations: List<ButtplugDeviceDefinition>,
@@ -44,7 +46,9 @@ data class ButtplugProtocolDefinition(
         } ?: return null
         val nameMatched = communicationNames.isEmpty() ||
             communicationNames.any { alias -> fingerprint.name.matchesButtplugAlias(alias) }
-        if (!nameMatched) return null
+        val manufacturerMatched = manufacturerDataCompanies.isNotEmpty() &&
+            manufacturerDataCompanies.any(fingerprint.manufacturerData::containsKey)
+        if (!nameMatched && !manufacturerMatched) return null
         val device = configurations.firstOrNull { config ->
             config.identifiers.any { identifier -> fingerprint.name.matchesButtplugAlias(identifier) }
         } ?: defaultDevice
@@ -52,6 +56,7 @@ data class ButtplugProtocolDefinition(
             protocol = this,
             device = device,
             endpoint = matchedEndpoint,
+            fingerprint = fingerprint,
         )
     }
 }
@@ -60,6 +65,11 @@ data class ButtplugDeviceMatch(
     val protocol: ButtplugProtocolDefinition,
     val device: ButtplugDeviceDefinition,
     val endpoint: ButtplugEndpoint,
+    val fingerprint: ButtplugDeviceFingerprint = ButtplugDeviceFingerprint(
+        name = "",
+        serviceUuids = emptySet(),
+        characteristicUuids = emptySet(),
+    ),
 ) {
     val outputTypes: Set<String>
         get() = device.features.map { it.type }.toSet()

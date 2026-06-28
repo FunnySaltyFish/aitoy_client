@@ -4,17 +4,24 @@ import com.funny.aitoy.buttplug.ButtplugConfigRepository
 import com.funny.aitoy.buttplug.ButtplugDeviceFingerprint
 import com.funny.aitoy.buttplug.ButtplugDeviceMatch
 import com.funny.aitoy.buttplug.ButtplugLocalHandlerRegistry
+import com.funny.aitoy.buttplug.FlufferProtocolPlans
+import com.funny.aitoy.buttplug.HandyProtocolPlans
+import com.funny.aitoy.buttplug.HoneyPlayBoxFrameCollector
+import com.funny.aitoy.buttplug.HoneyPlayBoxProtocolPlans
+import com.funny.aitoy.buttplug.LeloProtocolPlans
 import com.funny.aitoy.buttplug.LinearProtocolPlan
 import com.funny.aitoy.buttplug.LinearProtocolPlans
 import com.funny.aitoy.buttplug.MixedOutputProtocolPlan
 import com.funny.aitoy.buttplug.MixedOutputProtocolPlans
 import com.funny.aitoy.buttplug.ScalarProtocolPlan
 import com.funny.aitoy.buttplug.ScalarProtocolPlans
+import com.funny.aitoy.buttplug.ScalarProtocolWrite
 import com.funny.aitoy.buttplug.SimpleVibrateProtocolPlan
 import com.funny.aitoy.buttplug.SimpleVibrateProtocolPlans
 import com.funny.aitoy.buttplug.StatefulVibrateProtocolPlan
 import com.funny.aitoy.buttplug.StatefulVibrateProtocolPlans
 import com.funny.aitoy.buttplug.ToyOutputKind
+import com.funny.aitoy.buttplug.VibCrafterProtocolPlans
 import com.funny.aitoy.buttplug.WeVibeProtocolPlans
 import com.funny.aitoy.buttplug.normalizedUuidText
 import com.funny.aitoy.buttplug.toToyOutputKind
@@ -28,6 +35,8 @@ internal sealed interface BleProtocolOperation {
     data class UnsubscribeNotify(val characteristicUuid: UUID) : BleProtocolOperation
 
     data class Sleep(val millis: Long) : BleProtocolOperation
+
+    data class WaitForProtocolReady(val timeoutMs: Long) : BleProtocolOperation
 
     data class Write(
         val characteristicUuid: UUID,
@@ -84,6 +93,8 @@ internal interface BleDeviceProtocol {
 
     fun onNotify(characteristicUuid: UUID, bytes: ByteArray): List<BleProtocolOperation> = emptyList()
 
+    fun isProtocolReady(): Boolean = true
+
     fun commandsFor(action: ToyControlAction): List<BleProtocolOperation>
 }
 
@@ -136,6 +147,13 @@ private object ButtplugBleProtocolFactory {
             "wevibe" -> ButtplugWeVibePackedProtocol(match)
             "wevibe-8bit" -> ButtplugWeVibe8BitProtocol(match)
             "wevibe-chorus" -> ButtplugWeVibeChorusProtocol(match)
+            "honeyplaybox" -> ButtplugHoneyPlayBoxProtocol(match)
+            "lelo-harmony" -> ButtplugLeloHarmonyProtocol(match)
+            "lelo-f1sv2" -> ButtplugLeloF1sV2Protocol(match)
+            "vibcrafter" -> ButtplugVibCrafterProtocol(match)
+            "fluffer" -> ButtplugFlufferProtocol(match)
+            "thehandy" -> ButtplugHandyProtocol(match)
+            "thehandy-v3" -> ButtplugHandyV3Protocol(match)
             else -> SimpleVibrateProtocolPlans.forProtocolId(match.protocol.id)
                 ?.let { ButtplugSimpleVibrateProtocol(match, it) }
                 ?: StatefulVibrateProtocolPlans.forProtocolId(match.protocol.id)
@@ -163,6 +181,574 @@ private class ButtplugUnsupportedProtocol(
     override fun matches(fingerprint: BleGattFingerprint): Boolean = false
 
     override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> = emptyList()
+}
+
+private class ButtplugHoneyPlayBoxProtocol(
+    private val match: ButtplugDeviceMatch,
+) : BleDeviceProtocol {
+    private val endpointByRole = match.endpoint.characteristics
+    private val txUuid: UUID = uuid(endpointByRole.getValue("tx"))
+    private val rxUuid: UUID = uuid(endpointByRole.getValue("rx"))
+    private val features = match.scalarOutputs.sortedBy { it.featureIndex }
+    private val maxByFeature = features.associate { it.featureIndex to it.max.coerceAtLeast(1) }
+    private val speeds = IntArray(features.size.coerceAtLeast(1))
+    private val collector = HoneyPlayBoxFrameCollector()
+    private var randomKey: ByteArray? = null
+    private var packetId = 0
+
+    override val status: BleProtocolStatus = match.toBleStatus(
+        id = "buttplug_${match.protocol.id}",
+        controllable = endpointByRole.containsKey("tx") && endpointByRole.containsKey("rx"),
+        supportsMode = false,
+        controlStyle = if (features.size > 1) ToyControlStyle.DualIntensityOnly else ToyControlStyle.IntensityOnly,
+    )
+
+    override fun matches(fingerprint: BleGattFingerprint): Boolean = false
+
+    override fun initialize(fingerprint: BleGattFingerprint): List<BleProtocolOperation> =
+        listOf(
+            BleProtocolOperation.SubscribeNotify(rxUuid),
+            BleProtocolOperation.Write(
+                characteristicUuid = txUuid,
+                bytes = HoneyPlayBoxProtocolPlans.handshakeFrame(counter = 0),
+                withResponse = true,
+            ),
+            BleProtocolOperation.WaitForProtocolReady(HoneyPlayBoxProtocolPlans.handshakeTimeoutMs),
+        )
+
+    override fun keepaliveIntervalMs(): Long = HoneyPlayBoxProtocolPlans.keepaliveIntervalMs
+
+    override fun keepaliveCommands(lastCommands: List<BleProtocolOperation>): List<BleProtocolOperation> =
+        if (isProtocolReady()) listOf(writeState()) else emptyList()
+
+    override fun isProtocolReady(): Boolean = randomKey != null
+
+    override fun onNotify(characteristicUuid: UUID, bytes: ByteArray): List<BleProtocolOperation> {
+        if (characteristicUuid != rxUuid) return emptyList()
+        for (frame in collector.pushBytes(bytes)) {
+            val response = HoneyPlayBoxProtocolPlans.parseResponse(frame) ?: continue
+            val code = response.responseCode
+            if (code == 0x9000 && response.random != null) {
+                randomKey = response.random
+                packetId = 1
+                return emptyList()
+            }
+            if (code != null && code != 0x9000) {
+                error("HoneyPlayBox handshake failed: code=${code.toString(16)}")
+            }
+        }
+        return emptyList()
+    }
+
+    override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> {
+        when (action) {
+            is ToyControlAction.Intensity -> setAll(action.value)
+            is ToyControlAction.Combined -> setAll(action.intensity)
+            is ToyControlAction.Pattern -> setAll(maxByFeature.values.maxOrNull() ?: 1)
+            is ToyControlAction.DualMotor -> {
+                if (speeds.size > 1) {
+                    speeds[0] = action.internalIntensity.coerceIn(0, maxForFeature(0))
+                    speeds[1] = action.externalIntensity.coerceIn(0, maxForFeature(1))
+                } else {
+                    setAll(action.strongestIntensity(maxForFeature(0)))
+                }
+            }
+            ToyControlAction.Stop -> speeds.fill(0)
+        }
+        return listOf(writeState())
+    }
+
+    private fun setAll(value: Int) {
+        repeat(speeds.size) { index ->
+            speeds[index] = value.coerceIn(0, maxForFeature(index))
+        }
+    }
+
+    private fun maxForFeature(featureIndex: Int): Int =
+        maxByFeature[featureIndex] ?: maxByFeature.values.firstOrNull() ?: 100
+
+    private fun writeState(): BleProtocolOperation.Write {
+        val random = requireNotNull(randomKey) { "HoneyPlayBox handshake is not complete" }
+        packetId = (packetId + 1) and 0xFF
+        return BleProtocolOperation.Write(
+            characteristicUuid = txUuid,
+            bytes = HoneyPlayBoxProtocolPlans.controlFrame(random, speeds, packetId),
+            withResponse = true,
+        )
+    }
+}
+
+private class ButtplugFlufferProtocol(
+    private val match: ButtplugDeviceMatch,
+) : BleDeviceProtocol {
+    private val endpointByRole = match.endpoint.characteristics
+    private val txUuid: UUID = uuid(endpointByRole.getValue("tx"))
+    private val rxUuid: UUID = uuid(endpointByRole.getValue("rx"))
+    private val scalarFeatures = match.scalarOutputs.sortedBy { it.featureIndex }
+    private val channelCount = scalarFeatures.size.coerceAtLeast(1).coerceAtMost(2)
+    private val speeds = IntArray(2)
+    private val advertisementData = FlufferProtocolPlans.manufacturerAdvertisement(match.fingerprint.manufacturerData)
+    private var authorized = advertisementData.isEmpty()
+
+    override val status: BleProtocolStatus = match.toBleStatus(
+        id = "buttplug_${match.protocol.id}",
+        controllable = endpointByRole.containsKey("tx") && endpointByRole.containsKey("rx"),
+        supportsMode = false,
+        controlStyle = if (channelCount > 1) ToyControlStyle.DualIntensityOnly else ToyControlStyle.IntensityOnly,
+    )
+
+    override fun matches(fingerprint: BleGattFingerprint): Boolean = false
+
+    override fun initialize(fingerprint: BleGattFingerprint): List<BleProtocolOperation> =
+        if (advertisementData.isEmpty()) {
+            emptyList()
+        } else {
+            listOf(
+                BleProtocolOperation.SubscribeNotify(rxUuid),
+                BleProtocolOperation.Write(
+                    characteristicUuid = txUuid,
+                    bytes = FlufferProtocolPlans.authPayload(advertisementData, FlufferProtocolPlans.randomNonce()),
+                    withResponse = false,
+                ),
+                BleProtocolOperation.WaitForProtocolReady(FlufferProtocolPlans.handshakeTimeoutMs),
+            )
+        }
+
+    override fun keepaliveIntervalMs(): Long = FlufferProtocolPlans.keepaliveIntervalMs
+
+    override fun keepaliveCommands(lastCommands: List<BleProtocolOperation>): List<BleProtocolOperation> =
+        if (authorized) {
+            listOf(
+                BleProtocolOperation.Write(
+                    characteristicUuid = txUuid,
+                    bytes = FlufferProtocolPlans.keepalivePayload(),
+                    withResponse = false,
+                ),
+            )
+        } else {
+            emptyList()
+        }
+
+    override fun isProtocolReady(): Boolean = authorized
+
+    override fun onNotify(characteristicUuid: UUID, bytes: ByteArray): List<BleProtocolOperation> {
+        if (characteristicUuid != rxUuid) return emptyList()
+        val authenticated = runCatching { FlufferProtocolPlans.isAuthSuccess(bytes) }.getOrDefault(false)
+        if (!authenticated) return emptyList()
+        authorized = true
+        return listOf(
+            BleProtocolOperation.Write(
+                characteristicUuid = txUuid,
+                bytes = FlufferProtocolPlans.enablePayload(),
+                withResponse = false,
+            ),
+        )
+    }
+
+    override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> {
+        when (action) {
+            is ToyControlAction.Intensity -> setAll(action.value)
+            is ToyControlAction.Combined -> setAll(action.intensity)
+            is ToyControlAction.Pattern -> setAll(maxValue())
+            is ToyControlAction.DualMotor -> {
+                setFeature(0, action.internalIntensity)
+                if (channelCount > 1) {
+                    setFeature(1, action.externalIntensity)
+                } else {
+                    setFeature(1, speeds[0])
+                }
+            }
+            ToyControlAction.Stop -> speeds.fill(0)
+        }
+        return listOf(
+            BleProtocolOperation.Write(
+                characteristicUuid = txUuid,
+                bytes = FlufferProtocolPlans.controlPayload(speeds[0], speeds[1]),
+                withResponse = false,
+            ),
+        )
+    }
+
+    private fun setAll(value: Int) {
+        repeat(channelCount) { index -> setFeature(index, value) }
+        if (channelCount == 1) speeds[1] = speeds[0]
+    }
+
+    private fun setFeature(index: Int, value: Int) {
+        val feature = scalarFeatures.getOrNull(index)
+        val normalized = when {
+            feature == null -> value.coerceIn(0, 100)
+            feature.type.toToyOutputKind() == ToyOutputKind.Rotate && feature.min < 0 ->
+                FlufferProtocolPlans.rotateSpeed(value.coerceIn(feature.min, feature.max))
+            else -> value.coerceIn(feature.min, feature.max)
+        }
+        speeds[index.coerceIn(0, 1)] = normalized
+    }
+
+    private fun maxValue(): Int =
+        scalarFeatures.maxOfOrNull { maxOf(kotlin.math.abs(it.min), kotlin.math.abs(it.max)) } ?: 100
+}
+
+private class ButtplugHandyProtocol(
+    private val match: ButtplugDeviceMatch,
+) : BleDeviceProtocol {
+    private val txUuid: UUID = uuid(match.endpoint.txUuid.orEmpty())
+    private val linearFeatures = match.linearOutputs.sortedBy { it.featureIndex }
+    private val maxPosition = linearFeatures.maxOfOrNull { it.max.coerceAtLeast(1) } ?: 100
+
+    override val status: BleProtocolStatus = match.toBleStatus(
+        id = "buttplug_${match.protocol.id}",
+        controllable = txUuid.toString().isNotBlank(),
+        supportsMode = false,
+        controlStyle = ToyControlStyle.IntensityOnly,
+    )
+
+    override fun matches(fingerprint: BleGattFingerprint): Boolean = false
+
+    override fun keepaliveIntervalMs(): Long = HandyProtocolPlans.keepaliveIntervalMs
+
+    override fun keepaliveCommands(lastCommands: List<BleProtocolOperation>): List<BleProtocolOperation> =
+        listOf(write(HandyProtocolPlans.handyPingPayload()))
+
+    override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
+        when (action) {
+            is ToyControlAction.Intensity -> writePosition(action.value)
+            is ToyControlAction.Combined -> writePosition(action.intensity)
+            is ToyControlAction.Pattern -> writePosition(maxPosition)
+            is ToyControlAction.DualMotor -> writePosition(action.strongestIntensity(maxPosition))
+            ToyControlAction.Stop -> writePosition(0)
+        }
+
+    private fun writePosition(position: Int): List<BleProtocolOperation> =
+        listOf(write(HandyProtocolPlans.handyLinearPayload(position.coerceIn(0, maxPosition), DEFAULT_LINEAR_DURATION_MS)))
+
+    private fun write(bytes: ByteArray): BleProtocolOperation.Write =
+        BleProtocolOperation.Write(
+            characteristicUuid = txUuid,
+            bytes = bytes,
+            withResponse = true,
+        )
+
+    private companion object {
+        const val DEFAULT_LINEAR_DURATION_MS = 1000
+    }
+}
+
+private class ButtplugHandyV3Protocol(
+    private val match: ButtplugDeviceMatch,
+) : BleDeviceProtocol {
+    private val endpointByRole = match.endpoint.characteristics
+    private val txUuid: UUID = uuid(endpointByRole.getValue("tx"))
+    private val rxUuid: UUID? = endpointByRole["rx"]?.let(::uuid)
+    private val linearFeatures = match.linearOutputs.sortedBy { it.featureIndex }
+    private val scalarFeatures = match.scalarOutputs.sortedBy { it.featureIndex }
+    private val maxValue = (linearFeatures + scalarFeatures).maxOfOrNull { it.max.coerceAtLeast(1) } ?: 100
+    private var sequence = 1
+
+    override val status: BleProtocolStatus = match.toBleStatus(
+        id = "buttplug_${match.protocol.id}",
+        controllable = endpointByRole.containsKey("tx"),
+        supportsMode = false,
+        controlStyle = if (scalarFeatures.size > 1) ToyControlStyle.DualIntensityOnly else ToyControlStyle.IntensityOnly,
+    )
+
+    override fun matches(fingerprint: BleGattFingerprint): Boolean = false
+
+    override fun initialize(fingerprint: BleGattFingerprint): List<BleProtocolOperation> =
+        buildList {
+            rxUuid?.let { add(BleProtocolOperation.SubscribeNotify(it)) }
+            add(write(HandyProtocolPlans.handyV3BatteryRequestPayload(nextSequence()), withResponse = false))
+            add(write(HandyProtocolPlans.handyV3CapabilitiesRequestPayload(nextSequence()), withResponse = false))
+        }
+
+    override fun keepaliveIntervalMs(): Long = HandyProtocolPlans.keepaliveIntervalMs
+
+    override fun keepaliveCommands(lastCommands: List<BleProtocolOperation>): List<BleProtocolOperation> =
+        listOf(write(HandyProtocolPlans.handyV3KeepalivePayload(nextSequence()), withResponse = true))
+
+    override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
+        when (action) {
+            is ToyControlAction.Intensity -> writeValue(action.value)
+            is ToyControlAction.Combined -> writeValue(action.intensity)
+            is ToyControlAction.Pattern -> writeValue(maxValue)
+            is ToyControlAction.DualMotor -> writeValue(action.strongestIntensity(maxValue))
+            ToyControlAction.Stop -> writeValue(0)
+        }
+
+    private fun writeValue(value: Int): List<BleProtocolOperation> =
+        if (linearFeatures.isNotEmpty()) {
+            listOf(
+                write(
+                    HandyProtocolPlans.handyV3LinearPayload(nextSequence(), value.coerceIn(0, maxValue), DEFAULT_LINEAR_DURATION_MS),
+                    withResponse = true,
+                ),
+            )
+        } else {
+            listOf(write(HandyProtocolPlans.handyV3VibratePayload(nextSequence(), value.coerceIn(0, maxValue)), withResponse = true))
+        }
+
+    private fun write(bytes: ByteArray, withResponse: Boolean): BleProtocolOperation.Write =
+        BleProtocolOperation.Write(
+            characteristicUuid = txUuid,
+            bytes = bytes,
+            withResponse = withResponse,
+        )
+
+    private fun nextSequence(): Int {
+        val current = sequence
+        sequence += 1
+        return current
+    }
+
+    private companion object {
+        const val DEFAULT_LINEAR_DURATION_MS = 1000
+    }
+}
+
+private class ButtplugVibCrafterProtocol(
+    private val match: ButtplugDeviceMatch,
+) : BleDeviceProtocol {
+    private val endpointByRole = match.endpoint.characteristics
+    private val txUuid: UUID = uuid(endpointByRole.getValue("tx"))
+    private val rxUuid: UUID = uuid(endpointByRole.getValue("rx"))
+    private val features = match.vibrateOutputs.sortedBy { it.featureIndex }
+    private val channelCount = features.size.coerceAtLeast(1).coerceAtMost(2)
+    private val speeds = IntArray(2)
+    private val maxByFeature = features.associate { it.featureIndex to it.max.coerceAtLeast(1) }
+    private var authorized = false
+
+    override val status: BleProtocolStatus = match.toBleStatus(
+        id = "buttplug_${match.protocol.id}",
+        controllable = endpointByRole.containsKey("tx") && endpointByRole.containsKey("rx"),
+        supportsMode = false,
+        controlStyle = if (channelCount > 1) ToyControlStyle.DualIntensityOnly else ToyControlStyle.IntensityOnly,
+    )
+
+    override fun matches(fingerprint: BleGattFingerprint): Boolean = false
+
+    override fun initialize(fingerprint: BleGattFingerprint): List<BleProtocolOperation> =
+        listOf(
+            BleProtocolOperation.SubscribeNotify(rxUuid),
+            BleProtocolOperation.Write(
+                characteristicUuid = txUuid,
+                bytes = VibCrafterProtocolPlans.authPayload(VibCrafterProtocolPlans.randomAuthToken()),
+                withResponse = false,
+            ),
+            BleProtocolOperation.WaitForProtocolReady(VibCrafterProtocolPlans.handshakeTimeoutMs),
+        )
+
+    override fun isProtocolReady(): Boolean = authorized
+
+    override fun onNotify(characteristicUuid: UUID, bytes: ByteArray): List<BleProtocolOperation> {
+        if (characteristicUuid != rxUuid) return emptyList()
+        val text = VibCrafterProtocolPlans.decryptNotification(bytes)
+        return when {
+            text == "OK;" -> {
+                authorized = true
+                emptyList()
+            }
+            else -> listOf(
+                BleProtocolOperation.Write(
+                    characteristicUuid = txUuid,
+                    bytes = VibCrafterProtocolPlans.challengeResponsePayload(text),
+                    withResponse = false,
+                ),
+                BleProtocolOperation.WaitForProtocolReady(VibCrafterProtocolPlans.handshakeTimeoutMs),
+            )
+        }
+    }
+
+    override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> {
+        when (action) {
+            is ToyControlAction.Intensity -> setAll(action.value)
+            is ToyControlAction.Combined -> setAll(action.intensity)
+            is ToyControlAction.Pattern -> setAll(maxByFeature.values.maxOrNull() ?: 1)
+            is ToyControlAction.DualMotor -> {
+                speeds[0] = action.internalIntensity.coerceIn(0, maxForFeature(0))
+                speeds[1] = if (channelCount > 1) action.externalIntensity.coerceIn(0, maxForFeature(1)) else speeds[0]
+            }
+            ToyControlAction.Stop -> speeds.fill(0)
+        }
+        return listOf(writeState())
+    }
+
+    private fun setAll(value: Int) {
+        repeat(channelCount) { index ->
+            speeds[index] = value.coerceIn(0, maxForFeature(index))
+        }
+        if (channelCount == 1) speeds[1] = speeds[0]
+    }
+
+    private fun maxForFeature(featureIndex: Int): Int =
+        maxByFeature[featureIndex] ?: maxByFeature.values.firstOrNull() ?: 99
+
+    private fun writeState(): BleProtocolOperation.Write =
+        BleProtocolOperation.Write(
+            characteristicUuid = txUuid,
+            bytes = VibCrafterProtocolPlans.controlPayload(speeds[0], speeds[1]),
+            withResponse = false,
+        )
+}
+
+private class ButtplugLeloHarmonyProtocol(
+    private val match: ButtplugDeviceMatch,
+) : BleDeviceProtocol {
+    private val endpointByRole = match.endpoint.characteristics
+    private val txUuid: UUID = uuid(endpointByRole.getValue("tx"))
+    private val security = LeloSecurityHandshake(uuid(endpointByRole.getValue("whitelist")))
+    private val features = match.scalarOutputs.sortedBy { it.featureIndex }
+    private val maxByFeature = features.associate { it.featureIndex to it.max.coerceAtLeast(1) }
+
+    override val status: BleProtocolStatus = match.toBleStatus(
+        id = "buttplug_${match.protocol.id}",
+        controllable = endpointByRole.containsKey("tx") && endpointByRole.containsKey("whitelist"),
+        supportsMode = false,
+        controlStyle = if (features.size > 1) ToyControlStyle.DualIntensityOnly else ToyControlStyle.IntensityOnly,
+    )
+
+    override fun matches(fingerprint: BleGattFingerprint): Boolean = false
+
+    override fun initialize(fingerprint: BleGattFingerprint): List<BleProtocolOperation> =
+        security.initialize()
+
+    override fun isProtocolReady(): Boolean = security.authorized
+
+    override fun onNotify(characteristicUuid: UUID, bytes: ByteArray): List<BleProtocolOperation> =
+        security.onNotify(characteristicUuid, bytes)
+
+    override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
+        when (action) {
+            is ToyControlAction.Intensity -> writeAll(action.value)
+            is ToyControlAction.Combined -> writeAll(action.intensity)
+            is ToyControlAction.Pattern -> writeAll(maxByFeature.values.maxOrNull() ?: 1)
+            is ToyControlAction.DualMotor -> {
+                if (features.size > 1) {
+                    listOf(
+                        write(features[0].featureIndex, action.internalIntensity),
+                        write(features[1].featureIndex, action.externalIntensity),
+                    )
+                } else {
+                    writeAll(action.strongestIntensity(maxByFeature[0] ?: 1))
+                }
+            }
+            ToyControlAction.Stop -> writeAll(0)
+        }
+
+    private fun writeAll(speed: Int): List<BleProtocolOperation> =
+        features.ifEmpty { listOf(null) }.mapIndexed { index, feature ->
+            write(feature?.featureIndex ?: index, speed)
+        }
+
+    private fun write(featureIndex: Int, speed: Int): BleProtocolOperation.Write =
+        BleProtocolOperation.Write(
+            characteristicUuid = txUuid,
+            bytes = LeloProtocolPlans.harmonyPayload(featureIndex, speed.coerceIn(0, maxByFeature[featureIndex] ?: 100)),
+            withResponse = false,
+        )
+
+}
+
+private class ButtplugLeloF1sV2Protocol(
+    private val match: ButtplugDeviceMatch,
+) : BleDeviceProtocol {
+    private val endpointByRole = match.endpoint.characteristics
+    private val txUuid: UUID = uuid(endpointByRole.getValue("tx"))
+    private val securityEndpointRole = if (endpointByRole.containsKey("whitelist")) "whitelist" else "generic0"
+    private val security = LeloSecurityHandshake(uuid(endpointByRole.getValue(securityEndpointRole)))
+    private val features = match.vibrateOutputs.sortedBy { it.featureIndex }
+    private val channelCount = features.size.coerceAtLeast(1).coerceAtMost(2)
+    private val speeds = IntArray(2)
+    private val maxByFeature = features.associate { it.featureIndex to it.max.coerceAtLeast(1) }
+
+    override val status: BleProtocolStatus = match.toBleStatus(
+        id = "buttplug_${match.protocol.id}",
+        controllable = endpointByRole.containsKey("tx") && endpointByRole.containsKey(securityEndpointRole),
+        supportsMode = false,
+        controlStyle = if (channelCount > 1) ToyControlStyle.DualIntensityOnly else ToyControlStyle.IntensityOnly,
+    )
+
+    override fun matches(fingerprint: BleGattFingerprint): Boolean = false
+
+    override fun initialize(fingerprint: BleGattFingerprint): List<BleProtocolOperation> =
+        security.initialize()
+
+    override fun isProtocolReady(): Boolean = security.authorized
+
+    override fun onNotify(characteristicUuid: UUID, bytes: ByteArray): List<BleProtocolOperation> =
+        security.onNotify(characteristicUuid, bytes)
+
+    override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> {
+        when (action) {
+            is ToyControlAction.Intensity -> setAll(action.value)
+            is ToyControlAction.Combined -> setAll(action.intensity)
+            is ToyControlAction.Pattern -> setAll(maxByFeature.values.maxOrNull() ?: 1)
+            is ToyControlAction.DualMotor -> {
+                speeds[0] = action.internalIntensity.coerceIn(0, maxForFeature(0))
+                speeds[1] = if (channelCount > 1) {
+                    action.externalIntensity.coerceIn(0, maxForFeature(1))
+                } else {
+                    speeds[0]
+                }
+            }
+            ToyControlAction.Stop -> speeds.fill(0)
+        }
+        return listOf(writeState())
+    }
+
+    private fun setAll(value: Int) {
+        repeat(channelCount) { index ->
+            speeds[index] = value.coerceIn(0, maxForFeature(index))
+        }
+        if (channelCount == 1) speeds[1] = speeds[0]
+    }
+
+    private fun maxForFeature(featureIndex: Int): Int =
+        maxByFeature[featureIndex] ?: maxByFeature.values.firstOrNull() ?: 100
+
+    private fun writeState(): BleProtocolOperation.Write =
+        BleProtocolOperation.Write(
+            characteristicUuid = txUuid,
+            bytes = LeloProtocolPlans.f1sPayload(speeds[0], speeds[1]),
+            withResponse = true,
+        )
+}
+
+private class LeloSecurityHandshake(
+    private val securityUuid: UUID,
+) {
+    var authorized: Boolean = false
+        private set
+
+    fun initialize(): List<BleProtocolOperation> =
+        listOf(
+            BleProtocolOperation.SubscribeNotify(securityUuid),
+            BleProtocolOperation.WaitForProtocolReady(LELO_SECURITY_TIMEOUT_MS),
+        )
+
+    fun onNotify(characteristicUuid: UUID, bytes: ByteArray): List<BleProtocolOperation> {
+        if (characteristicUuid != securityUuid) return emptyList()
+        return when {
+            bytes.isEmpty() || bytes.all { it == 0.toByte() } -> emptyList()
+            bytes.size >= 8 && bytes[0] == 1.toByte() && bytes.drop(1).all { it == 0.toByte() } -> {
+                authorized = true
+                emptyList()
+            }
+            else -> listOf(
+                BleProtocolOperation.UnsubscribeNotify(securityUuid),
+                BleProtocolOperation.Write(
+                    characteristicUuid = securityUuid,
+                    bytes = bytes,
+                    withResponse = true,
+                ),
+                BleProtocolOperation.SubscribeNotify(securityUuid),
+                BleProtocolOperation.WaitForProtocolReady(LELO_SECURITY_TIMEOUT_MS),
+            )
+        }
+    }
+
+    private companion object {
+        const val LELO_SECURITY_TIMEOUT_MS = 30_000L
+    }
 }
 
 private abstract class ButtplugVibrateProtocol(
@@ -425,18 +1011,7 @@ private class ButtplugScalarProtocol(
                 }
                 add(BleProtocolOperation.SubscribeNotify(uuid(endpoint)))
             }
-            for (write in plan.initWrites) {
-                val endpoint = requireNotNull(endpointByRole[write.endpointRole]) {
-                    "${plan.protocolId} endpoint ${write.endpointRole} is missing"
-                }
-                add(
-                    BleProtocolOperation.Write(
-                        characteristicUuid = uuid(endpoint),
-                        bytes = write.bytes,
-                        withResponse = write.withResponse,
-                    ),
-                )
-            }
+            addAll(operationsForWrites(plan.initWrites))
             for (read in plan.initReads) {
                 val endpoint = requireNotNull(endpointByRole[read.endpointRole]) {
                     "${plan.protocolId} endpoint ${read.endpointRole} is missing"
@@ -448,16 +1023,7 @@ private class ButtplugScalarProtocol(
     override fun keepaliveIntervalMs(): Long = plan.keepaliveIntervalMs
 
     override fun keepaliveCommands(lastCommands: List<BleProtocolOperation>): List<BleProtocolOperation> =
-        plan.keepaliveWritesFor(state)?.map { write ->
-            val endpoint = requireNotNull(endpointByRole[write.endpointRole]) {
-                "${plan.protocolId} endpoint ${write.endpointRole} is missing"
-            }
-            BleProtocolOperation.Write(
-                characteristicUuid = uuid(endpoint),
-                bytes = write.bytes,
-                withResponse = write.withResponse,
-            )
-        } ?: lastCommands
+        plan.keepaliveWritesFor(state)?.let(::operationsForWrites) ?: lastCommands
 
     override fun onRead(characteristicUuid: UUID, bytes: ByteArray): List<BleProtocolOperation> {
         val endpointRole = endpointRoleByUuid[characteristicUuid] ?: return emptyList()
@@ -483,10 +1049,10 @@ private class ButtplugScalarProtocol(
             ToyControlAction.Stop -> scalarFeatures.flatMap { writeFeature(it, 0) }
         }
 
-    private fun writeAll(value: Int): List<BleProtocolOperation.Write> =
+    private fun writeAll(value: Int): List<BleProtocolOperation> =
         scalarFeatures.flatMap { feature -> writeFeature(feature, value) }
 
-    private fun writeFeature(feature: com.funny.aitoy.buttplug.ButtplugOutputFeature, value: Int): List<BleProtocolOperation.Write> {
+    private fun writeFeature(feature: com.funny.aitoy.buttplug.ButtplugOutputFeature, value: Int): List<BleProtocolOperation> {
         val kind = feature.type.toToyOutputKind()
         val signedValue = if (kind == ToyOutputKind.Rotate && feature.min < 0) {
             value.coerceIn(0, maxOf(kotlin.math.abs(feature.min), kotlin.math.abs(feature.max)))
@@ -497,17 +1063,27 @@ private class ButtplugScalarProtocol(
             state,
             com.funny.aitoy.buttplug.ScalarProtocolCommand(feature.featureIndex, kind, signedValue),
             nextPacketId(),
-        ).map { write ->
-            val endpoint = requireNotNull(endpointByRole[write.endpointRole]) {
-                "${plan.protocolId} endpoint ${write.endpointRole} is missing"
-            }
-            BleProtocolOperation.Write(
-                characteristicUuid = uuid(endpoint),
-                bytes = write.bytes,
-                withResponse = write.withResponse,
-            )
-        }
+        ).let(::operationsForWrites)
     }
+
+    private fun operationsForWrites(writes: List<ScalarProtocolWrite>): List<BleProtocolOperation> =
+        buildList {
+            for (write in writes) {
+                if (write.delayBeforeMs > 0L) {
+                    add(BleProtocolOperation.Sleep(write.delayBeforeMs))
+                }
+                val endpoint = requireNotNull(endpointByRole[write.endpointRole]) {
+                    "${plan.protocolId} endpoint ${write.endpointRole} is missing"
+                }
+                add(
+                    BleProtocolOperation.Write(
+                        characteristicUuid = uuid(endpoint),
+                        bytes = write.bytes,
+                        withResponse = write.withResponse,
+                    ),
+                )
+            }
+        }
 
     private fun nextPacketId(): Int {
         if (!plan.usesPacketSequence) return 0
@@ -2179,6 +2755,7 @@ private fun BleGattFingerprint.toButtplugFingerprint(): ButtplugDeviceFingerprin
         name = name,
         serviceUuids = serviceUuids.map { it.toString().normalizedUuidText() }.toSet(),
         characteristicUuids = characteristicUuids.map { it.toString().normalizedUuidText() }.toSet(),
+        manufacturerData = manufacturerData.toManufacturerDataMap(),
     )
 
 private fun ButtplugDeviceMatch.toBleStatus(
@@ -2251,6 +2828,28 @@ private fun String.firstManufacturerByte(): Int? {
         ?.takeIf { it.length in 1..2 && it.all { ch -> ch.isDigit() || ch.lowercaseChar() in 'a'..'f' } }
         ?.toIntOrNull(16)
 }
+
+private fun String.toManufacturerDataMap(): Map<Int, ByteArray> =
+    split(",")
+        .mapNotNull { entry ->
+            val idText = entry.substringBefore(":", missingDelimiterValue = "").trim()
+            val dataText = entry.substringAfter(":", missingDelimiterValue = "").trim()
+            val id = idText.removePrefix("0x").removePrefix("0X").toIntOrNull(16) ?: return@mapNotNull null
+            id to dataText.hexByteArray()
+        }
+        .toMap()
+
+private fun String.hexByteArray(): ByteArray =
+    trim()
+        .takeIf { it.isNotEmpty() }
+        ?.split(Regex("\\s+"))
+        ?.mapNotNull { token ->
+            token.takeIf { it.length in 1..2 && it.all { ch -> ch.isDigit() || ch.lowercaseChar() in 'a'..'f' } }
+                ?.toIntOrNull(16)
+                ?.toByte()
+        }
+        ?.toByteArray()
+        ?: byteArrayOf()
 
 private fun IntArray.toByteArrayForSistalkV1(): ByteArray =
     if (size > 2) {

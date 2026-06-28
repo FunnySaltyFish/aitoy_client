@@ -39,6 +39,14 @@ class ScalarProtocolPlansTest {
         assertWrites("fredorch-rotary", intArrayOf(5, 0), command(0, ToyOutputKind.Oscillate, 3), "55 03 02 05 aa")
         assertWrites("fredorch-rotary", intArrayOf(5, 0), command(0, ToyOutputKind.Oscillate, 0), "55 03 24 27 aa")
         assertWrites("utimi", intArrayOf(0, 0, 0, 0, 0), command(1, ToyOutputKind.Oscillate, 0x32), "a0 03 00 32 00 00 00 aa")
+        assertWrites("joyhub", intArrayOf(0, 0, 0, 0), command(0, ToyOutputKind.Vibrate, 0x20), "a0 03 20 00 00 00 aa")
+        assertWrites("joyhub", intArrayOf(0x20, 0, 0, 0), command(1, ToyOutputKind.Rotate, 0x30), "a0 03 20 30 00 00 aa")
+        assertWrites("joyhub", intArrayOf(), command(4, ToyOutputKind.Constrict, 3), "a0 07 01 00 03 ff")
+        assertWrites("joyhub", intArrayOf(), command(5, ToyOutputKind.Constrict, 3), "a0 0d 00 00 03 ff")
+        assertWrites("joyhub", intArrayOf(), command(0, ToyOutputKind.Led, 1), "a0 14 01 00 01 ff")
+        assertWrites("joyhub", intArrayOf(), command(0, ToyOutputKind.Led, 0), "a0 14 00 00 00 00")
+        assertWrites("joyhub", intArrayOf(), command(0, ToyOutputKind.Temperature, 1), "a0 04 01 00 01 ff")
+        assertWrites("joyhub", intArrayOf(), command(0, ToyOutputKind.Temperature, 0), "a0 04 00 00 00 00")
         assertWrites("luvmazer", intArrayOf(), command(0, ToyOutputKind.Vibrate, 0x32), "a0 01 00 00 64 32")
         assertWrites("luvmazer", intArrayOf(), command(2, ToyOutputKind.Vibrate, 0x32), "a0 0c 00 00 64 32")
         assertWrites("luvmazer", intArrayOf(), command(1, ToyOutputKind.Oscillate, 0x32), "a0 06 01 00 64 32")
@@ -53,6 +61,9 @@ class ScalarProtocolPlansTest {
         assertWrites("sexverse-v2", intArrayOf(), command(1, ToyOutputKind.Oscillate, 0x0A), "aa 03 01 02 64 0a", true)
         assertWrites("sexverse-v3", intArrayOf(), command(1, ToyOutputKind.Rotate, -1), "a1 04 ff 02", true)
         assertWrites("sexverse-lg389", intArrayOf(0x03, 0), command(1, ToyOutputKind.Oscillate, 0x08), "aa 05 03 14 01 00 04 00 08 00", true)
+        assertWrites("galaku", galakuState(outputCount = 1), command(0, ToyOutputKind.Vibrate, 0x32), "23 81 bb ab d2 ec 29 c3 bb a3 3b d2")
+        assertWrites("galaku", galakuState(outputCount = 2), command(0, ToyOutputKind.Oscillate, 0x32), "23 81 bb ab d2 7b 44 61 3b a3 3b e4")
+        assertWrites("galaku", galakuState(outputCount = 2, firstSpeed = 0x20), command(1, ToyOutputKind.Rotate, -0x30), "23 81 bb ab d2 7b 44 53 eb a3 3b 42")
         assertWrites("galaku-pump", intArrayOf(0, 0), command(0, ToyOutputKind.Oscillate, 0x32), "23 81 bb ab d2 9b 44 61 3b a3 3b 44", true)
         assertWrites("svakom-v3", intArrayOf(), command(0, ToyOutputKind.Vibrate, 3), "55 03 03 00 01 03")
         assertWrites("svakom-v3", intArrayOf(), command(1, ToyOutputKind.Rotate, 1), "55 08 00 00 01 ff")
@@ -218,6 +229,25 @@ class ScalarProtocolPlansTest {
     }
 
     @Test
+    fun galakuHandlerUsesDeviceNameSpecificSingleOutputPayload() = runBlocking {
+        val transport = RecordingTransport()
+        val handler = requireNotNull(ScalarProtocolHandlers.forProtocolId("galaku"))
+        val session = handler.createSession(
+            match(
+                "galaku",
+                listOf(ButtplugOutputFeature(OUTPUT_VIBRATE, 0, 100, 0, "Vibrate")),
+                mapOf("tx" to "tx"),
+                deviceName = "AC695X_1(BLE)",
+            ),
+            transport,
+        )
+
+        session.handle(ToyOutputCommand.Scalar(featureIndex = 0, kind = ToyOutputKind.Vibrate, value = 0x32))
+
+        assertContentEquals(hex("aa 01 0a 03 32 01 00 00 00 00 00 00 00 00 00 00"), transport.writeBytesAt(0))
+    }
+
+    @Test
     fun fredorchRotaryHandlerUsesDynamicKeepaliveSteps() = runBlocking {
         val transport = RecordingTransport()
         val handler = requireNotNull(ScalarProtocolHandlers.forProtocolId("fredorch-rotary"))
@@ -277,6 +307,25 @@ class ScalarProtocolPlansTest {
         assertEquals(5, transport.operations.size)
     }
 
+    @Test
+    fun joyhubHandlerRunsDelayedSprayStop() = runBlocking {
+        val transport = RecordingTransport()
+        val handler = requireNotNull(ScalarProtocolHandlers.forProtocolId("joyhub"))
+        val session = handler.createSession(
+            match(
+                "joyhub",
+                listOf(ButtplugOutputFeature(OUTPUT_SPRAY, 0, 1, 0, "Spray")),
+            ),
+            transport,
+        )
+
+        session.handle(ToyOutputCommand.Scalar(featureIndex = 0, kind = ToyOutputKind.Spray, value = 1))
+
+        assertContentEquals(hex("a0 24 01 00 01 ff"), transport.writeBytesAt(0))
+        assertEquals(HardwareOperation.Sleep(1000), transport.operations[1])
+        assertContentEquals(hex("a0 24 00 00 00 00"), transport.writeBytesAt(2))
+    }
+
 
     private fun assertWrites(
         protocolId: String,
@@ -299,6 +348,13 @@ class ScalarProtocolPlansTest {
     private fun command(featureIndex: Int, kind: ToyOutputKind, value: Int): ScalarProtocolCommand =
         ScalarProtocolCommand(featureIndex = featureIndex, kind = kind, value = value)
 
+    private fun galakuState(outputCount: Int, firstSpeed: Int = 0, caipingPump: Boolean = false): IntArray =
+        IntArray(10).also { state ->
+            state[0] = firstSpeed
+            state[8] = if (caipingPump) 1 else 0
+            state[9] = outputCount
+        }
+
     private fun match(protocolId: String): ButtplugDeviceMatch {
         return match(
             protocolId,
@@ -319,6 +375,7 @@ class ScalarProtocolPlansTest {
         protocolId: String,
         features: List<ButtplugOutputFeature>,
         endpointCharacteristics: Map<String, String>,
+        deviceName: String = protocolId,
     ): ButtplugDeviceMatch {
         val definition = ButtplugProtocolDefinition(
             id = protocolId,
@@ -333,7 +390,7 @@ class ScalarProtocolPlansTest {
             ),
             defaultDevice = ButtplugDeviceDefinition(
                 identifiers = emptyList(),
-                name = protocolId,
+                name = deviceName,
                 features = features,
             ),
             configurations = emptyList(),
