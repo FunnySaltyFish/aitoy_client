@@ -212,6 +212,7 @@ class AndroidBleController(
         @Deprecated("Android 13 之前的回调")
         override fun onCharacteristicChanged(gatt: BluetoothGatt, characteristic: BluetoothGattCharacteristic) {
             trace("Notify uuid=${characteristic.uuid} bytes=${characteristic.value.toHexString()}")
+            handleCharacteristicNotify(characteristic.uuid, characteristic.value ?: byteArrayOf())
         }
 
         override fun onCharacteristicChanged(
@@ -220,6 +221,7 @@ class AndroidBleController(
             value: ByteArray,
         ) {
             trace("Notify uuid=${characteristic.uuid} bytes=${value.toHexString()}")
+            handleCharacteristicNotify(characteristic.uuid, value)
         }
 
         override fun onDescriptorWrite(gatt: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
@@ -745,9 +747,15 @@ class AndroidBleController(
         val protocol = keepaliveProtocol ?: return
         val runnable = Runnable {
             if (activeProtocol === protocol && protocolReady && keepaliveOperations.isNotEmpty()) {
-                trace("GATT keepalive protocol=${protocol.status.id} operations=${keepaliveOperations.size}")
-                enqueue(keepaliveOperations)
-                scheduleProtocolKeepalive(intervalMs)
+                val nextOperations = protocol.keepaliveCommands(keepaliveOperations)
+                if (nextOperations.isNotEmpty()) {
+                    keepaliveOperations = nextOperations
+                    trace("GATT keepalive protocol=${protocol.status.id} operations=${nextOperations.size}")
+                    enqueue(nextOperations)
+                    scheduleProtocolKeepalive(intervalMs)
+                } else {
+                    cancelProtocolKeepalive()
+                }
             }
         }
         keepaliveRunnable = runnable
@@ -846,6 +854,36 @@ class AndroidBleController(
                     return
                 }
             }
+            is BleProtocolOperation.UnsubscribeNotify -> {
+                val characteristic = findCharacteristic(operation.characteristicUuid)
+                    ?: run {
+                        operationInProgress = false
+                        handleProtocolOperationFailed("找不到通知通道：${operation.characteristicUuid}")
+                        return
+                    }
+                val localEnabled = gatt?.setCharacteristicNotification(characteristic, false) == true
+                trace("关闭 Notify 本地监听 uuid=${characteristic.uuid} result=$localEnabled")
+                val descriptor = characteristic.getDescriptor(CLIENT_CHARACTERISTIC_CONFIG_UUID)
+                if (descriptor == null) {
+                    operationInProgress = false
+                    handleProtocolOperationFailed("找不到 Notify 描述符：${characteristic.uuid}")
+                    return
+                }
+                val descriptorResult = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    gatt?.writeDescriptor(descriptor, BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE) ?: -1
+                } else {
+                    @Suppress("DEPRECATION")
+                    descriptor.value = BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE
+                    @Suppress("DEPRECATION")
+                    if (gatt?.writeDescriptor(descriptor) == true) BluetoothGatt.GATT_SUCCESS else -1
+                }
+                trace("写入 Notify 关闭描述符 result=$descriptorResult")
+                if (descriptorResult != BluetoothGatt.GATT_SUCCESS) {
+                    operationInProgress = false
+                    handleProtocolOperationFailed("提交 Notify 关闭描述符失败：$descriptorResult")
+                    return
+                }
+            }
             is BleProtocolOperation.Sleep -> {
                 trace("等待协议初始化 ${operation.millis}ms")
                 mainHandler.postDelayed({
@@ -871,6 +909,19 @@ class AndroidBleController(
             return
         }
         executeNextOperation()
+    }
+
+    private fun handleCharacteristicNotify(uuid: UUID, bytes: ByteArray) {
+        runCatching {
+            activeProtocol?.onNotify(uuid, bytes)?.let { operations ->
+                if (operations.isNotEmpty()) {
+                    operationQueue.addAll(operations)
+                    executeNextOperation()
+                }
+            }
+        }.onFailure {
+            handleProtocolOperationFailed("协议通知处理失败：${it.message}")
+        }
     }
 
     private fun handleProtocolOperationFailed(reason: String) {
@@ -949,6 +1000,7 @@ class AndroidBleController(
         when (this) {
             is BleProtocolOperation.Read -> "Read uuid=$characteristicUuid"
             is BleProtocolOperation.SubscribeNotify -> "SubscribeNotify uuid=$characteristicUuid"
+            is BleProtocolOperation.UnsubscribeNotify -> "UnsubscribeNotify uuid=$characteristicUuid"
             is BleProtocolOperation.Sleep -> "Sleep millis=$millis"
             is BleProtocolOperation.Write ->
                 "Write uuid=$characteristicUuid withResponse=$withResponse bytes=${bytes.toHexString()}"

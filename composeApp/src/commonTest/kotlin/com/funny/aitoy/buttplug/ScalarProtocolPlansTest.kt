@@ -31,6 +31,13 @@ class ScalarProtocolPlansTest {
         assertWrites("sakuraneko", intArrayOf(), command(1, ToyOutputKind.Rotate, 0x32), "a2 08 01 00 00 00 64 32 00 32 df 55")
         assertWrites("tryfun-meta2", intArrayOf(), command(0, ToyOutputKind.Oscillate, 0x64), "00 02 00 05 21 05 0b 64 6b")
         assertWrites("tryfun-blackhole", intArrayOf(), command(0, ToyOutputKind.Oscillate, 0x64), "00 02 00 03 0c 64 90")
+        assertWrites("tryfun", intArrayOf(), command(0, ToyOutputKind.Oscillate, 0x05), "aa 02 07 05 f4", true)
+        assertWrites("tryfun", intArrayOf(), command(1, ToyOutputKind.Rotate, 0x06), "aa 02 08 06 f2", true)
+        assertWrites("tryfun", intArrayOf(), command(0, ToyOutputKind.Vibrate, 0x04), "00 02 00 05 02 04 01 00 f9", true)
+        assertWrites("tryfun", intArrayOf(), command(0, ToyOutputKind.Vibrate, 0), "00 02 00 05 01 02 01 01 fc", true)
+        assertWrites("fredorch-rotary", intArrayOf(0, 0), command(0, ToyOutputKind.Oscillate, 3), "55 03 01 04 aa")
+        assertWrites("fredorch-rotary", intArrayOf(5, 0), command(0, ToyOutputKind.Oscillate, 3), "55 03 02 05 aa")
+        assertWrites("fredorch-rotary", intArrayOf(5, 0), command(0, ToyOutputKind.Oscillate, 0), "55 03 24 27 aa")
         assertWrites("utimi", intArrayOf(0, 0, 0, 0, 0), command(1, ToyOutputKind.Oscillate, 0x32), "a0 03 00 32 00 00 00 aa")
         assertWrites("luvmazer", intArrayOf(), command(0, ToyOutputKind.Vibrate, 0x32), "a0 01 00 00 64 32")
         assertWrites("luvmazer", intArrayOf(), command(2, ToyOutputKind.Vibrate, 0x32), "a0 0c 00 00 64 32")
@@ -38,6 +45,11 @@ class ScalarProtocolPlansTest {
         assertWrites("luvmazer", intArrayOf(), command(1, ToyOutputKind.Rotate, 0x32), "a0 0f 00 00 64 32")
         assertWrites("luvmazer", intArrayOf(), command(2, ToyOutputKind.Constrict, 0), "a0 0d 00 00 00 00")
         assertWrites("luvmazer", intArrayOf(), command(2, ToyOutputKind.Constrict, 0x20), "a0 0d 00 00 14 20")
+        assertWrites("hismith", intArrayOf(), command(0, ToyOutputKind.Oscillate, 0x10), "aa 04 10 14")
+        assertWrites("hismith", intArrayOf(), command(1, ToyOutputKind.Vibrate, 0), "aa 06 f0 f6")
+        assertWrites("hismith-mini", intArrayOf(1, 0), command(0, ToyOutputKind.Vibrate, 0x10), "cc 03 10 13")
+        assertWrites("hismith-mini", intArrayOf(1, 1), command(1, ToyOutputKind.Constrict, 0x10), "cc 05 10 15")
+        assertWrites("hismith-mini", intArrayOf(), command(0, ToyOutputKind.Spray, 1), "cc 0b 01 0c")
         assertWrites("sexverse-v2", intArrayOf(), command(1, ToyOutputKind.Oscillate, 0x0A), "aa 03 01 02 64 0a", true)
         assertWrites("sexverse-v3", intArrayOf(), command(1, ToyOutputKind.Rotate, -1), "a1 04 ff 02", true)
         assertWrites("sexverse-lg389", intArrayOf(0x03, 0), command(1, ToyOutputKind.Oscillate, 0x08), "aa 05 03 14 01 00 04 00 08 00", true)
@@ -69,9 +81,17 @@ class ScalarProtocolPlansTest {
         assertEquals(100, ScalarProtocolPlans.forProtocolId("svakom-v5")?.keepaliveIntervalMs)
         assertEquals(100, ScalarProtocolPlans.forProtocolId("svakom-sam")?.keepaliveIntervalMs)
         assertEquals(100, ScalarProtocolPlans.forProtocolId("svakom-sam2")?.keepaliveIntervalMs)
+        assertEquals(100, ScalarProtocolPlans.forProtocolId("fredorch-rotary")?.keepaliveIntervalMs)
         assertEquals("rx", requireNotNull(ScalarProtocolPlans.forProtocolId("svakom-sam")).initSubscriptions.single())
         assertContentEquals(hex("aa 04"), requireNotNull(ScalarProtocolPlans.forProtocolId("sexverse-v2")).initWrites.single().bytes)
         assertEquals("tx", requireNotNull(ScalarProtocolPlans.forProtocolId("sensee-v2")).initReads.single().endpointRole)
+
+        val fredorchRotary = requireNotNull(ScalarProtocolPlans.forProtocolId("fredorch-rotary"))
+        assertEquals("rx", fredorchRotary.initSubscriptions.single())
+        assertContentEquals(hex("55 03 99 9c aa"), fredorchRotary.initWrites[0].bytes)
+        assertContentEquals(hex("55 09 21 00 00 00 00 00 00 2a aa"), fredorchRotary.initWrites[1].bytes)
+        assertContentEquals(hex("55 03 1f 22 aa"), fredorchRotary.initWrites[2].bytes)
+        assertContentEquals(hex("55 03 24 27 aa"), fredorchRotary.initWrites[3].bytes)
     }
 
     @Test
@@ -195,6 +215,66 @@ class ScalarProtocolPlansTest {
 
         assertEquals(HardwareOperation.Subscribe("rx"), transport.operations[0])
         assertContentEquals(hex("12 01 03 00 04 03"), transport.writeBytesAt(1))
+    }
+
+    @Test
+    fun fredorchRotaryHandlerUsesDynamicKeepaliveSteps() = runBlocking {
+        val transport = RecordingTransport()
+        val handler = requireNotNull(ScalarProtocolHandlers.forProtocolId("fredorch-rotary"))
+        val session = handler.createSession(
+            match(
+                "fredorch-rotary",
+                listOf(ButtplugOutputFeature(OUTPUT_OSCILLATE, 0, 20, 0, "Oscillate")),
+                mapOf("tx" to "tx", "rx" to "rx"),
+            ),
+            transport,
+        )
+        val plan = requireNotNull(ScalarProtocolPlans.forProtocolId("fredorch-rotary"))
+        val state = plan.createState(match("fredorch-rotary"))
+
+        session.initialize()
+        session.handle(ToyOutputCommand.Scalar(featureIndex = 0, kind = ToyOutputKind.Oscillate, value = 2))
+        val secondStep = requireNotNull(plan.keepaliveWritesFor(state.apply {
+            this[0] = 1
+            this[1] = 2
+        })).single()
+        val done = requireNotNull(plan.keepaliveWritesFor(state.apply {
+            this[0] = 2
+            this[1] = 2
+        }))
+
+        assertEquals(HardwareOperation.Subscribe("rx"), transport.operations[0])
+        assertContentEquals(hex("55 03 99 9c aa"), transport.writeBytesAt(1))
+        assertContentEquals(hex("55 03 01 04 aa"), transport.writeBytesAt(5))
+        assertContentEquals(hex("55 03 01 04 aa"), secondStep.bytes)
+        assertTrue(done.isEmpty())
+    }
+
+    @Test
+    fun hismithMiniHandlerSupportsRotateAndSprayStopWithoutTriggeringSpray() = runBlocking {
+        val transport = RecordingTransport()
+        val handler = requireNotNull(ScalarProtocolHandlers.forProtocolId("hismith-mini"))
+        val session = handler.createSession(
+            match(
+                "hismith-mini",
+                listOf(
+                    ButtplugOutputFeature(OUTPUT_ROTATE, -100, 100, 0, "Rotate"),
+                    ButtplugOutputFeature(OUTPUT_SPRAY, 0, 1, 1, "Spray"),
+                ),
+            ),
+            transport,
+        )
+
+        session.handle(ToyOutputCommand.Scalar(featureIndex = 0, kind = ToyOutputKind.Rotate, value = -7))
+        session.handle(ToyOutputCommand.Scalar(featureIndex = 1, kind = ToyOutputKind.Spray, value = 1))
+        session.stop()
+
+        assertContentEquals(hex("cc 03 07 0a"), transport.writeBytesAt(0))
+        assertContentEquals(hex("cc 01 c1 c2"), transport.writeBytesAt(1))
+        assertContentEquals(hex("cc 0b 01 0c"), transport.writeBytesAt(2))
+        assertContentEquals(hex("cc 03 00 03"), transport.writeBytesAt(3))
+        assertContentEquals(hex("cc 01 c0 c1"), transport.writeBytesAt(4))
+        assertEquals(5, transport.operations.size)
     }
 
 

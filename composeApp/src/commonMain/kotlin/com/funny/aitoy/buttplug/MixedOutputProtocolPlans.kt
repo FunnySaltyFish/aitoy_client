@@ -12,11 +12,13 @@ data class MixedOutputProtocolPlan(
     val protocolId: String,
     val supportedKinds: Set<ToyOutputKind>,
     val stateSize: Int,
+    val initialState: ((ButtplugDeviceMatch) -> IntArray)? = null,
     val scalarWrites: (state: IntArray, command: ScalarProtocolCommand) -> List<MixedOutputProtocolWrite>,
     val linearWrites: (state: IntArray, command: LinearProtocolCommand) -> List<MixedOutputProtocolWrite>,
 ) {
     fun createState(match: ButtplugDeviceMatch): IntArray =
-        IntArray(maxOf(stateSize, match.scalarOutputs.size, match.linearOutputs.size))
+        initialState?.invoke(match)
+            ?: IntArray(maxOf(stateSize, match.scalarOutputs.size, match.linearOutputs.size))
 }
 
 object MixedOutputProtocolPlans {
@@ -37,6 +39,25 @@ object MixedOutputProtocolPlans {
                 state[0] = position
                 val speed = kiirooSpeed(previousPosition, position, command.durationMs)
                 listOf(write(bytes(0x03, 0x00, speed, position)))
+            },
+        ),
+        MixedOutputProtocolPlan(
+            protocolId = "vorze-sa",
+            supportedKinds = setOf(ToyOutputKind.Vibrate, ToyOutputKind.Rotate, ToyOutputKind.Linear),
+            stateSize = VORZE_STATE_SIZE,
+            initialState = { match -> vorzeInitialState(match) },
+            scalarWrites = { state, command ->
+                when (command.kind) {
+                    ToyOutputKind.Vibrate -> vorzeVibrateWrites(state, command)
+                    ToyOutputKind.Rotate -> vorzeRotateWrites(state, command)
+                    else -> unsupportedScalar(command)
+                }
+            },
+            linearWrites = { state, command ->
+                val position = command.position.coerceIn(0, 99)
+                val previousPosition = state[VORZE_PREVIOUS_POSITION_INDEX]
+                state[VORZE_PREVIOUS_POSITION_INDEX] = position
+                listOf(write(bytes(VORZE_DEVICE_PISTON, position, vorzePistonSpeed(previousPosition, position, command.durationMs)), withResponse = true))
             },
         ),
     ).associateBy { it.protocolId }
@@ -61,6 +82,63 @@ object MixedOutputProtocolPlans {
         }
     }
 
+    private fun vorzeInitialState(match: ButtplugDeviceMatch): IntArray {
+        val name = match.device.name.lowercase()
+        val deviceType = when {
+            "bach" in name -> VORZE_DEVICE_BACH
+            "rocket" in name -> VORZE_DEVICE_ROCKET
+            "cyclone" in name || "cycsa" in name -> VORZE_DEVICE_CYCLONE
+            "ufo tw" in name || "ufo-tw" in name -> VORZE_DEVICE_UFO_TW
+            "ufo" in name -> VORZE_DEVICE_UFO
+            "piston" in name -> VORZE_DEVICE_PISTON
+            "omorfi" in name || "omor" in name -> VORZE_DEVICE_OMORFI
+            else -> 0
+        }
+        return IntArray(VORZE_STATE_SIZE).also { it[VORZE_DEVICE_TYPE_INDEX] = deviceType }
+    }
+
+    private fun vorzeVibrateWrites(state: IntArray, command: ScalarProtocolCommand): List<MixedOutputProtocolWrite> {
+        val deviceType = state[VORZE_DEVICE_TYPE_INDEX]
+        return when (deviceType) {
+            VORZE_DEVICE_BACH,
+            VORZE_DEVICE_ROCKET,
+            -> listOf(write(bytes(deviceType, VORZE_ACTION_VIBRATE, command.value), withResponse = true))
+            VORZE_DEVICE_OMORFI -> {
+                state[VORZE_SCALAR_0_INDEX + command.featureIndex.coerceIn(0, 1)] = command.value
+                listOf(write(bytes(VORZE_DEVICE_OMORFI, state[VORZE_SCALAR_0_INDEX], state[VORZE_SCALAR_1_INDEX]), withResponse = true))
+            }
+            else -> unsupportedScalar(command)
+        }
+    }
+
+    private fun vorzeRotateWrites(state: IntArray, command: ScalarProtocolCommand): List<MixedOutputProtocolWrite> {
+        val deviceType = state[VORZE_DEVICE_TYPE_INDEX]
+        val encoded = vorzeRotation(command.value)
+        return when (deviceType) {
+            VORZE_DEVICE_CYCLONE,
+            VORZE_DEVICE_UFO,
+            -> listOf(write(bytes(deviceType, VORZE_ACTION_ROTATE, encoded), withResponse = true))
+            VORZE_DEVICE_UFO_TW -> {
+                state[VORZE_SCALAR_0_INDEX + command.featureIndex.coerceIn(0, 1)] = encoded
+                listOf(write(bytes(VORZE_DEVICE_UFO_TW, state[VORZE_SCALAR_0_INDEX], state[VORZE_SCALAR_1_INDEX]), withResponse = true))
+            }
+            else -> unsupportedScalar(command)
+        }
+    }
+
+    private fun vorzeRotation(speed: Int): Int {
+        val clockwise = if (speed >= 0) 1 else 0
+        return (clockwise shl 7) or kotlin.math.abs(speed).coerceIn(0, 0x7F)
+    }
+
+    private fun vorzePistonSpeed(previousPosition: Int, position: Int, durationMs: Int): Int {
+        val distance = kotlin.math.abs(previousPosition - position).toDouble()
+        if (distance <= 0.0) return 100
+        val scaledDistance = distance.coerceAtMost(200.0)
+        val duration = 200.0 * durationMs.coerceAtLeast(0).toDouble() / scaledDistance
+        return (duration / 6658.0).pow(-1.21).toInt().coerceIn(0, 100)
+    }
+
     private fun write(
         bytes: ByteArray,
         endpointRole: String = "tx",
@@ -73,6 +151,21 @@ object MixedOutputProtocolPlans {
 
     private fun bytes(vararg values: Int): ByteArray =
         ByteArray(values.size) { index -> values[index].coerceIn(0, 0xFF).toByte() }
+
+    private const val VORZE_DEVICE_TYPE_INDEX = 0
+    private const val VORZE_SCALAR_0_INDEX = 1
+    private const val VORZE_SCALAR_1_INDEX = 2
+    private const val VORZE_PREVIOUS_POSITION_INDEX = 3
+    private const val VORZE_STATE_SIZE = 4
+    private const val VORZE_DEVICE_BACH = 6
+    private const val VORZE_DEVICE_PISTON = 3
+    private const val VORZE_DEVICE_CYCLONE = 1
+    private const val VORZE_DEVICE_ROCKET = 7
+    private const val VORZE_DEVICE_OMORFI = 9
+    private const val VORZE_DEVICE_UFO = 2
+    private const val VORZE_DEVICE_UFO_TW = 5
+    private const val VORZE_ACTION_ROTATE = 1
+    private const val VORZE_ACTION_VIBRATE = 3
 }
 
 object MixedOutputProtocolHandlers {

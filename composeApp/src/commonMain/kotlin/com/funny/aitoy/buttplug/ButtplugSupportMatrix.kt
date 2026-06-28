@@ -3,6 +3,7 @@ package com.funny.aitoy.buttplug
 enum class ButtplugSupportStatus {
     Controllable,
     PartiallyControllable,
+    RecognizedNoOutput,
     RecognizedMissingHandler,
     RecognizedUnsupportedTransport,
 }
@@ -179,6 +180,7 @@ object ButtplugLocalHandlerRegistry {
         val descriptor = descriptorFor(protocol.id)
         val outputKinds = protocol.allOutputKinds()
         val status = descriptor?.status ?: when {
+            outputKinds.isEmpty() && protocol.supportsCurrentAndroidTransport() -> ButtplugSupportStatus.RecognizedNoOutput
             protocol.supportsCurrentAndroidTransport() -> ButtplugSupportStatus.RecognizedMissingHandler
             else -> ButtplugSupportStatus.RecognizedUnsupportedTransport
         }

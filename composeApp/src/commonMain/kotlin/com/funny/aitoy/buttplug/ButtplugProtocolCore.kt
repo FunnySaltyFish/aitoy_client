@@ -10,6 +10,8 @@ enum class ToyOutputKind {
     Position,
     Heater,
     Led,
+    Spray,
+    Temperature,
     Unknown,
 }
 
@@ -104,6 +106,8 @@ fun String.toToyOutputKind(): ToyOutputKind =
         OUTPUT_HW_POSITION_WITH_DURATION -> ToyOutputKind.Linear
         OUTPUT_HEATER -> ToyOutputKind.Heater
         OUTPUT_LED -> ToyOutputKind.Led
+        OUTPUT_SPRAY -> ToyOutputKind.Spray
+        OUTPUT_TEMPERATURE -> ToyOutputKind.Temperature
         else -> ToyOutputKind.Unknown
     }
 

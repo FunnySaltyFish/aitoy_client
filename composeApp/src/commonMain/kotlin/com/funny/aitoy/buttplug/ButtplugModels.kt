@@ -73,7 +73,8 @@ data class ButtplugDeviceMatch(
                 it.type == OUTPUT_OSCILLATE ||
                 it.type == OUTPUT_ROTATE ||
                 it.type == OUTPUT_CONSTRICT ||
-                it.type == OUTPUT_INFLATE
+                it.type == OUTPUT_INFLATE ||
+                it.type == OUTPUT_SPRAY
         }
 
     val linearOutputs: List<ButtplugOutputFeature>
@@ -94,6 +95,8 @@ const val OUTPUT_POSITION = "position"
 const val OUTPUT_HW_POSITION_WITH_DURATION = "hw_position_with_duration"
 const val OUTPUT_HEATER = "heater"
 const val OUTPUT_LED = "led"
+const val OUTPUT_SPRAY = "spray"
+const val OUTPUT_TEMPERATURE = "temperature"
 
 const val COMMUNICATION_BTLE = "btle"
 const val COMMUNICATION_HID = "hid"

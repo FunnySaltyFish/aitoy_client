@@ -24,8 +24,12 @@ class ButtplugSupportMatrixTest {
                 "fleshy-thrust",
                 "fox",
                 "foreo",
+                "fredorch",
+                "fredorch-rotary",
                 "galaku-pump",
                 "hgod",
+                "hismith",
+                "hismith-mini",
                 "htk_bm",
                 "itoys",
                 "kiiroo-powershot",
@@ -98,7 +102,9 @@ class ButtplugSupportMatrixTest {
                 "synchro",
                 "tryfun-blackhole",
                 "tryfun-meta2",
+                "tryfun",
                 "utimi",
+                "vorze-sa",
                 "wetoy",
                 "xiuxiuda",
                 "xibao",
@@ -137,6 +143,19 @@ class ButtplugSupportMatrixTest {
     }
 
     @Test
+    fun btleProtocolWithoutOutputIsRecognizedAsNoOutput() {
+        val entry = ButtplugLocalHandlerRegistry.supportEntryFor(
+            protocol(
+                id = "example-input-only",
+                communicationTypes = setOf(COMMUNICATION_BTLE),
+                outputType = null,
+            ),
+        )
+
+        assertEquals(ButtplugSupportStatus.RecognizedNoOutput, entry.status)
+    }
+
+    @Test
     fun supportEntryMapsProtocolOutputsToStrongKinds() {
         val entry = ButtplugLocalHandlerRegistry.supportEntryFor(
             protocol(
@@ -147,6 +166,32 @@ class ButtplugSupportMatrixTest {
         )
 
         assertEquals(setOf(ToyOutputKind.Linear), entry.outputKinds)
+    }
+
+    @Test
+    fun supportEntryMapsSprayOutput() {
+        val entry = ButtplugLocalHandlerRegistry.supportEntryFor(
+            protocol(
+                id = "example-spray",
+                communicationTypes = setOf(COMMUNICATION_BTLE),
+                outputType = OUTPUT_SPRAY,
+            ),
+        )
+
+        assertEquals(setOf(ToyOutputKind.Spray), entry.outputKinds)
+    }
+
+    @Test
+    fun supportEntryMapsTemperatureOutput() {
+        val entry = ButtplugLocalHandlerRegistry.supportEntryFor(
+            protocol(
+                id = "example-temperature",
+                communicationTypes = setOf(COMMUNICATION_BTLE),
+                outputType = OUTPUT_TEMPERATURE,
+            ),
+        )
+
+        assertEquals(setOf(ToyOutputKind.Temperature), entry.outputKinds)
     }
 
     @Test
@@ -174,7 +219,7 @@ class ButtplugSupportMatrixTest {
     private fun protocol(
         id: String,
         communicationTypes: Set<String>,
-        outputType: String = OUTPUT_VIBRATE,
+        outputType: String? = OUTPUT_VIBRATE,
     ): ButtplugProtocolDefinition =
         ButtplugProtocolDefinition(
             id = id,
@@ -185,15 +230,17 @@ class ButtplugSupportMatrixTest {
             defaultDevice = ButtplugDeviceDefinition(
                 identifiers = emptyList(),
                 name = id,
-                features = listOf(
-                    ButtplugOutputFeature(
-                        type = outputType,
-                        min = 0,
-                        max = 100,
-                        featureIndex = 0,
-                        description = "",
-                    ),
-                ),
+                features = outputType?.let {
+                    listOf(
+                        ButtplugOutputFeature(
+                            type = it,
+                            min = 0,
+                            max = 100,
+                            featureIndex = 0,
+                            description = "",
+                        ),
+                    )
+                }.orEmpty(),
             ),
             configurations = emptyList(),
         )

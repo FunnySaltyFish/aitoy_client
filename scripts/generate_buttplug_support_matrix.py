@@ -135,6 +135,8 @@ def inferred_status(protocol: dict[str, Any], handler: dict[str, str] | None) ->
     if handler:
         return handler["support_status"]
     comms = set(communication_types(protocol))
+    if (not comms or "btle" in comms) and not output_types(protocol):
+        return "RecognizedNoOutput"
     if not comms or "btle" in comms:
         return "RecognizedMissingHandler"
     return "RecognizedUnsupportedTransport"

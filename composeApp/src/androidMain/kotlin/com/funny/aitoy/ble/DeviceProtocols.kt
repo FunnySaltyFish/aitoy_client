@@ -25,6 +25,8 @@ internal sealed interface BleProtocolOperation {
 
     data class SubscribeNotify(val characteristicUuid: UUID) : BleProtocolOperation
 
+    data class UnsubscribeNotify(val characteristicUuid: UUID) : BleProtocolOperation
+
     data class Sleep(val millis: Long) : BleProtocolOperation
 
     data class Write(
@@ -76,7 +78,11 @@ internal interface BleDeviceProtocol {
 
     fun keepaliveIntervalMs(): Long = 0L
 
+    fun keepaliveCommands(lastCommands: List<BleProtocolOperation>): List<BleProtocolOperation> = lastCommands
+
     fun onRead(characteristicUuid: UUID, bytes: ByteArray): List<BleProtocolOperation> = emptyList()
+
+    fun onNotify(characteristicUuid: UUID, bytes: ByteArray): List<BleProtocolOperation> = emptyList()
 
     fun commandsFor(action: ToyControlAction): List<BleProtocolOperation>
 }
@@ -441,6 +447,18 @@ private class ButtplugScalarProtocol(
 
     override fun keepaliveIntervalMs(): Long = plan.keepaliveIntervalMs
 
+    override fun keepaliveCommands(lastCommands: List<BleProtocolOperation>): List<BleProtocolOperation> =
+        plan.keepaliveWritesFor(state)?.map { write ->
+            val endpoint = requireNotNull(endpointByRole[write.endpointRole]) {
+                "${plan.protocolId} endpoint ${write.endpointRole} is missing"
+            }
+            BleProtocolOperation.Write(
+                characteristicUuid = uuid(endpoint),
+                bytes = write.bytes,
+                withResponse = write.withResponse,
+            )
+        } ?: lastCommands
+
     override fun onRead(characteristicUuid: UUID, bytes: ByteArray): List<BleProtocolOperation> {
         val endpointRole = endpointRoleByUuid[characteristicUuid] ?: return emptyList()
         plan.onRead?.invoke(state, endpointRole, bytes)
@@ -519,15 +537,25 @@ private class ButtplugLinearProtocol(
     override fun matches(fingerprint: BleGattFingerprint): Boolean = false
 
     override fun initialize(fingerprint: BleGattFingerprint): List<BleProtocolOperation> =
-        plan.initWrites.map { write ->
-            val endpoint = requireNotNull(endpointByRole[write.endpointRole]) {
-                "${plan.protocolId} endpoint ${write.endpointRole} is missing"
+        buildList {
+            for (endpointRole in plan.initSubscriptions) {
+                val endpoint = requireNotNull(endpointByRole[endpointRole]) {
+                    "${plan.protocolId} endpoint $endpointRole is missing"
+                }
+                add(BleProtocolOperation.SubscribeNotify(uuid(endpoint)))
             }
-            BleProtocolOperation.Write(
-                characteristicUuid = uuid(endpoint),
-                bytes = write.bytes,
-                withResponse = write.withResponse,
-            )
+            for (write in plan.initWrites) {
+                val endpoint = requireNotNull(endpointByRole[write.endpointRole]) {
+                    "${plan.protocolId} endpoint ${write.endpointRole} is missing"
+                }
+                add(
+                    BleProtocolOperation.Write(
+                        characteristicUuid = uuid(endpoint),
+                        bytes = write.bytes,
+                        withResponse = write.withResponse,
+                    ),
+                )
+            }
         }
 
     override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =

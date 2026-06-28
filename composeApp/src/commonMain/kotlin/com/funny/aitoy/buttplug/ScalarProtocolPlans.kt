@@ -4,6 +4,7 @@ data class ScalarProtocolWrite(
     val endpointRole: String = "tx",
     val bytes: ByteArray,
     val withResponse: Boolean,
+    val delayBeforeMs: Long = 0L,
 )
 
 data class ScalarProtocolRead(
@@ -26,6 +27,7 @@ data class ScalarProtocolPlan(
     val keepaliveIntervalMs: Long = 0L,
     val initialState: ((ButtplugDeviceMatch) -> IntArray)? = null,
     val onRead: ((state: IntArray, endpointRole: String, bytes: ByteArray) -> Unit)? = null,
+    val keepaliveWrites: ((state: IntArray) -> List<ScalarProtocolWrite>)? = null,
     val writes: (state: IntArray, command: ScalarProtocolCommand) -> List<ScalarProtocolWrite>,
 ) {
     var sequencedWrites: ((state: IntArray, command: ScalarProtocolCommand, packetId: Int) -> List<ScalarProtocolWrite>)? = null
@@ -35,6 +37,9 @@ data class ScalarProtocolPlan(
 
     fun writesFor(state: IntArray, command: ScalarProtocolCommand, packetId: Int): List<ScalarProtocolWrite> =
         sequencedWrites?.invoke(state, command, packetId) ?: writes(state, command)
+
+    fun keepaliveWritesFor(state: IntArray): List<ScalarProtocolWrite>? =
+        keepaliveWrites?.invoke(state)
 
     fun createState(match: ButtplugDeviceMatch): IntArray =
         initialState?.invoke(match) ?: IntArray(maxOf(stateSize, match.scalarOutputs.size))
@@ -120,6 +125,30 @@ object ScalarProtocolPlans {
                         ),
                     ),
                 )
+            },
+        ),
+        ScalarProtocolPlan(
+            protocolId = "fredorch-rotary",
+            supportedKinds = setOf(ToyOutputKind.Oscillate),
+            stateSize = FREDORCH_ROTARY_STATE_SIZE,
+            initSubscriptions = listOf("rx"),
+            initWrites = listOf(
+                write(bytes(0x55, 0x03, 0x99, 0x9C, 0xAA)),
+                write(bytes(0x55, 0x09, 0x21, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x2A, 0xAA)),
+                write(bytes(0x55, 0x03, 0x1F, 0x22, 0xAA)),
+                write(bytes(0x55, 0x03, 0x24, 0x27, 0xAA)),
+            ),
+            keepaliveIntervalMs = 100,
+            keepaliveWrites = { state -> fredorchRotaryNextStep(state) },
+            writes = { state, command ->
+                require(command.kind == ToyOutputKind.Oscillate) { "${command.kind} is not supported by fredorch-rotary" }
+                state[FREDORCH_ROTARY_TARGET_SPEED_INDEX] = command.value.coerceIn(0, 20)
+                if (command.value == 0) {
+                    state[FREDORCH_ROTARY_CURRENT_SPEED_INDEX] = 0
+                    listOf(write(fredorchRotaryStopPayload()))
+                } else {
+                    fredorchRotaryNextStep(state)
+                }
             },
         ),
         ScalarProtocolPlan(
@@ -230,12 +259,51 @@ object ScalarProtocolPlans {
             sequencedWrites = { _, command, packetId -> listOf(write(tryfunBlackHolePayload(command, packetId))) }
         },
         ScalarProtocolPlan(
+            protocolId = "tryfun",
+            supportedKinds = setOf(ToyOutputKind.Oscillate, ToyOutputKind.Rotate, ToyOutputKind.Vibrate),
+            stateSize = 3,
+            writes = { _, command ->
+                when (command.kind) {
+                    ToyOutputKind.Oscillate -> listOf(write(tryfunYuanChecksumPayload(0xAA, 0x02, 0x07, command.value), withResponse = true))
+                    ToyOutputKind.Rotate -> listOf(write(tryfunYuanChecksumPayload(0xAA, 0x02, 0x08, command.value), withResponse = true))
+                    ToyOutputKind.Vibrate -> listOf(write(tryfunYuanVibratePayload(command.value), withResponse = true))
+                    else -> unsupported(command)
+                }
+            },
+        ),
+        ScalarProtocolPlan(
             protocolId = "utimi",
             supportedKinds = setOf(ToyOutputKind.Vibrate, ToyOutputKind.Oscillate),
             stateSize = 5,
             writes = { state, command ->
                 state[command.featureIndex.coerceIn(0, state.lastIndex)] = command.value
                 listOf(write(bytes(0xA0, 0x03, state[0], state[1], state[2], state[3], state[4], 0xAA)))
+            },
+        ),
+        ScalarProtocolPlan(
+            protocolId = "joyhub",
+            supportedKinds = setOf(
+                ToyOutputKind.Vibrate,
+                ToyOutputKind.Oscillate,
+                ToyOutputKind.Rotate,
+                ToyOutputKind.Constrict,
+                ToyOutputKind.Spray,
+                ToyOutputKind.Led,
+                ToyOutputKind.Temperature,
+            ),
+            stateSize = JOYHUB_STATE_SIZE,
+            writes = { state, command ->
+                when (command.kind) {
+                    ToyOutputKind.Vibrate,
+                    ToyOutputKind.Oscillate,
+                    ToyOutputKind.Rotate,
+                    -> listOf(write(joyhubMultiSpeedPayload(state, command.featureIndex, kotlin.math.abs(command.value))))
+                    ToyOutputKind.Constrict -> listOf(write(joyhubConstrictPayload(command.featureIndex, command.value)))
+                    ToyOutputKind.Spray -> joyhubSprayWrites(command.value)
+                    ToyOutputKind.Led -> listOf(write(joyhubSwitchPayload(0x14, command.value)))
+                    ToyOutputKind.Temperature -> listOf(write(joyhubSwitchPayload(0x04, command.value)))
+                    else -> unsupported(command)
+                }
             },
         ),
         ScalarProtocolPlan(
@@ -288,6 +356,66 @@ object ScalarProtocolPlans {
             writes = { state, command ->
                 senseeV2SetValue(state, command)
                 listOf(write(senseeV2Payload(state)))
+            },
+        ),
+        ScalarProtocolPlan(
+            protocolId = "hismith",
+            supportedKinds = setOf(ToyOutputKind.Oscillate, ToyOutputKind.Vibrate),
+            stateSize = 2,
+            writes = { _, command ->
+                val index = when (command.kind) {
+                    ToyOutputKind.Oscillate -> 0x04
+                    ToyOutputKind.Vibrate -> if (command.featureIndex == 0) 0x04 else 0x06
+                    else -> unsupported(command)
+                }
+                val value = if (command.kind == ToyOutputKind.Vibrate && command.featureIndex != 0 && command.value == 0) {
+                    0xF0
+                } else {
+                    command.value
+                }
+                listOf(write(bytes(0xAA, index, value, value + index)))
+            },
+        ),
+        ScalarProtocolPlan(
+            protocolId = "hismith-mini",
+            supportedKinds = setOf(
+                ToyOutputKind.Oscillate,
+                ToyOutputKind.Vibrate,
+                ToyOutputKind.Constrict,
+                ToyOutputKind.Rotate,
+                ToyOutputKind.Spray,
+            ),
+            stateSize = HISMITH_MINI_STATE_SIZE,
+            initialState = { match -> hismithMiniInitialState(match) },
+            writes = { state, command ->
+                when (command.kind) {
+                    ToyOutputKind.Oscillate -> listOf(write(hismithMiniPacket(0x03, command.value)))
+                    ToyOutputKind.Vibrate -> {
+                        val index = if (state[HISMITH_MINI_DUAL_VIBE_INDEX] == 0 || command.featureIndex == 1) 0x05 else 0x03
+                        listOf(write(hismithMiniPacket(index, command.value)))
+                    }
+                    ToyOutputKind.Constrict -> {
+                        val index = if (state[HISMITH_MINI_SECOND_CONSTRICT_INDEX] != 0) 0x05 else 0x03
+                        listOf(write(hismithMiniPacket(index, command.value)))
+                    }
+                    ToyOutputKind.Rotate -> listOf(
+                        write(hismithMiniPacket(0x03, kotlin.math.abs(command.value))),
+                        write(
+                            bytes(
+                                0xCC,
+                                0x01,
+                                if (command.value >= 0) 0xC0 else 0xC1,
+                                if (command.value >= 0) 0xC1 else 0xC2,
+                            ),
+                        ),
+                    )
+                    ToyOutputKind.Spray -> if (command.value == 0) {
+                        emptyList()
+                    } else {
+                        listOf(write(bytes(0xCC, 0x0B, 0x01, 0x0C)))
+                    }
+                    else -> unsupported(command)
+                }
             },
         ),
         ScalarProtocolPlan(
@@ -579,6 +707,69 @@ object ScalarProtocolPlans {
         return (-speed) and 0xFF
     }
 
+    private fun tryfunYuanChecksumPayload(vararg body: Int): ByteArray {
+        var sum = 0xFF
+        var count = 0
+        for (item in body.drop(1)) {
+            sum = (sum - (item and 0xFF)) and 0xFF
+            count += 1
+        }
+        return bytes(*body, (sum + count) and 0xFF)
+    }
+
+    private fun tryfunYuanVibratePayload(speed: Int): ByteArray =
+        bytes(
+            0x00,
+            0x02,
+            0x00,
+            0x05,
+            if (speed == 0) 0x01 else 0x02,
+            if (speed == 0) 0x02 else speed,
+            0x01,
+            if (speed == 0) 0x01 else 0x00,
+            0xFD - speed.coerceAtLeast(1),
+        )
+
+    private fun fredorchRotaryNextStep(state: IntArray): List<ScalarProtocolWrite> {
+        val current = state[FREDORCH_ROTARY_CURRENT_SPEED_INDEX]
+        val target = state[FREDORCH_ROTARY_TARGET_SPEED_INDEX]
+        if (current == target) return emptyList()
+        val command = if (target > current) 0x01 else 0x02
+        state[FREDORCH_ROTARY_CURRENT_SPEED_INDEX] = if (target > current) current + 1 else current - 1
+        return listOf(write(bytes(0x55, 0x03, command, command + 3, 0xAA)))
+    }
+
+    private fun fredorchRotaryStopPayload(): ByteArray =
+        bytes(0x55, 0x03, 0x24, 0x27, 0xAA)
+
+    private fun joyhubMultiSpeedPayload(state: IntArray, featureIndex: Int, speed: Int): ByteArray {
+        state[featureIndex.coerceIn(0, JOYHUB_STATE_SIZE - 1)] = speed.coerceIn(0, 0xFF)
+        return bytes(0xA0, 0x03, state[0], state[1], state[2], state[3], 0xAA)
+    }
+
+    private fun joyhubConstrictPayload(featureIndex: Int, level: Int): ByteArray =
+        if (featureIndex == 4) {
+            bytes(0xA0, 0x07, if (level == 0) 0x00 else 0x01, 0x00, level, 0xFF)
+        } else {
+            bytes(0xA0, 0x0D, 0x00, 0x00, level, 0xFF)
+        }
+
+    private fun joyhubSwitchPayload(command: Int, level: Int): ByteArray =
+        if (level == 0) {
+            bytes(0xA0, command, 0x00, 0x00, 0x00, 0x00)
+        } else {
+            bytes(0xA0, command, 0x01, 0x00, 0x01, 0xFF)
+        }
+
+    private fun joyhubSprayWrites(level: Int): List<ScalarProtocolWrite> {
+        val stop = write(bytes(0xA0, 0x24, 0x00, 0x00, 0x00, 0x00), delayBeforeMs = if (level == 0) 0L else 1000L)
+        return if (level == 0) {
+            listOf(stop)
+        } else {
+            listOf(write(bytes(0xA0, 0x24, 0x01, 0x00, 0x01, 0xFF)), stop)
+        }
+    }
+
     private fun galakuPumpPayload(oscillate: Int, vibrate: Int): ByteArray {
         val data = mutableListOf(0x23, 0x5A, 0x00, 0x00, 0x01, 0x60, 0x03, oscillate, vibrate, 0x00, 0x00)
         data += data.fold(0) { acc, value -> (acc + value) and 0xFF }
@@ -690,6 +881,17 @@ object ScalarProtocolPlans {
             else -> null
         }
 
+    private fun hismithMiniInitialState(match: ButtplugDeviceMatch): IntArray {
+        val features = match.scalarOutputs.sortedBy { it.featureIndex }
+        return intArrayOf(
+            if (features.count { it.type.toToyOutputKind() == ToyOutputKind.Vibrate } >= 2) 1 else 0,
+            if (features.indexOfFirst { it.type.toToyOutputKind() == ToyOutputKind.Constrict } == 1) 1 else 0,
+        )
+    }
+
+    private fun hismithMiniPacket(index: Int, value: Int): ByteArray =
+        bytes(0xCC, index, value, value + index)
+
     private data class SenseeV2Group(
         val id: Int,
         val presentOffset: Int,
@@ -729,8 +931,9 @@ object ScalarProtocolPlans {
         bytes: ByteArray,
         endpointRole: String = "tx",
         withResponse: Boolean = false,
+        delayBeforeMs: Long = 0L,
     ): ScalarProtocolWrite =
-        ScalarProtocolWrite(endpointRole = endpointRole, bytes = bytes, withResponse = withResponse)
+        ScalarProtocolWrite(endpointRole = endpointRole, bytes = bytes, withResponse = withResponse, delayBeforeMs = delayBeforeMs)
 
     private fun read(endpointRole: String): ScalarProtocolRead =
         ScalarProtocolRead(endpointRole = endpointRole)
@@ -757,6 +960,13 @@ object ScalarProtocolPlans {
     private const val SENSEE_V2_THRUST_SPEED_OFFSET = 65
     private const val SENSEE_V2_SUCK_SPEED_OFFSET = 81
     private const val SENSEE_V2_STATE_SIZE = 97
+    private const val HISMITH_MINI_DUAL_VIBE_INDEX = 0
+    private const val HISMITH_MINI_SECOND_CONSTRICT_INDEX = 1
+    private const val HISMITH_MINI_STATE_SIZE = 2
+    private const val FREDORCH_ROTARY_CURRENT_SPEED_INDEX = 0
+    private const val FREDORCH_ROTARY_TARGET_SPEED_INDEX = 1
+    private const val FREDORCH_ROTARY_STATE_SIZE = 2
+    private const val JOYHUB_STATE_SIZE = 4
 
     private val GALAKU_PUMP_KEY_TABLE = arrayOf(
         intArrayOf(0, 24, 0x98, 0xF7, 0xA5, 61, 13, 41, 37, 80, 68, 70),
@@ -839,6 +1049,13 @@ private class ScalarProtocolSession(
 
     private suspend fun executeWrites(writes: List<ScalarProtocolWrite>) {
         for (write in writes) {
+            if (write.delayBeforeMs > 0) {
+                when (val result = transport.execute(HardwareOperation.Sleep(write.delayBeforeMs))) {
+                    HardwareResult.Success,
+                    is HardwareResult.ReadResult -> Unit
+                    is HardwareResult.Failure -> error(result.message)
+                }
+            }
             val endpoint = requireNotNull(endpointByRole[write.endpointRole]) {
                 "${plan.protocolId} endpoint ${write.endpointRole} is missing"
             }

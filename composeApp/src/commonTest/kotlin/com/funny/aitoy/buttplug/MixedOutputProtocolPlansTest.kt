@@ -26,6 +26,59 @@ class MixedOutputProtocolPlansTest {
     }
 
     @Test
+    fun vorzePlanMatchesPortedButtplugVariants() {
+        val plan = requireNotNull(MixedOutputProtocolPlans.forProtocolId("vorze-sa"))
+
+        val bach = plan.createState(match("vorze-sa", "Vorze Bach", listOf(ButtplugOutputFeature(OUTPUT_VIBRATE, 0, 100, 0, "Vibrate"))))
+        val bachWrite = plan.scalarWrites(bach, ScalarProtocolCommand(0, ToyOutputKind.Vibrate, 10)).single()
+        assertContentEquals(hex("06 03 0a"), bachWrite.bytes)
+        assertTrue(bachWrite.withResponse)
+
+        val cyclone = plan.createState(match("vorze-sa", "Vorze A10 Cyclone SA", listOf(ButtplugOutputFeature(OUTPUT_ROTATE, -99, 99, 0, "Rotate"))))
+        assertContentEquals(hex("01 01 87"), plan.scalarWrites(cyclone, ScalarProtocolCommand(0, ToyOutputKind.Rotate, 7)).single().bytes)
+        assertContentEquals(hex("01 01 07"), plan.scalarWrites(cyclone, ScalarProtocolCommand(0, ToyOutputKind.Rotate, -7)).single().bytes)
+
+        val omorfi = plan.createState(
+            match(
+                "vorze-sa",
+                "Vorze Omorfi",
+                listOf(
+                    ButtplugOutputFeature(OUTPUT_VIBRATE, 0, 99, 0, "Vibrate 1"),
+                    ButtplugOutputFeature(OUTPUT_VIBRATE, 0, 99, 1, "Vibrate 2"),
+                ),
+            ),
+        )
+        assertContentEquals(hex("09 05 00"), plan.scalarWrites(omorfi, ScalarProtocolCommand(0, ToyOutputKind.Vibrate, 5)).single().bytes)
+        assertContentEquals(hex("09 05 08"), plan.scalarWrites(omorfi, ScalarProtocolCommand(1, ToyOutputKind.Vibrate, 8)).single().bytes)
+
+        val ufoTw = plan.createState(
+            match(
+                "vorze-sa",
+                "Vorze UFO TW",
+                listOf(
+                    ButtplugOutputFeature(OUTPUT_ROTATE, -99, 99, 0, "Rotate 1"),
+                    ButtplugOutputFeature(OUTPUT_ROTATE, -99, 99, 1, "Rotate 2"),
+                ),
+            ),
+        )
+        assertContentEquals(hex("05 07 00"), plan.scalarWrites(ufoTw, ScalarProtocolCommand(0, ToyOutputKind.Rotate, -7)).single().bytes)
+        assertContentEquals(hex("05 07 89"), plan.scalarWrites(ufoTw, ScalarProtocolCommand(1, ToyOutputKind.Rotate, 9)).single().bytes)
+
+        val piston = plan.createState(
+            match(
+                "vorze-sa",
+                "Vorze Piston",
+                listOf(ButtplugOutputFeature(OUTPUT_HW_POSITION_WITH_DURATION, 0, 99, 0, "Linear")),
+            ),
+        )
+        assertContentEquals(hex("03 32 01"), plan.linearWrites(piston, LinearProtocolCommand(0, position = 50, durationMs = 1000)).single().bytes)
+        assertEquals(
+            setOf(ToyOutputKind.Vibrate, ToyOutputKind.Rotate, ToyOutputKind.Linear),
+            MixedOutputProtocolPlans.supportedKinds("vorze-sa"),
+        )
+    }
+
+    @Test
     fun mixedHandlerWritesThroughToyTransport() = runBlocking {
         val transport = RecordingTransport()
         val handler = requireNotNull(MixedOutputProtocolHandlers.forProtocolId("kiiroo-v21"))
@@ -42,6 +95,21 @@ class MixedOutputProtocolPlansTest {
     }
 
     private fun match(protocolId: String): ButtplugDeviceMatch {
+        return match(
+            protocolId,
+            protocolId,
+            listOf(
+                ButtplugOutputFeature(OUTPUT_VIBRATE, 0, 100, 0, "Vibrate"),
+                ButtplugOutputFeature(OUTPUT_HW_POSITION_WITH_DURATION, 0, 99, 1, "Linear"),
+            ),
+        )
+    }
+
+    private fun match(
+        protocolId: String,
+        deviceName: String,
+        features: List<ButtplugOutputFeature>,
+    ): ButtplugDeviceMatch {
         val definition = ButtplugProtocolDefinition(
             id = protocolId,
             displayName = protocolId,
@@ -55,11 +123,8 @@ class MixedOutputProtocolPlansTest {
             ),
             defaultDevice = ButtplugDeviceDefinition(
                 identifiers = emptyList(),
-                name = protocolId,
-                features = listOf(
-                    ButtplugOutputFeature(OUTPUT_VIBRATE, 0, 100, 0, "Vibrate"),
-                    ButtplugOutputFeature(OUTPUT_HW_POSITION_WITH_DURATION, 0, 99, 1, "Linear"),
-                ),
+                name = deviceName,
+                features = features,
             ),
             configurations = emptyList(),
         )
