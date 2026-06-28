@@ -283,7 +283,9 @@ class AndroidBleController(
                 "manufacturer=${device.manufacturerData.ifBlank { "<none>" }}",
         )
         broadcastProtocolCandidates = BleBroadcastProtocolRegistry.resolveAll(device)
-        if (broadcastProtocolCandidates.isNotEmpty()) {
+        val shouldUseBroadcastDirectly = broadcastProtocolCandidates.isNotEmpty() &&
+            (!device.connectable || broadcastProtocolCandidates.none { it.preferGattWhenConnectable })
+        if (shouldUseBroadcastDirectly) {
             activeBroadcastProtocol = broadcastProtocolCandidates.first()
             protocolReady = true
             activeBroadcastProtocol?.status?.let(onProtocol)
@@ -300,6 +302,11 @@ class AndroidBleController(
             trace("已启用广播协议：${activeBroadcastProtocol!!.status.displayName}")
             updateState(BleConnectionState.Ready)
             return
+        } else if (broadcastProtocolCandidates.isNotEmpty()) {
+            trace(
+                "发现广播协议候选 ${broadcastProtocolCandidates.joinToString { it.status.id }}，" +
+                    "设备可连接，优先读取 GATT 能力",
+            )
         }
         if (!device.connectable) {
             trace("扫描结果显示不可连接，仍尝试读取设备能力 address=${device.address}")

@@ -12,6 +12,7 @@ internal data class BleAdvertiseOperation(
 
 internal interface BleBroadcastProtocol {
     val status: BleProtocolStatus
+    val preferGattWhenConnectable: Boolean get() = false
 
     fun matches(device: ScannedBleDevice): Boolean
 
@@ -33,11 +34,13 @@ internal object BleBroadcastProtocolRegistry {
 }
 
 /**
- * ANKNI QD1 扫描包只暴露 FEFF 广播 UUID，GATT 连接后没有玩具控制服务。
+ * ANKNI QD1 的不可连接分支通过 FEFF 广播 UUID 控制；可连接设备优先走 GATT。
  * 控制帧复用醉清风小程序的 ANKNI 滑动强度封包：makeHexStr("08", makeSlideOrder(200, value, ...))。
  */
 internal object AnkniQd1BroadcastProtocol : BleBroadcastProtocol {
     private const val SERVICE_DATA_UUID = "0000feff-0000-1000-8000-00805f9b34fb"
+
+    override val preferGattWhenConnectable = true
 
     override val status = BleProtocolStatus(
         id = "ankni_qd1_advertise",

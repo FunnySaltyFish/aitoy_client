@@ -8,10 +8,10 @@ import com.funny.aitoy.buttplug.LinearProtocolPlan
 import com.funny.aitoy.buttplug.LinearProtocolPlans
 import com.funny.aitoy.buttplug.MixedOutputProtocolPlan
 import com.funny.aitoy.buttplug.MixedOutputProtocolPlans
-import com.funny.aitoy.buttplug.SimpleVibrateProtocolPlan
-import com.funny.aitoy.buttplug.SimpleVibrateProtocolPlans
 import com.funny.aitoy.buttplug.ScalarProtocolPlan
 import com.funny.aitoy.buttplug.ScalarProtocolPlans
+import com.funny.aitoy.buttplug.SimpleVibrateProtocolPlan
+import com.funny.aitoy.buttplug.SimpleVibrateProtocolPlans
 import com.funny.aitoy.buttplug.StatefulVibrateProtocolPlan
 import com.funny.aitoy.buttplug.StatefulVibrateProtocolPlans
 import com.funny.aitoy.buttplug.ToyOutputKind
@@ -86,6 +86,8 @@ internal object BleProtocolRegistry {
         listOf(AnkniProtocol) +
                 ankniDdddProfileProtocols +
                 listOf(
+                    AnkniQd1GattProtocol,
+                    Ankni0010Protocol,
                     AnkniYwtdProtocol,
                     KissToyProtocol,
                     WeVibeSyncLiteProtocol,
@@ -1828,6 +1830,100 @@ private object AnkniProtocol : BleDeviceProtocol {
         }
         return remain
     }
+}
+
+private object AnkniQd1GattProtocol : BleDeviceProtocol {
+    private val writeUuid = uuid("0000ddd1-0000-1000-8000-00805f9b34fb")
+
+    override val status = BleProtocolStatus(
+        id = "ankni_qd1_gatt",
+        displayName = "ANKNI QD1",
+        controllable = true,
+        intensityMax = 100,
+        supportsMode = false,
+        controlStyle = ToyControlStyle.IntensityOnly,
+        intensityLabel = "强度",
+        automatic = true,
+    )
+
+    override fun matches(fingerprint: BleGattFingerprint): Boolean {
+        if (!fingerprint.hasAnkniDdddGatt()) return false
+        val name = fingerprint.name.normalizedDeviceName()
+        return name.contains("ankniqd1") || name.contains("ankniqd01")
+    }
+
+    override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
+        when (action) {
+            is ToyControlAction.Intensity -> listOf(write(slideFrame(action.value)))
+            is ToyControlAction.Combined -> listOf(write(slideFrame(action.intensity)))
+            is ToyControlAction.DualMotor -> listOf(write(slideFrame(action.strongestIntensity(status.intensityMax))))
+            is ToyControlAction.Pattern -> listOf(write(slideFrame(status.intensityMax)))
+            ToyControlAction.Stop -> listOf(write(slideFrame(0)))
+        }
+
+    private fun slideFrame(intensity: Int): ByteArray {
+        val value = intensity.coerceIn(0, status.intensityMax)
+        val duration = if (value > 0) SLIDE_DURATION else 0
+        return ankniAaFrame(SLIDE_COMMAND, value, duration)
+    }
+
+    private fun write(bytes: ByteArray): BleProtocolOperation.Write =
+        BleProtocolOperation.Write(
+            characteristicUuid = writeUuid,
+            bytes = bytes,
+            withResponse = false,
+        )
+
+    private const val SLIDE_COMMAND = 0x08
+    private const val SLIDE_DURATION = 0xC8
+}
+
+private object Ankni0010Protocol : BleDeviceProtocol {
+    private val writeUuid = uuid("0000ffe1-0000-1000-8000-00805f9b34fb")
+
+    override val status = BleProtocolStatus(
+        id = "ankni_0010",
+        displayName = "ANKNI 0010",
+        controllable = true,
+        intensityMax = 100,
+        supportsMode = false,
+        controlStyle = ToyControlStyle.IntensityOnly,
+        intensityLabel = "强度",
+        automatic = true,
+    )
+
+    override fun matches(fingerprint: BleGattFingerprint): Boolean {
+        if (!fingerprint.characteristicUuids.contains(writeUuid)) return false
+        val name = fingerprint.name.normalizedDeviceName()
+        return name.contains("安可尼0010") ||
+            name.contains("ankni0010") ||
+            name.contains("ankeni0010")
+    }
+
+    override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
+        when (action) {
+            is ToyControlAction.Intensity -> listOf(write(slideFrame(action.value)))
+            is ToyControlAction.Combined -> listOf(write(slideFrame(action.intensity)))
+            is ToyControlAction.DualMotor -> listOf(write(slideFrame(action.strongestIntensity(status.intensityMax))))
+            is ToyControlAction.Pattern -> listOf(write(slideFrame(status.intensityMax)))
+            ToyControlAction.Stop -> listOf(write(slideFrame(0)))
+        }
+
+    private fun slideFrame(intensity: Int): ByteArray {
+        val value = intensity.coerceIn(0, status.intensityMax)
+        val duration = if (value > 0) SLIDE_DURATION else 0
+        return ankniAaFrame(SLIDE_COMMAND, value, duration)
+    }
+
+    private fun write(bytes: ByteArray): BleProtocolOperation.Write =
+        BleProtocolOperation.Write(
+            characteristicUuid = writeUuid,
+            bytes = bytes,
+            withResponse = false,
+        )
+
+    private const val SLIDE_COMMAND = 0x08
+    private const val SLIDE_DURATION = 0xC8
 }
 
 private val ankniDdddProfileProtocols: List<BleDeviceProtocol> = listOf(
