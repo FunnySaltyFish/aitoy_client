@@ -30,6 +30,7 @@ import com.funny.aitoy.core.kmp.openUrl
 import com.funny.aitoy.core.kmp.toast
 import com.funny.aitoy.core.prefs.DataSaverUtils
 import com.funny.aitoy.diagnostics.AiToyCrashReporter
+import com.funny.aitoy.diagnostics.AiToyTraceEvent
 import com.funny.aitoy.diagnostics.AiToyTraceUploader
 import com.funny.aitoy.network.OkHttpUtils
 import com.funny.aitoy.network.api.AiToyServices
@@ -417,6 +418,7 @@ class BridgeViewModel : ViewModel() {
         onProtocol = { },
         onProtocolAttempt = { },
         onLog = ::appendLog,
+        onTrace = ::appendTrace,
     )
     private val controllers = mutableMapOf<String, AndroidBleController>()
     private val keepAliveTasks = mutableMapOf<String, Runnable>()
@@ -434,6 +436,7 @@ class BridgeViewModel : ViewModel() {
         },
         onLog = ::appendLog,
         onCommand = ::handleRelayCommand,
+        onTrace = ::appendTrace,
     )
     private val relaySequenceJobs = mutableMapOf<String, Job>()
     private var debugLogTapCount = 0
@@ -456,6 +459,7 @@ class BridgeViewModel : ViewModel() {
                 onProtocol = { onDeviceProtocol(address, it) },
                 onProtocolAttempt = { onDeviceProtocolAttempt(address, it) },
                 onLog = ::appendLog,
+                onTrace = ::appendTrace,
             )
         }
 
@@ -1139,11 +1143,14 @@ class BridgeViewModel : ViewModel() {
     }
 
     private fun appendLog(message: String) {
-        AiToyTraceUploader.recordBle(message)
         mainHandler.post {
             logs += message
             while (logs.size > 200) logs.removeAt(0)
         }
+    }
+
+    private fun appendTrace(event: AiToyTraceEvent) {
+        AiToyTraceUploader.recordBle(event)
     }
 
     private fun updateTraceContext() {

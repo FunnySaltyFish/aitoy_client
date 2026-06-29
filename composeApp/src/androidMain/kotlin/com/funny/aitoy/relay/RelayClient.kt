@@ -3,6 +3,8 @@ package com.funny.aitoy.relay
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import com.funny.aitoy.diagnostics.AiToyTraceEvent
+import com.funny.aitoy.diagnostics.AiToyTraceUploadPolicy
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -52,6 +54,7 @@ class RelayClient(
     private val onState: (String) -> Unit,
     private val onLog: (String) -> Unit,
     private val onCommand: (RelayCommand) -> Unit,
+    private val onTrace: (AiToyTraceEvent) -> Unit,
 ) {
     private val client = OkHttpClient.Builder()
         .pingInterval(20, TimeUnit.SECONDS)
@@ -97,13 +100,21 @@ class RelayClient(
                     if (generation != connectionGeneration) return
                     connecting = false
                     retryCount = 0
-                    trace("AI 伙伴已在线")
+                    trace(
+                        "AI 伙伴已在线",
+                        type = "relay_online",
+                        uploadPolicy = AiToyTraceUploadPolicy.SessionOnce,
+                    )
                     emitState("已在线")
                 }
 
                 override fun onMessage(webSocket: WebSocket, text: String) {
                     if (generation != connectionGeneration) return
-                    trace("AI 伙伴收到指令：$text")
+                    trace(
+                        "AI 伙伴收到指令：$text",
+                        type = "relay_command_received",
+                        uploadPolicy = AiToyTraceUploadPolicy.Always,
+                    )
                     val json = JSONObject(text)
                     if (json.optString("type") == "command") {
                         emitCommand(
@@ -133,11 +144,19 @@ class RelayClient(
                     socket = null
                     connecting = false
                     if (userRequestedOnline) {
-                        trace("AI 伙伴连接已断开，正在准备重连")
+                        trace(
+                            "AI 伙伴连接已断开，正在准备重连",
+                            type = "relay_disconnected",
+                            uploadPolicy = AiToyTraceUploadPolicy.Always,
+                        )
                         emitState("等待重连")
                         scheduleReconnect()
                     } else {
-                        trace("AI 伙伴已下线")
+                        trace(
+                            "AI 伙伴已下线",
+                            type = "relay_offline",
+                            uploadPolicy = AiToyTraceUploadPolicy.Always,
+                        )
                         emitState("未连接")
                     }
                 }
@@ -240,6 +259,15 @@ class RelayClient(
         val text = json.toString()
         val accepted = socket?.send(text) == true
         trace("AI 伙伴同步状态 accepted=$accepted payload=$text")
+        if (!accepted) {
+            onTrace(
+                AiToyTraceEvent(
+                    message = "AI 伙伴同步状态 accepted=false",
+                    error = true,
+                    type = "relay_sync_rejected",
+                )
+            )
+        }
         if (!accepted && userRequestedOnline) scheduleReconnect()
     }
 
@@ -251,9 +279,28 @@ class RelayClient(
         mainHandler.postDelayed(reconnect, delayMs)
     }
 
-    private fun trace(message: String, error: Boolean = false) {
+    private fun trace(
+        message: String,
+        error: Boolean = false,
+        type: String = "",
+        uploadPolicy: AiToyTraceUploadPolicy = if (error) {
+            AiToyTraceUploadPolicy.Always
+        } else {
+            AiToyTraceUploadPolicy.Drop
+        },
+    ) {
         if (error) Log.e(TAG, message) else Log.d(TAG, message)
         mainHandler.post { onLog(message) }
+        if (error || uploadPolicy != AiToyTraceUploadPolicy.Drop) {
+            onTrace(
+                AiToyTraceEvent(
+                    message = message,
+                    error = error,
+                    type = type,
+                    uploadPolicy = uploadPolicy,
+                )
+            )
+        }
     }
 
     private fun emitState(state: String) {

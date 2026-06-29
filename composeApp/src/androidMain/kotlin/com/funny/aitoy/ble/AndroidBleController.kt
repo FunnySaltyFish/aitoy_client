@@ -17,6 +17,8 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import com.funny.aitoy.core.platform.AndroidPlatformInit
+import com.funny.aitoy.diagnostics.AiToyTraceEvent
+import com.funny.aitoy.diagnostics.AiToyTraceUploadPolicy
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -32,6 +34,7 @@ class AndroidBleController(
     private val onProtocol: (BleProtocolStatus) -> Unit,
     private val onProtocolAttempt: (ProtocolAttemptStatus) -> Unit,
     private val onLog: (String) -> Unit,
+    private val onTrace: (AiToyTraceEvent) -> Unit,
 ) {
     private val context: Context = AndroidPlatformInit.appContext
     private val adapter = context.getSystemService(BluetoothManager::class.java).adapter
@@ -112,7 +115,20 @@ class AndroidBleController(
 
     private val gattCallback = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
-            trace("连接状态回调 status=$status newState=$newState address=${gatt.device.address}")
+            trace(
+                "连接状态回调 status=$status newState=$newState address=${gatt.device.address}",
+                type = if (status == BluetoothGatt.GATT_SUCCESS && newState == BluetoothProfile.STATE_CONNECTED) {
+                    "ble_gatt_connected"
+                } else {
+                    ""
+                },
+                uploadPolicy = if (status == BluetoothGatt.GATT_SUCCESS && newState == BluetoothProfile.STATE_CONNECTED) {
+                    AiToyTraceUploadPolicy.Always
+                } else {
+                    AiToyTraceUploadPolicy.Drop
+                },
+                key = "ble_gatt_connected:$operationId",
+            )
             when (newState) {
                 BluetoothProfile.STATE_CONNECTED -> {
                     updateState(BleConnectionState.Discovering)
@@ -136,7 +152,17 @@ class AndroidBleController(
         }
 
         override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
-            trace("服务发现完成 status=$status serviceCount=${gatt.services.size}")
+            trace(
+                "服务发现完成 status=$status serviceCount=${gatt.services.size}",
+                error = status != BluetoothGatt.GATT_SUCCESS,
+                type = "ble_services_discovered",
+                uploadPolicy = if (status == BluetoothGatt.GATT_SUCCESS) {
+                    AiToyTraceUploadPolicy.Always
+                } else {
+                    AiToyTraceUploadPolicy.Always
+                },
+                key = "ble_services_discovered:$operationId",
+            )
             gatt.services.forEach { service ->
                 trace("服务 uuid=${service.uuid} characteristicCount=${service.characteristics.size}")
                 service.characteristics.forEach { characteristic ->
@@ -171,7 +197,12 @@ class AndroidBleController(
                 protocolCandidateIndex = -1
                 failedProtocolNames.clear()
                 if (protocolCandidates.isNotEmpty()) {
-                    trace("找到 ${protocolCandidates.size} 个候选协议，开始依次确认")
+                    trace(
+                        "找到 ${protocolCandidates.size} 个候选协议，开始依次确认",
+                        type = "ble_protocol_candidates",
+                        uploadPolicy = AiToyTraceUploadPolicy.Always,
+                        key = "ble_protocol_candidates:$operationId",
+                    )
                     tryNextProtocol(fingerprint, discoveredGatt, config)
                     return@launch
                 }
@@ -286,6 +317,9 @@ class AndroidBleController(
             "连接请求 op=$operationId name=${device.name} address=${device.address} service=${protocolTemplate.serviceUuid} " +
                 "write=${protocolTemplate.writeUuid} notify=${protocolTemplate.notifyUuid.ifBlank { "<none>" }} " +
                 "manufacturer=${device.manufacturerData.ifBlank { "<none>" }}",
+            type = "ble_connect_request",
+            uploadPolicy = AiToyTraceUploadPolicy.Always,
+            key = "ble_connect_request:$operationId",
         )
         broadcastProtocolCandidates = BleBroadcastProtocolRegistry.resolveAll(device)
         val shouldUseBroadcastDirectly = broadcastProtocolCandidates.isNotEmpty() &&
@@ -304,13 +338,21 @@ class AndroidBleController(
                     total = broadcastProtocolCandidates.size,
                 ),
             )
-            trace("已启用广播协议：${activeBroadcastProtocol!!.status.displayName}")
+            trace(
+                "已启用广播协议：${activeBroadcastProtocol!!.status.displayName}",
+                type = "ble_broadcast_ready",
+                uploadPolicy = AiToyTraceUploadPolicy.Always,
+                key = "ble_broadcast_ready:$operationId:${activeBroadcastProtocol!!.status.id}",
+            )
             updateState(BleConnectionState.Ready)
             return
         } else if (broadcastProtocolCandidates.isNotEmpty()) {
             trace(
                 "发现广播协议候选 ${broadcastProtocolCandidates.joinToString { it.status.id }}，" +
                     "设备可连接，优先读取 GATT 能力",
+                type = "ble_broadcast_candidates",
+                uploadPolicy = AiToyTraceUploadPolicy.Always,
+                key = "ble_broadcast_candidates:$operationId",
             )
         }
         if (!device.connectable) {
@@ -328,7 +370,13 @@ class AndroidBleController(
     fun sendAction(action: ToyControlAction) {
         activeBroadcastProtocol?.let { protocol ->
             val commands = protocol.commandsFor(action)
-            trace("广播控制 action=$action protocol=${protocol.status.id} operations=${commands.size}")
+            trace(
+                "广播控制 action=$action protocol=${protocol.status.id} operations=${commands.size}",
+                type = "ble_command_summary",
+                uploadPolicy = AiToyTraceUploadPolicy.RateLimited,
+                key = "ble_command_summary:broadcast:${protocol.status.id}:$action",
+                intervalMs = 2_000L,
+            )
             commands.forEach(advertiser::start)
             return
         }
@@ -340,7 +388,13 @@ class AndroidBleController(
             mainHandler.postDelayed(
                 {
                     if (activeProtocol === protocol && protocolReady) {
-                        trace("GATT 控制 action=$action protocol=${protocol.status.id} operations=${commands.size}")
+                        trace(
+                            "GATT 控制 action=$action protocol=${protocol.status.id} operations=${commands.size}",
+                            type = "ble_command_summary",
+                            uploadPolicy = AiToyTraceUploadPolicy.RateLimited,
+                            key = "ble_command_summary:gatt:${protocol.status.id}:$action",
+                            intervalMs = 2_000L,
+                        )
                         enqueue(commands)
                         updateProtocolKeepalive(protocol, action, commands)
                     }
@@ -349,7 +403,13 @@ class AndroidBleController(
             )
             return
         }
-        trace("GATT 控制 action=$action protocol=${protocol.status.id} operations=${commands.size}")
+        trace(
+            "GATT 控制 action=$action protocol=${protocol.status.id} operations=${commands.size}",
+            type = "ble_command_summary",
+            uploadPolicy = AiToyTraceUploadPolicy.RateLimited,
+            key = "ble_command_summary:gatt:${protocol.status.id}:$action",
+            intervalMs = 2_000L,
+        )
         enqueue(commands)
         updateProtocolKeepalive(protocol, action, commands)
     }
@@ -543,6 +603,9 @@ class AndroidBleController(
             "确认协议 ${protocolCandidateIndex + 1}/${protocolCandidates.size}：" +
                 "${protocol.status.displayName} id=${protocol.status.id} candidates=" +
                 protocolCandidates.joinToString { it.status.id },
+            type = "ble_protocol_attempt",
+            uploadPolicy = AiToyTraceUploadPolicy.Always,
+            key = "ble_protocol_attempt:$operationId:${protocol.status.id}",
         )
         if (!protocol.status.controllable) {
             protocol.status.displayName
@@ -591,6 +654,12 @@ class AndroidBleController(
                     failedNames = failedProtocolNames.toList(),
                 ),
             )
+            trace(
+                "协议就绪 name=${protocol.status.displayName} id=${protocol.status.id} index=${protocolCandidateIndex + 1}/${protocolCandidates.size}",
+                type = "ble_protocol_ready",
+                uploadPolicy = AiToyTraceUploadPolicy.Always,
+                key = "ble_protocol_ready:$operationId:${protocol.status.id}",
+            )
             updateState(BleConnectionState.Ready)
         }
     }
@@ -626,7 +695,12 @@ class AndroidBleController(
         }
         val configuredService = gatt.getService(config.serviceUuid.toUuidOrNull())
         val configuredWrite = configuredService?.getCharacteristic(config.writeUuid.toUuidOrNull())
-        trace("协议匹配 service=${configuredService != null} write=${configuredWrite != null}")
+        trace(
+            "协议匹配 service=${configuredService != null} write=${configuredWrite != null}",
+            type = "ble_manual_template_match",
+            uploadPolicy = AiToyTraceUploadPolicy.Always,
+            key = "ble_manual_template_match:$operationId",
+        )
         resolvedWriteCharacteristic = configuredWrite ?: gatt.services.asSequence()
             .flatMap { it.characteristics.asSequence() }
             .firstOrNull {
@@ -638,6 +712,9 @@ class AndroidBleController(
                 "自动选择写入特征 service=${resolvedWriteCharacteristic?.service?.uuid} " +
                     "uuid=${resolvedWriteCharacteristic?.uuid} properties=0x" +
                     resolvedWriteCharacteristic?.properties?.toString(16),
+                type = "ble_auto_write_characteristic",
+                uploadPolicy = AiToyTraceUploadPolicy.Always,
+                key = "ble_auto_write_characteristic:$operationId",
             )
         }
         if (resolvedWriteCharacteristic == null) {
@@ -671,7 +748,12 @@ class AndroidBleController(
                     failedNames = failedProtocolNames.toList(),
                 ),
             )
-            trace("未找到可用内置协议，已启用用户确认的高级手动模板")
+            trace(
+                "未找到可用内置协议，已启用用户确认的高级手动模板",
+                type = "ble_manual_template_ready",
+                uploadPolicy = AiToyTraceUploadPolicy.Always,
+                key = "ble_manual_template_ready:$operationId",
+            )
         } else {
             activeProtocol = null
             protocolReady = false
@@ -811,6 +893,12 @@ class AndroidBleController(
                             total = protocolCandidates.size,
                             failedNames = failedProtocolNames.toList(),
                         ),
+                    )
+                    trace(
+                        "协议就绪 name=${status.displayName} id=${status.id} index=${protocolCandidateIndex + 1}/${protocolCandidates.size}",
+                        type = "ble_protocol_ready",
+                        uploadPolicy = AiToyTraceUploadPolicy.Always,
+                        key = "ble_protocol_ready:$operationId:${status.id}",
                     )
                 }
                 updateState(BleConnectionState.Ready)
@@ -1045,9 +1133,32 @@ class AndroidBleController(
         mainHandler.post { onProtocolAttempt(status) }
     }
 
-    private fun trace(message: String, error: Boolean = false) {
+    private fun trace(
+        message: String,
+        error: Boolean = false,
+        type: String = "",
+        uploadPolicy: AiToyTraceUploadPolicy = if (error) {
+            AiToyTraceUploadPolicy.Always
+        } else {
+            AiToyTraceUploadPolicy.Drop
+        },
+        key: String = "",
+        intervalMs: Long = 0L,
+    ) {
         if (error) Log.e(TAG, message) else Log.d(TAG, message)
         mainHandler.post { onLog(message) }
+        if (error || uploadPolicy != AiToyTraceUploadPolicy.Drop) {
+            onTrace(
+                AiToyTraceEvent(
+                    message = message,
+                    error = error,
+                    type = type,
+                    uploadPolicy = uploadPolicy,
+                    key = key,
+                    intervalMs = intervalMs,
+                )
+            )
+        }
     }
 
     private fun BleProtocolOperation.describe(): String =

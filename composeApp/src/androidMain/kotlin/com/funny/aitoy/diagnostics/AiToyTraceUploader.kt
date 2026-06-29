@@ -40,6 +40,8 @@ object AiToyTraceUploader : LogSink {
     private val probeLock = Any()
     private val pending = ArrayDeque<TraceLogItem>()
     private val lastProbeAt = mutableMapOf<String, Long>()
+    private val lastTraceUploadAt = mutableMapOf<String, Long>()
+    private val uploadedSessionKeys = mutableSetOf<String>()
 
     private var uploadScheduled = false
     private var uploading = false
@@ -84,15 +86,43 @@ object AiToyTraceUploader : LogSink {
         scheduleFlushIfNeeded(0L)
     }
 
-    fun recordBle(message: String, error: Boolean = false) {
+    fun recordBle(event: AiToyTraceEvent) {
+        if (!shouldUpload(event)) return
         enqueue(
             TraceLogItem(
                 tsMs = System.currentTimeMillis(),
-                level = if (error) "ERROR" else "INFO",
+                level = if (event.error) "ERROR" else "INFO",
                 tag = "AiToyBle",
-                message = message.take(MAX_MESSAGE_LENGTH),
+                message = event.message.take(MAX_MESSAGE_LENGTH),
             )
         )
+    }
+
+    private fun shouldUpload(event: AiToyTraceEvent): Boolean {
+        if (event.error) return true
+        val key = event.key.ifBlank { event.type.ifBlank { event.message } }
+        return when (event.uploadPolicy) {
+            AiToyTraceUploadPolicy.Drop -> false
+            AiToyTraceUploadPolicy.Always -> true
+            AiToyTraceUploadPolicy.SessionOnce -> synchronized(lock) {
+                uploadedSessionKeys.add(key)
+            }
+            AiToyTraceUploadPolicy.RateLimited -> rateLimit(key, event.intervalMs)
+        }
+    }
+
+    private fun rateLimit(key: String, intervalMs: Long): Boolean {
+        val now = System.currentTimeMillis()
+        val interval = intervalMs.coerceAtLeast(1_000L)
+        return synchronized(lock) {
+            val lastAt = lastTraceUploadAt[key] ?: 0L
+            if (now - lastAt < interval) {
+                false
+            } else {
+                lastTraceUploadAt[key] = now
+                true
+            }
+        }
     }
 
     override fun log(event: LogEvent) {
