@@ -1,5 +1,6 @@
 package com.funny.aitoy.ble
 
+import com.funny.aitoy.core.prefs.DataSaverUtils
 import kotlin.random.Random
 
 internal data class BleAdvertiseOperation(
@@ -318,7 +319,8 @@ internal object CachitoDaxiuBroadcastProtocol : BleBroadcastProtocol {
 }
 
 private object CachitoBroadcastCodec {
-    private var deviceId = newDeviceId()
+    private const val CONTROL_DEVICE_ID_KEY = "CACHITO_CONTROL_DEVICE_ID"
+    private var deviceId = loadDeviceId()
 
     fun finalUuid(template: String): String {
         val command = template
@@ -334,6 +336,14 @@ private object CachitoBroadcastCodec {
     }
 
     private fun newCommandId(): String = toHex(Random.nextInt(100, 256))
+
+    private fun loadDeviceId(): String {
+        val saved = DataSaverUtils.readData(CONTROL_DEVICE_ID_KEY, "")
+            .uppercase()
+            .filter { it in '0'..'9' || it in 'A'..'F' }
+        if (saved.length == 4) return saved
+        return newDeviceId().also { DataSaverUtils.saveData(CONTROL_DEVICE_ID_KEY, it) }
+    }
 
     private fun newDeviceId(): String =
         buildString {

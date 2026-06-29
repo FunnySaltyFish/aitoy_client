@@ -115,6 +115,7 @@ internal class AndroidBleAdvertiser(
     }
 
     fun stop() {
+        handler.removeCallbacksAndMessages(null)
         val currentAdvertiser = advertiser ?: return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             advertisingSetCallback?.let { callback ->
@@ -130,6 +131,6 @@ internal class AndroidBleAdvertiser(
     }
 
     companion object {
-        private const val RESTART_DELAY_MS = 500L
+        private const val RESTART_DELAY_MS = 100L
     }
 }
