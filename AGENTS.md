@@ -77,6 +77,17 @@ fun CacheManager.fileSubDir(name: String) = fileDir.resolve(name).ensureDirector
 - GET 缓存策略通过接口注解声明（如 `@GetCache(...)`），避免在拦截器中维护路径分支
 - 超时策略通过接口注解声明（如 `@DynamicTimeout(...)`），按接口粒度控制读写超时
 
+## Trace 与诊断日志
+
+- 端上本地日志和远端 Trace 是两条路径：`appendLog` 只负责本地 UI 展示；线上需要排查的事件使用 `AiToyTraceEvent` 交给 `AiToyTraceUploader.recordBle(event)`。
+- 新增 BLE、Relay 或协议排查日志时，默认不要上传。只有真正需要线上诊断的事件才在源头标记上传策略：
+  - `Always`：错误、连接请求、GATT 连接、服务发现、协议候选、协议确认、协议就绪、广播协议就绪、手动模板匹配、Relay 收到指令、断线/失败。
+  - `SessionOnce`：同一 App session 内只需要知道发生过一次的状态，例如 Relay 已在线。
+  - `RateLimited`：控制摘要、广播摘要等可能高频但仍有运营诊断价值的事件，必须提供稳定 `key` 和合理 `intervalMs`。
+  - `Drop`：默认策略，适用于写入回调、Notify 原始字节、状态同步 payload、ACK、keepalive、重复扫描结果等高频流水线日志。
+- 不要在 `AiToyTraceUploader` 里用业务文案做字符串过滤。上传器只负责通用策略执行、排队、flush 和 probe；具体是否上传必须由产生日志的源头决定。
+- 需要临时排查某个协议的低层字节时，在对应源头临时加结构化 Trace 并设置限频或 session 周期策略；排查结束后保留有长期价值的关键事件，移除噪音上传。
+
 ## 全局信息
 
 > 下述：.core 代表 com.funny.aitoy.core
