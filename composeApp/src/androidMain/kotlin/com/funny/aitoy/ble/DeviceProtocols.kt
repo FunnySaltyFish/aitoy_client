@@ -103,6 +103,7 @@ internal object BleProtocolRegistry {
         listOf(AnkniProtocol) +
                 ankniDdddProfileProtocols +
                 listOf(
+                    AnkniQd1Ff12GattProtocol,
                     AnkniQd1GattProtocol,
                     Ankni0010Protocol,
                     AnkniYwtdProtocol,
@@ -2452,8 +2453,7 @@ private object AnkniQd1GattProtocol : BleDeviceProtocol {
 
     override fun matches(fingerprint: BleGattFingerprint): Boolean {
         if (!fingerprint.hasAnkniDdddGatt()) return false
-        val name = fingerprint.name.normalizedDeviceName()
-        return name.contains("ankniqd1") || name.contains("ankniqd01")
+        return fingerprint.hasAnkniQd1Name()
     }
 
     override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
@@ -2476,6 +2476,53 @@ private object AnkniQd1GattProtocol : BleDeviceProtocol {
             characteristicUuid = writeUuid,
             bytes = bytes,
             withResponse = false,
+        )
+
+    private const val SLIDE_COMMAND = 0x08
+    private const val SLIDE_DURATION = 0xC8
+}
+
+private object AnkniQd1Ff12GattProtocol : BleDeviceProtocol {
+    private val serviceUuid = uuid("0000ff10-0000-1000-8000-00805f9b34fb")
+    private val writeUuid = uuid("0000ff12-0000-1000-8000-00805f9b34fb")
+
+    override val status = BleProtocolStatus(
+        id = "ankni_qd1_ff12_gatt",
+        displayName = "ANKNI QD1",
+        controllable = true,
+        intensityMax = 100,
+        supportsMode = false,
+        controlStyle = ToyControlStyle.IntensityOnly,
+        intensityLabel = "强度",
+        automatic = true,
+    )
+
+    override fun matches(fingerprint: BleGattFingerprint): Boolean {
+        return fingerprint.hasAnkniQd1Name() &&
+            fingerprint.serviceUuids.contains(serviceUuid) &&
+            fingerprint.characteristicUuids.contains(writeUuid)
+    }
+
+    override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
+        when (action) {
+            is ToyControlAction.Intensity -> listOf(write(slideFrame(action.value)))
+            is ToyControlAction.Combined -> listOf(write(slideFrame(action.intensity)))
+            is ToyControlAction.DualMotor -> listOf(write(slideFrame(action.strongestIntensity(status.intensityMax))))
+            is ToyControlAction.Pattern -> listOf(write(slideFrame(status.intensityMax)))
+            ToyControlAction.Stop -> listOf(write(slideFrame(0)))
+        }
+
+    private fun slideFrame(intensity: Int): ByteArray {
+        val value = intensity.coerceIn(0, status.intensityMax)
+        val duration = if (value > 0) SLIDE_DURATION else 0
+        return ankniAaFrame(SLIDE_COMMAND, value, duration)
+    }
+
+    private fun write(bytes: ByteArray): BleProtocolOperation.Write =
+        BleProtocolOperation.Write(
+            characteristicUuid = writeUuid,
+            bytes = bytes,
+            withResponse = true,
         )
 
     private const val SLIDE_COMMAND = 0x08
@@ -2807,6 +2854,11 @@ private fun ankniAaFrame(command: Int, vararg payload: Int): ByteArray {
 
 private fun String.normalizedDeviceName(): String =
     lowercase().replace("_", "").replace("-", "").replace(" ", "")
+
+private fun BleGattFingerprint.hasAnkniQd1Name(): Boolean {
+    val name = name.normalizedDeviceName()
+    return name.contains("ankniqd1") || name.contains("ankniqd01") || name.contains("ankeniqd1")
+}
 
 private fun BleGattFingerprint.hasSvakomManufacturerData(): Boolean =
     manufacturerData.substringAfter(':', missingDelimiterValue = manufacturerData)
