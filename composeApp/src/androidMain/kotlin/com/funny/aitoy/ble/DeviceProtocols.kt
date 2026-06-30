@@ -106,6 +106,7 @@ internal object BleProtocolRegistry {
                     AnkniQd1Ff12GattProtocol,
                     AnkniQd1GattProtocol,
                     Ankni0010Protocol,
+                    KissToyTutuIIProtocol,
                     AnkniYwtdProtocol,
                     KissToyProtocol,
                     WeVibeSyncLiteProtocol,
@@ -128,6 +129,11 @@ internal object BleProtocolRegistry {
 
     suspend fun resolve(fingerprint: BleGattFingerprint): BleDeviceProtocol? =
         resolveAll(fingerprint).firstOrNull()
+
+    internal fun resolveNative(fingerprint: BleGattFingerprint): BleDeviceProtocol? =
+        nativeProtocols.firstNotNullOfOrNull { protocol ->
+            protocol.takeIf { it.matches(fingerprint) }?.createInstance(fingerprint)
+        }
 
     suspend fun resolveAll(fingerprint: BleGattFingerprint): List<BleDeviceProtocol> {
         val native = nativeProtocols.mapNotNull { protocol ->
@@ -1941,6 +1947,118 @@ private object SenseeCcpa10S2Protocol : BleDeviceProtocol {
         bytes = payload,
         withResponse = false,
     )
+}
+
+private object KissToyTutuIIProtocol : BleDeviceProtocol {
+    private val serviceUuid = uuid("0000dddd-0000-1000-8000-00805f9b34fb")
+    private val writeUuid = uuid("0000ddd1-0000-1000-8000-00805f9b34fb")
+    private val notifyUuid = uuid("0000ddd2-0000-1000-8000-00805f9b34fb")
+    private val aliases = listOf("迷路", "突突", "tutu", "tutu2", "tutuii", "kisstoytutu")
+
+    override val status = BleProtocolStatus(
+        id = "kisstoy_tutu2",
+        displayName = "KissToy 突突二代",
+        controllable = true,
+        intensityMax = 100,
+        supportsMode = false,
+        controlStyle = ToyControlStyle.DualIntensityOnly,
+        intensityLabel = "强度",
+        channelNames = listOf("伸缩", "震动"),
+        automatic = true,
+    )
+
+    override fun matches(fingerprint: BleGattFingerprint): Boolean {
+        if (!fingerprint.serviceUuids.contains(serviceUuid)) return false
+        if (!fingerprint.characteristicUuids.contains(writeUuid)) return false
+        if (!fingerprint.characteristicUuids.contains(notifyUuid)) return false
+        val name = fingerprint.name.normalizedDeviceName()
+        return aliases.any { alias -> name.contains(alias.normalizedDeviceName()) }
+    }
+
+    override fun createInstance(fingerprint: BleGattFingerprint): BleDeviceProtocol =
+        KissToyTutuIIProtocolSession()
+
+    override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> = emptyList()
+
+    private class KissToyTutuIIProtocolSession : BleDeviceProtocol {
+        private var authenticated = false
+
+        override val status: BleProtocolStatus = KissToyTutuIIProtocol.status
+
+        override fun matches(fingerprint: BleGattFingerprint): Boolean =
+            KissToyTutuIIProtocol.matches(fingerprint)
+
+        override fun initialize(fingerprint: BleGattFingerprint): List<BleProtocolOperation> =
+            listOf(
+                BleProtocolOperation.SubscribeNotify(notifyUuid),
+                BleProtocolOperation.WaitForProtocolReady(AUTH_TIMEOUT_MS),
+            )
+
+        override fun onNotify(characteristicUuid: UUID, bytes: ByteArray): List<BleProtocolOperation> {
+            if (characteristicUuid != notifyUuid || authenticated) return emptyList()
+            if (bytes.size < AUTH_CHALLENGE_SIZE || bytes[0] != PACKET_PREFIX) return emptyList()
+            authenticated = true
+            return listOf(
+                write(authPacket(bytes)),
+                BleProtocolOperation.Sleep(AUTH_SETTLE_MS),
+            )
+        }
+
+        override fun isProtocolReady(): Boolean = authenticated
+
+        override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
+            when (action) {
+                is ToyControlAction.DualMotor -> runDual(action.internalIntensity, action.externalIntensity)
+                is ToyControlAction.Intensity -> runDual(action.value, action.value)
+                is ToyControlAction.Combined -> runDual(action.intensity, action.intensity)
+                is ToyControlAction.Pattern -> runDual(50, 50)
+                ToyControlAction.Stop -> runDual(0, 0)
+            }
+
+        private fun runDual(stretchIntensity: Int, vibrateIntensity: Int): List<BleProtocolOperation> =
+            listOf(
+                write(
+                    motorPacket(
+                        stretchIntensity.scalePercentTo(max = MOTOR1_MAX),
+                        vibrateIntensity.scalePercentTo(max = MOTOR2_MAX),
+                    )
+                )
+            )
+
+        private fun authPacket(challenge: ByteArray): ByteArray =
+            byteArrayOf(PACKET_PREFIX) + challenge.copyOfRange(1, AUTH_CHALLENGE_SIZE).xorFixedKey()
+
+        private fun motorPacket(motor1: Int, motor2: Int): ByteArray {
+            val plain = MOTOR_PLAINTEXT_BASE.copyOf()
+            plain[4] = motor1.coerceIn(0, 255).toByte()
+            plain[5] = motor2.coerceIn(0, 255).toByte()
+            return byteArrayOf(PACKET_PREFIX) + plain.xorFixedKey()
+        }
+
+        private fun write(bytes: ByteArray): BleProtocolOperation.Write =
+            BleProtocolOperation.Write(
+                characteristicUuid = writeUuid,
+                bytes = bytes,
+                withResponse = false,
+            )
+    }
+
+    private fun Int.scalePercentTo(max: Int): Int =
+        (coerceIn(0, status.intensityMax) * max / status.intensityMax.coerceAtLeast(1)).coerceIn(0, max)
+
+    private fun ByteArray.xorFixedKey(): ByteArray =
+        ByteArray(size.coerceAtMost(K_FIXED.size)) { index ->
+            (this[index].toInt() xor K_FIXED[index].toInt()).toByte()
+        }
+
+    private val K_FIXED = bytes(0xea, 0x30, 0xbb, 0xdb, 0xad, 0xb6, 0xc6, 0x2f, 0xcf, 0xe9, 0xe9, 0x96)
+    private val MOTOR_PLAINTEXT_BASE = bytes(0x15, 0x31, 0xb9, 0x00, 0x00, 0x00, 0x00, 0xd0, 0x00, 0x16, 0x16, 0x69)
+    private const val PACKET_PREFIX: Byte = 0x58
+    private const val AUTH_CHALLENGE_SIZE = 13
+    private const val AUTH_TIMEOUT_MS = 4_000L
+    private const val AUTH_SETTLE_MS = 1_000L
+    private const val MOTOR1_MAX = 82
+    private const val MOTOR2_MAX = 73
 }
 
 private object KissToyProtocol : BleDeviceProtocol {
