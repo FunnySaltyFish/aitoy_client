@@ -1525,8 +1525,13 @@ class BridgeViewModel : ViewModel() {
 
     private fun startKeepAlive(action: ToyControlAction, address: String, autoStopSec: Int? = null) {
         cancelKeepAlive(address)
-        val interval = protocolStatusFor(address).repeatIntervalMs.coerceAtLeast(0)
+        val status = protocolStatusFor(address)
+        val interval = status.repeatIntervalMs.coerceAtLeast(0)
         if (interval <= 0) return
+        if (!actionKeepsDeviceRunning(action)) return
+        if (action is ToyControlAction.Pattern && status.controlStyle == ToyControlStyle.ExclusivePatternOrIntensity) {
+            return
+        }
         val deadline = autoStopSec?.let {
             System.currentTimeMillis() + it.coerceIn(1, MaxSequenceDurationSec) * 1_000L
         }

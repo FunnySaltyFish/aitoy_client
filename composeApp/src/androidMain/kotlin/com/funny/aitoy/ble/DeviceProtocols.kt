@@ -2767,6 +2767,7 @@ private object AnkniYwtdProtocol : BleDeviceProtocol {
         modeLabel = "预设节奏",
         intensityLabel = "滑动强度",
         automatic = true,
+        repeatIntervalMs = YWTD_KEEP_ALIVE_MS,
     )
 
     override fun matches(fingerprint: BleGattFingerprint): Boolean =
@@ -2787,6 +2788,8 @@ private object AnkniYwtdProtocol : BleDeviceProtocol {
             ToyControlAction.Stop ->
                 listOf(write(ankniAaFrame(MODE_COMMAND, 0)))
         }
+
+    private const val YWTD_KEEP_ALIVE_MS = 200
 
     private fun write(bytes: ByteArray): BleProtocolOperation.Write =
         BleProtocolOperation.Write(
