@@ -55,6 +55,10 @@ def load_registry(path: Path) -> dict[str, dict[str, str]]:
         ("VibCrafterProtocolPlans.kt", "VibCrafter AES authentication handler ported from Buttplug protocol_impl"),
         ("FlufferProtocolPlans.kt", "Fluffer AES authentication and scalar handler ported from Buttplug protocol_impl"),
         ("HandyProtocolPlans.kt", "The Handy protobuf handler ported from Buttplug protocol_impl"),
+        ("LegacyStpihkalProtocolPlans.kt", "Legacy STPIHKAL LevelCmd/LinearCmd handler ported from Buttplug device config"),
+        ("LovenseProtocolPlans.kt", "Lovense DeviceType and output handler ported from Buttplug protocol_impl"),
+        ("SpecializedProtocolPlans.kt", "Specialized handler ported from Buttplug protocol_impl"),
+        ("ExternalButtplugTransportPlans.kt", "Controlled through external Buttplug/Intiface transport"),
     ]:
         for protocol_id in load_plan_protocol_ids(path.with_name(file_name)):
             entries.setdefault(
@@ -72,7 +76,7 @@ def load_plan_protocol_ids(path: Path) -> list[str]:
     if not path.exists():
         return []
     text = path.read_text(encoding="utf-8")
-    ids = re.findall(r'protocolId\s*=\s*"([^"]+)"', text)
+    ids = re.findall(r'protocolId[^=]*=\s*"([^"]+)"', text)
     for block in re.findall(r'protocolIds[^=]*=\s*setOf\((.*?)\)', text, flags=re.S):
         ids.extend(re.findall(r'"([^"]+)"', block))
     return ids

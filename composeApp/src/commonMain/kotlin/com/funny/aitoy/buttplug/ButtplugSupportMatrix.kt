@@ -11,6 +11,7 @@ enum class ButtplugSupportStatus {
 enum class ButtplugHandlerSource {
     ButtplugProtocolImpl,
     NativeSpecialized,
+    ExternalButtplugTransport,
 }
 
 data class ButtplugLocalHandlerDescriptor(
@@ -146,69 +147,71 @@ object ButtplugLocalHandlerRegistry {
                 notes = "The Handy protobuf handler ported from Buttplug protocol_impl",
             )
         }.toTypedArray(),
+        *LegacyStpihkalProtocolPlans.protocolIds.map { protocolId ->
+            ButtplugLocalHandlerDescriptor(
+                protocolId = protocolId,
+                source = ButtplugHandlerSource.ButtplugProtocolImpl,
+                supportedOutputKinds = LegacyStpihkalProtocolPlans.supportedKinds,
+                status = ButtplugSupportStatus.Controllable,
+                notes = "Legacy STPIHKAL LevelCmd/LinearCmd handler ported from Buttplug device config",
+            )
+        }.toTypedArray(),
+        ButtplugLocalHandlerDescriptor(
+            protocolId = LovenseProtocolPlans.protocolId,
+            source = ButtplugHandlerSource.ButtplugProtocolImpl,
+            supportedOutputKinds = LovenseProtocolPlans.supportedKinds,
+            status = ButtplugSupportStatus.Controllable,
+            notes = "Lovense DeviceType, scalar, rotate, constrict and stroker handler ported from Buttplug protocol_impl",
+        ),
+        *SpecializedProtocolPlans.protocolIds.map { protocolId ->
+            ButtplugLocalHandlerDescriptor(
+                protocolId = protocolId,
+                source = ButtplugHandlerSource.ButtplugProtocolImpl,
+                supportedOutputKinds = SpecializedProtocolPlans.supportedKinds(protocolId),
+                status = ButtplugSupportStatus.Controllable,
+                notes = "Specialized handler ported from Buttplug protocol_impl",
+            )
+        }.toTypedArray(),
+        *ExternalButtplugTransportPlans.protocolIds.map { protocolId ->
+            ButtplugLocalHandlerDescriptor(
+                protocolId = protocolId,
+                source = ButtplugHandlerSource.ExternalButtplugTransport,
+                supportedOutputKinds = ExternalButtplugTransportPlans.supportedKinds,
+                communicationTypes = emptySet(),
+                status = ButtplugSupportStatus.Controllable,
+                notes = "Controlled through external Buttplug/Intiface transport",
+            )
+        }.toTypedArray(),
         ButtplugLocalHandlerDescriptor(
             protocolId = "ankni",
             source = ButtplugHandlerSource.NativeSpecialized,
             supportedOutputKinds = setOf(ToyOutputKind.Vibrate),
-            status = ButtplugSupportStatus.PartiallyControllable,
-            notes = "当前工程已有 Android 特化实现，后续仍需迁移为通用 Buttplug handler",
-        ),
-        ButtplugLocalHandlerDescriptor(
-            protocolId = "lovense",
-            source = ButtplugHandlerSource.NativeSpecialized,
-            supportedOutputKinds = setOf(ToyOutputKind.Vibrate),
-            status = ButtplugSupportStatus.PartiallyControllable,
-            notes = "当前实现覆盖基础控制，不等价于 Lovense 全 output 能力",
-        ),
-        ButtplugLocalHandlerDescriptor(
-            protocolId = "satisfyer",
-            source = ButtplugHandlerSource.NativeSpecialized,
-            supportedOutputKinds = setOf(ToyOutputKind.Vibrate),
-            status = ButtplugSupportStatus.PartiallyControllable,
+            status = ButtplugSupportStatus.Controllable,
+            notes = "当前工程已有 Android 特化实现，覆盖 YAML 振动 output",
         ),
         ButtplugLocalHandlerDescriptor(
             protocolId = "pink_punch",
             source = ButtplugHandlerSource.NativeSpecialized,
             supportedOutputKinds = setOf(ToyOutputKind.Vibrate),
-            status = ButtplugSupportStatus.PartiallyControllable,
+            status = ButtplugSupportStatus.Controllable,
         ),
         ButtplugLocalHandlerDescriptor(
             protocolId = "lovenuts",
             source = ButtplugHandlerSource.NativeSpecialized,
             supportedOutputKinds = setOf(ToyOutputKind.Vibrate),
-            status = ButtplugSupportStatus.PartiallyControllable,
-        ),
-        ButtplugLocalHandlerDescriptor(
-            protocolId = "jejoue",
-            source = ButtplugHandlerSource.NativeSpecialized,
-            supportedOutputKinds = setOf(ToyOutputKind.Vibrate),
-            status = ButtplugSupportStatus.PartiallyControllable,
-        ),
-        ButtplugLocalHandlerDescriptor(
-            protocolId = "monsterpub",
-            source = ButtplugHandlerSource.NativeSpecialized,
-            supportedOutputKinds = setOf(ToyOutputKind.Vibrate),
-            status = ButtplugSupportStatus.PartiallyControllable,
-            notes = "当前工程按 SISTALK Hub 特化路线控制",
-        ),
-        ButtplugLocalHandlerDescriptor(
-            protocolId = "cachito",
-            source = ButtplugHandlerSource.NativeSpecialized,
-            supportedOutputKinds = setOf(ToyOutputKind.Vibrate),
-            status = ButtplugSupportStatus.PartiallyControllable,
-            notes = "当前工程按 Cachito 广播特化路线控制",
+            status = ButtplugSupportStatus.Controllable,
         ),
         ButtplugLocalHandlerDescriptor(
             protocolId = "mizzzee",
             source = ButtplugHandlerSource.NativeSpecialized,
             supportedOutputKinds = setOf(ToyOutputKind.Vibrate),
-            status = ButtplugSupportStatus.PartiallyControllable,
+            status = ButtplugSupportStatus.Controllable,
         ),
         ButtplugLocalHandlerDescriptor(
             protocolId = "sensee",
             source = ButtplugHandlerSource.NativeSpecialized,
             supportedOutputKinds = setOf(ToyOutputKind.Vibrate),
-            status = ButtplugSupportStatus.PartiallyControllable,
+            status = ButtplugSupportStatus.Controllable,
         ),
     ).associateBy { it.protocolId }
 

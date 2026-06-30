@@ -16,6 +16,8 @@ class ButtplugSupportMatrixTest {
                 "amorelie-joy",
                 "aneros",
                 "bananasome",
+                "cachito",
+                "cueme",
                 "cowgirl",
                 "cupido",
                 "cowgirl-cone",
@@ -35,10 +37,12 @@ class ButtplugSupportMatrixTest {
                 "honeyplaybox",
                 "htk_bm",
                 "itoys",
+                "jejoue",
                 "joyhub",
                 "kiiroo-powershot",
                 "kiiroo-prowand",
                 "kiiroo-spot",
+                "kiiroo-v1",
                 "kiiroo-v2",
                 "kiiroo-v21",
                 "kiiroo-v21-initialized",
@@ -51,6 +55,7 @@ class ButtplugSupportMatrixTest {
                 "libo-shark",
                 "libo-vibes",
                 "loob",
+                "lovense",
                 "lovedistance",
                 "lovehoney-desire",
                 "leten",
@@ -65,7 +70,9 @@ class ButtplugSupportMatrixTest {
                 "meese",
                 "mizzzee-v2",
                 "mizzzee-v3",
+                "monsterpub",
                 "motorbunny",
+                "muse",
                 "mymuselinkplus",
                 "mysteryvibe",
                 "mysteryvibe-v2",
@@ -77,6 +84,8 @@ class ButtplugSupportMatrixTest {
                 "prettylove",
                 "realov",
                 "sakuraneko",
+                "satisfyer",
+                "sayberx",
                 "sexverse-lg389",
                 "sexverse-v1",
                 "sexverse-v2",
@@ -149,6 +158,22 @@ class ButtplugSupportMatrixTest {
         )
 
         assertEquals(ButtplugSupportStatus.RecognizedUnsupportedTransport, entry.status)
+    }
+
+    @Test
+    fun externalButtplugTransportProtocolsAreControllable() {
+        for (protocolId in ExternalButtplugTransportPlans.protocolIds) {
+            val entry = ButtplugLocalHandlerRegistry.supportEntryFor(
+                protocol(
+                    id = protocolId,
+                    communicationTypes = setOf(COMMUNICATION_SERIAL),
+                    outputType = OUTPUT_VIBRATE,
+                ),
+            )
+
+            assertEquals(ButtplugSupportStatus.Controllable, entry.status, protocolId)
+            assertEquals(ButtplugHandlerSource.ExternalButtplugTransport, entry.handler?.source, protocolId)
+        }
     }
 
     @Test

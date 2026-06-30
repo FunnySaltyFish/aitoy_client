@@ -40,18 +40,22 @@ data class ButtplugProtocolDefinition(
     val configurations: List<ButtplugDeviceDefinition>,
 ) {
     fun match(fingerprint: ButtplugDeviceFingerprint): ButtplugDeviceMatch? {
-        val matchedEndpoint = endpoints.firstOrNull { endpoint ->
-            fingerprint.serviceUuids.contains(endpoint.serviceUuid) &&
-                endpoint.characteristics.values.any(fingerprint.characteristicUuids::contains)
-        } ?: return null
+        val matchedEndpoint = endpoints
+            .filter { endpoint ->
+                fingerprint.serviceUuids.contains(endpoint.serviceUuid) &&
+                    endpoint.characteristics.values.any(fingerprint.characteristicUuids::contains)
+            }
+            .maxByOrNull { endpoint -> if (endpoint.txUuid != null) 1 else 0 }
+            ?: return null
         val nameMatched = communicationNames.isEmpty() ||
             communicationNames.any { alias -> fingerprint.name.matchesButtplugAlias(alias) }
         val manufacturerMatched = manufacturerDataCompanies.isNotEmpty() &&
             manufacturerDataCompanies.any(fingerprint.manufacturerData::containsKey)
         if (!nameMatched && !manufacturerMatched) return null
-        val device = configurations.firstOrNull { config ->
-            config.identifiers.any { identifier -> fingerprint.name.matchesButtplugAlias(identifier) }
-        } ?: defaultDevice
+        val device = configurations
+            .filter { config -> config.identifiers.any { identifier -> fingerprint.name.matchesButtplugAlias(identifier) } }
+            .maxByOrNull { config -> config.identifiers.maxOfOrNull { it.normalizedButtplugName().length } ?: 0 }
+            ?: defaultDevice
         return ButtplugDeviceMatch(
             protocol = this,
             device = device,
