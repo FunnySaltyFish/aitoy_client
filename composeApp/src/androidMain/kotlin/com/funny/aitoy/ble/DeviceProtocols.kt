@@ -2449,6 +2449,7 @@ private object AnkniQd1GattProtocol : BleDeviceProtocol {
         controlStyle = ToyControlStyle.IntensityOnly,
         intensityLabel = "强度",
         automatic = true,
+        repeatIntervalMs = QD1_KEEP_ALIVE_MS,
     )
 
     override fun matches(fingerprint: BleGattFingerprint): Boolean {
@@ -2480,6 +2481,7 @@ private object AnkniQd1GattProtocol : BleDeviceProtocol {
 
     private const val SLIDE_COMMAND = 0x08
     private const val SLIDE_DURATION = 0xC8
+    private const val QD1_KEEP_ALIVE_MS = 200
 }
 
 private object AnkniQd1Ff12GattProtocol : BleDeviceProtocol {
@@ -2495,6 +2497,7 @@ private object AnkniQd1Ff12GattProtocol : BleDeviceProtocol {
         controlStyle = ToyControlStyle.IntensityOnly,
         intensityLabel = "强度",
         automatic = true,
+        repeatIntervalMs = QD1_KEEP_ALIVE_MS,
     )
 
     override fun matches(fingerprint: BleGattFingerprint): Boolean {
@@ -2527,6 +2530,7 @@ private object AnkniQd1Ff12GattProtocol : BleDeviceProtocol {
 
     private const val SLIDE_COMMAND = 0x08
     private const val SLIDE_DURATION = 0xC8
+    private const val QD1_KEEP_ALIVE_MS = 200
 }
 
 private object Ankni0010Protocol : BleDeviceProtocol {

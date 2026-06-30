@@ -911,6 +911,12 @@ private fun IntensityControl(
         Text(status.intensityLabel, color = TextMain, fontWeight = FontWeight.SemiBold)
         Text("$targetIntensity/$maxIntensity", color = Rose, fontWeight = FontWeight.Bold)
     }
+    Spacer(Modifier.height(6.dp))
+    Text(
+        "震动控制会持续保持当前强度，直到调为 0 或点击立即停止；正常情况下不会主动停止。如立马停止，可加群反馈。",
+        color = TextSoft,
+        style = MaterialTheme.typography.bodySmall,
+    )
     Slider(
         value = targetIntensity.toFloat(),
         onValueChange = {

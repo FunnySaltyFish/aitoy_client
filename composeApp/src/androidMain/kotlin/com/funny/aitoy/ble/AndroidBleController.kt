@@ -332,7 +332,7 @@ class AndroidBleController(
                 ProtocolAttemptStatus(
                     success = true,
                     title = "${activeBroadcastProtocol!!.status.displayName} 已准备好",
-                    message = "这个设备使用广播控制，可以直接发送轻柔测试",
+                    message = "可以调节强度，设备会保持当前状态直到停止",
                     protocolName = activeBroadcastProtocol!!.status.displayName,
                     currentIndex = 1,
                     total = broadcastProtocolCandidates.size,
@@ -647,7 +647,7 @@ class AndroidBleController(
                 ProtocolAttemptStatus(
                     success = true,
                     title = "${protocol.status.displayName} 连接成功",
-                    message = "已完成协议确认，可以开始测试",
+                    message = "已完成协议确认，可以开始控制",
                     protocolName = protocol.status.displayName,
                     currentIndex = protocolCandidateIndex + 1,
                     total = protocolCandidates.size,
@@ -743,7 +743,7 @@ class AndroidBleController(
                 ProtocolAttemptStatus(
                     success = true,
                     title = "已使用高级模板连接",
-                    message = "可以先轻柔测试，再根据反馈调整指令",
+                    message = "可以从低强度开始控制，再根据反应调整指令",
                     protocolName = activeProtocol!!.status.displayName,
                     failedNames = failedProtocolNames.toList(),
                 ),
@@ -887,7 +887,7 @@ class AndroidBleController(
                         ProtocolAttemptStatus(
                             success = true,
                             title = "${status.displayName} 连接成功",
-                            message = "已完成协议确认，可以开始测试",
+                            message = "已完成协议确认，可以开始控制",
                             protocolName = status.displayName,
                             currentIndex = protocolCandidateIndex + 1,
                             total = protocolCandidates.size,

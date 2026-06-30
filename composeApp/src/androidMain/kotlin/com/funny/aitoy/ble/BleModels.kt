@@ -17,7 +17,7 @@ enum class BleConnectionState(val label: String) {
     Idle("未连接"),
     Connecting("正在连接"),
     Discovering("正在读取设备能力"),
-    Ready("已连接，可以测试"),
+    Ready("已连接，可以控制"),
     Disconnecting("正在断开"),
     Error("连接失败"),
 }
