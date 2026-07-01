@@ -51,6 +51,15 @@ class KissToyProtocolTest {
         assertEquals("58FF0102DB8492C6FFCFFFFFFF", write.bytes.hexUpper())
     }
 
+    @Test
+    fun qcttWithDdddRouteDoesNotFallBackToHistoricalKissToy() {
+        val protocol = BleProtocolRegistry.resolveNative(tutuFingerprint(name = "QCTT", includeHistoricalKissToyGatt = true))
+            ?: error("QCTT protocol not resolved")
+
+        assertEquals("kisstoy_tutu2", protocol.status.id)
+        assertEquals(ToyControlStyle.DualIntensityOnly, protocol.status.controlStyle)
+    }
+
     private fun ByteArray.hexUpper(): String =
         joinToString("") { byte -> "%02X".format(byte.toInt() and 0xff) }
 
@@ -67,12 +76,25 @@ class KissToyProtocolTest {
         characteristicUuids = setOf(KISSTOY_WRITE_UUID, KISSTOY_NOTIFY_UUID),
     )
 
-    private fun tutuFingerprint() = BleGattFingerprint(
-        name = "迷路",
+    private fun tutuFingerprint(
+        name: String = "迷路",
+        includeHistoricalKissToyGatt: Boolean = false,
+    ) = BleGattFingerprint(
+        name = name,
         manufacturerData = "",
         scanRecordHex = "",
-        serviceUuids = setOf(TUTU_SERVICE_UUID),
-        characteristicUuids = setOf(TUTU_WRITE_UUID, TUTU_NOTIFY_UUID),
+        serviceUuids = buildSet {
+            add(TUTU_SERVICE_UUID)
+            if (includeHistoricalKissToyGatt) add(KISSTOY_SERVICE_UUID)
+        },
+        characteristicUuids = buildSet {
+            add(TUTU_WRITE_UUID)
+            add(TUTU_NOTIFY_UUID)
+            if (includeHistoricalKissToyGatt) {
+                add(KISSTOY_WRITE_UUID)
+                add(KISSTOY_NOTIFY_UUID)
+            }
+        },
     )
 
     private companion object {

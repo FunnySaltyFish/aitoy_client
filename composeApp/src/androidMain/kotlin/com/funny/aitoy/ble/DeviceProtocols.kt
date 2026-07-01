@@ -2225,7 +2225,7 @@ private object KissToyTutuIIProtocol : BleDeviceProtocol {
     private val serviceUuid = uuid("0000dddd-0000-1000-8000-00805f9b34fb")
     private val writeUuid = uuid("0000ddd1-0000-1000-8000-00805f9b34fb")
     private val notifyUuid = uuid("0000ddd2-0000-1000-8000-00805f9b34fb")
-    private val aliases = listOf("迷路", "突突", "tutu", "tutu2", "tutuii", "kisstoytutu")
+    private val aliases = listOf("QCTT", "迷路", "突突", "tutu", "tutu2", "tutuii", "kisstoytutu")
 
     override val status = BleProtocolStatus(
         id = "kisstoy_tutu2",
