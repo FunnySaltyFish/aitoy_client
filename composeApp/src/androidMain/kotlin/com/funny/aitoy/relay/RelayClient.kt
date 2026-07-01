@@ -74,6 +74,24 @@ class RelayClient(
             connect(lastServerUrl, lastUserToken, resetRetry = false)
         }
     }
+    private val heartbeat = object : Runnable {
+        override fun run() {
+            val currentSocket = socket ?: return
+            if (!userRequestedOnline) return
+            val payload = JSONObject()
+                .put("type", "heartbeat")
+                .put("clientTime", System.currentTimeMillis())
+            val accepted = currentSocket.send(payload.toString())
+            if (accepted) {
+                mainHandler.postDelayed(this, HEARTBEAT_INTERVAL_MS)
+            } else {
+                trace("AI 伙伴保活失败，正在准备重连", error = true, type = "relay_heartbeat_failed")
+                currentSocket.cancel()
+                if (socket === currentSocket) socket = null
+                scheduleReconnect()
+            }
+        }
+    }
 
     fun connect(serverUrl: String, userToken: String) {
         connect(serverUrl, userToken, resetRetry = true)
@@ -84,6 +102,7 @@ class RelayClient(
         lastServerUrl = serverUrl
         lastUserToken = userToken
         mainHandler.removeCallbacks(reconnect)
+        stopHeartbeat()
         socket?.close(1000, "Reconnect")
         socket = null
         if (resetRetry) retryCount = 0
@@ -107,30 +126,37 @@ class RelayClient(
                         uploadPolicy = AiToyTraceUploadPolicy.SessionOnce,
                     )
                     emitState("已在线")
+                    startHeartbeat()
                 }
 
                 override fun onMessage(webSocket: WebSocket, text: String) {
                     if (generation != connectionGeneration) return
-                    trace(
-                        "AI 伙伴收到指令：$text",
-                        type = "relay_command_received",
-                        uploadPolicy = AiToyTraceUploadPolicy.Always,
-                    )
                     val json = JSONObject(text)
-                    if (json.optString("type") == "command") {
-                        emitCommand(
-                            RelayCommand(
-                                commandId = json.getString("commandId"),
-                                action = json.getString("action"),
-                                deviceId = json.optString("deviceId").ifBlank { null },
-                                intensity = json.optIntOrNull("intensity"),
-                                mode = json.optIntOrNull("mode"),
-                                durationSec = json.optIntOrNull("durationSec"),
-                                defaultDurationSec = json.optIntOrNull("defaultDurationSec"),
-                                script = json.optString("script").ifBlank { null },
-                                createdAt = json.optLongOrNull("createdAt"),
+                    val messageType = json.optString("type")
+                    when (messageType) {
+                        "command" -> {
+                            trace(
+                                "AI 伙伴收到指令：$text",
+                                type = "relay_command_received",
+                                uploadPolicy = AiToyTraceUploadPolicy.Always,
                             )
-                        )
+                            emitCommand(
+                                RelayCommand(
+                                    commandId = json.getString("commandId"),
+                                    action = json.getString("action"),
+                                    deviceId = json.optString("deviceId").ifBlank { null },
+                                    intensity = json.optIntOrNull("intensity"),
+                                    mode = json.optIntOrNull("mode"),
+                                    durationSec = json.optIntOrNull("durationSec"),
+                                    defaultDurationSec = json.optIntOrNull("defaultDurationSec"),
+                                    script = json.optString("script").ifBlank { null },
+                                    createdAt = json.optLongOrNull("createdAt"),
+                                )
+                            )
+                        }
+
+                        "heartbeat_ack" -> Unit
+                        else -> trace("AI 伙伴收到消息 type=$messageType")
                     }
                 }
 
@@ -142,6 +168,7 @@ class RelayClient(
 
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                     if (generation != connectionGeneration) return
+                    stopHeartbeat()
                     socket = null
                     connecting = false
                     if (userRequestedOnline) {
@@ -164,6 +191,7 @@ class RelayClient(
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                     if (generation != connectionGeneration) return
+                    stopHeartbeat()
                     socket = null
                     connecting = false
                     trace("AI 伙伴连接中断：${t.message ?: "网络不可用"}", error = true)
@@ -247,6 +275,7 @@ class RelayClient(
         retryCount = 0
         connectionGeneration += 1
         mainHandler.removeCallbacks(reconnect)
+        stopHeartbeat()
         socket?.close(1000, "App disconnect")
         socket = null
         emitState("未连接")
@@ -259,8 +288,9 @@ class RelayClient(
     }
 
     private fun send(json: JSONObject) {
+        val currentSocket = socket
         val text = json.toString()
-        val accepted = socket?.send(text) == true
+        val accepted = currentSocket?.send(text) == true
         trace("AI 伙伴同步状态 accepted=$accepted payload=$text")
         if (!accepted) {
             onTrace(
@@ -271,7 +301,20 @@ class RelayClient(
                 )
             )
         }
-        if (!accepted && userRequestedOnline) scheduleReconnect()
+        if (!accepted && userRequestedOnline) {
+            currentSocket?.cancel()
+            if (socket === currentSocket) socket = null
+            scheduleReconnect()
+        }
+    }
+
+    private fun startHeartbeat() {
+        mainHandler.removeCallbacks(heartbeat)
+        mainHandler.postDelayed(heartbeat, HEARTBEAT_INTERVAL_MS)
+    }
+
+    private fun stopHeartbeat() {
+        mainHandler.removeCallbacks(heartbeat)
     }
 
     private fun scheduleReconnect() {
@@ -328,5 +371,6 @@ class RelayClient(
 
     companion object {
         private const val TAG = "AiToyRelay"
+        private const val HEARTBEAT_INTERVAL_MS = 15_000L
     }
 }
