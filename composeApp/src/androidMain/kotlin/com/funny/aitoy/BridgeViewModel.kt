@@ -85,6 +85,7 @@ data class ManagedToy(
     val selected: Boolean,
     val current: Boolean,
     val saved: Boolean,
+    val batteryPercent: Int? = null,
 )
 
 private fun ManagedToy.lastSeenKey(saved: List<RememberedToy>): Long =
@@ -156,6 +157,7 @@ class BridgeViewModel : ViewModel() {
     private val deviceModes = mutableStateMapOf<String, Int>()
     private val deviceIntensities = mutableStateMapOf<String, Int>()
     private val deviceSecondaryIntensities = mutableStateMapOf<String, Int>()
+    private val deviceBatteryPercents = mutableStateMapOf<String, Int>()
 
     var connectionState by mutableStateOf(BleConnectionState.Idle)
         private set
@@ -306,6 +308,7 @@ class BridgeViewModel : ViewModel() {
                     selected = selectedAddress == toy.address,
                     current = selectedAddress == toy.address,
                     saved = true,
+                    batteryPercent = batteryPercentForAddress(toy.address),
                 )
             }.toMutableList()
             addresses
@@ -327,6 +330,7 @@ class BridgeViewModel : ViewModel() {
                         selected = selectedAddress == address,
                         current = selectedAddress == address,
                         saved = false,
+                        batteryPercent = batteryPercentForAddress(address),
                     )
                 }
             return rows.sortedWith(
@@ -417,6 +421,7 @@ class BridgeViewModel : ViewModel() {
         onState = { },
         onProtocol = { },
         onProtocolAttempt = { },
+        onBatteryPercent = { },
         onLog = ::appendLog,
         onTrace = ::appendTrace,
     )
@@ -458,6 +463,7 @@ class BridgeViewModel : ViewModel() {
                 onState = { onDeviceConnectionState(address, it) },
                 onProtocol = { onDeviceProtocol(address, it) },
                 onProtocolAttempt = { onDeviceProtocolAttempt(address, it) },
+                onBatteryPercent = { onDeviceBatteryPercent(address, it) },
                 onLog = ::appendLog,
                 onTrace = ::appendTrace,
             )
@@ -479,6 +485,7 @@ class BridgeViewModel : ViewModel() {
                 if (address == selectedAddress) autoOnlineSavedDevice()
             }
             BleConnectionState.Error -> {
+                deviceBatteryPercents.remove(address)
                 if (address == selectedAddress) {
                     busyHint = if (deviceProtocolAttempts[address]?.exhausted == true) {
                         "已尝试所有协议，目前仍不支持，请加群提交反馈，开发者会尝试支持。"
@@ -490,11 +497,21 @@ class BridgeViewModel : ViewModel() {
                 autoOfflineWhenNoConnectedSavedDevice()
             }
             BleConnectionState.Idle -> {
+                deviceBatteryPercents.remove(address)
                 syncRelayDevice()
                 autoOfflineWhenNoConnectedSavedDevice()
             }
             else -> Unit
         }
+    }
+
+    private fun onDeviceBatteryPercent(address: String, percent: Int?) {
+        if (percent == null) {
+            deviceBatteryPercents.remove(address)
+        } else {
+            deviceBatteryPercents[address] = percent.coerceIn(1, 100)
+        }
+        syncRelayDevice()
     }
 
     private fun onDeviceProtocol(address: String, status: BleProtocolStatus) {
@@ -547,6 +564,7 @@ class BridgeViewModel : ViewModel() {
         deviceDisplayNames[device.address] = device.name
         toyRuntimeStates[device.address] = ToyRuntimeState.Connecting
         deviceConnectionStates[device.address] = BleConnectionState.Connecting
+        deviceBatteryPercents.remove(device.address)
         protocolAttemptStatus = ProtocolAttemptStatus()
         protocolStatus = BleProtocolStatus()
         deviceProtocolAttempts[device.address] = protocolAttemptStatus
@@ -610,6 +628,7 @@ class BridgeViewModel : ViewModel() {
         showDeviceRemarkDialog = false
         toyRuntimeStates[address] = ToyRuntimeState.Offline
         deviceConnectionStates[address] = BleConnectionState.Idle
+        deviceBatteryPercents.remove(address)
         mainHandler.removeCallbacks(controlTrial)
         cancelAutoStop(address)
         cancelKeepAlive(address)
@@ -1197,6 +1216,11 @@ class BridgeViewModel : ViewModel() {
                     modeMax = status.modeMax,
                     modeNames = status.modeNames,
                     controlStyle = status.controlStyle.name,
+                    batteryPercent = if (deviceConnectionStates[address] == BleConnectionState.Ready) {
+                        deviceBatteryPercents[address]
+                    } else {
+                        null
+                    },
                     features = status.features.map { feature ->
                         RelayDeviceFeature(
                             type = feature.type,
@@ -1604,6 +1628,11 @@ class BridgeViewModel : ViewModel() {
 
     fun secondaryIntensityForAddress(address: String): Int =
         if (address == selectedAddress) secondaryIntensity else deviceSecondaryIntensities[address] ?: intensityForAddress(address)
+
+    fun batteryPercentForAddress(address: String): Int? =
+        deviceBatteryPercents[address]?.takeIf {
+            deviceConnectionStates[address] == BleConnectionState.Ready
+        }
 
     fun modeLabelForAddress(address: String): String {
         val status = protocolStatusFor(address)

@@ -39,6 +39,7 @@ data class RelayDevice(
     val modeMax: Int,
     val modeNames: List<String> = emptyList(),
     val controlStyle: String,
+    val batteryPercent: Int? = null,
     val features: List<RelayDeviceFeature> = emptyList(),
 )
 
@@ -191,37 +192,39 @@ class RelayClient(
                 "devices",
                 JSONArray().apply {
                     devices.forEach { device ->
-                        put(
-                            JSONObject()
-                                .put("deviceId", device.deviceId)
-                                .put("displayName", device.displayName)
-                                .put("connected", device.connected)
-                                .put("isDefault", device.isDefault)
-                                .put("protocolName", device.protocolName)
-                                .put("intensity", device.intensity)
-                                .put("mode", device.mode)
-                                .put("intensityMax", device.intensityMax)
-                                .put("modeMax", device.modeMax)
-                                .put("modeNames", JSONArray(device.modeNames))
-                                .put("controlStyle", device.controlStyle)
-                                .put(
-                                    "features",
-                                    JSONArray().apply {
-                                        device.features.forEach { feature ->
-                                            put(
-                                                JSONObject()
-                                                    .put("type", feature.type)
-                                                    .put("min", feature.min)
-                                                    .put("max", feature.max)
-                                                    .put("index", feature.index)
-                                                    .put("label", feature.label),
-                                            )
-                                        }
-                                    },
-                                )
-                                .put("adapterType", "template_ble")
-                                .put("capabilities", JSONArray(listOf("sequence"))),
-                        )
+                        val item = JSONObject()
+                            .put("deviceId", device.deviceId)
+                            .put("displayName", device.displayName)
+                            .put("connected", device.connected)
+                            .put("isDefault", device.isDefault)
+                            .put("protocolName", device.protocolName)
+                            .put("intensity", device.intensity)
+                            .put("mode", device.mode)
+                            .put("intensityMax", device.intensityMax)
+                            .put("modeMax", device.modeMax)
+                            .put("modeNames", JSONArray(device.modeNames))
+                            .put("controlStyle", device.controlStyle)
+                            .put(
+                                "features",
+                                JSONArray().apply {
+                                    device.features.forEach { feature ->
+                                        put(
+                                            JSONObject()
+                                                .put("type", feature.type)
+                                                .put("min", feature.min)
+                                                .put("max", feature.max)
+                                                .put("index", feature.index)
+                                                .put("label", feature.label),
+                                        )
+                                    }
+                                },
+                            )
+                            .put("adapterType", "template_ble")
+                            .put("capabilities", JSONArray(listOf("sequence")))
+                        device.batteryPercent
+                            ?.coerceIn(1, 100)
+                            ?.let { item.put("batteryPercent", it) }
+                        put(item)
                     }
                 },
             )

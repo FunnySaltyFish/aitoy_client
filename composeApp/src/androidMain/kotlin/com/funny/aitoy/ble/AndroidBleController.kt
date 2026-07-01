@@ -33,6 +33,7 @@ class AndroidBleController(
     private val onState: (BleConnectionState) -> Unit,
     private val onProtocol: (BleProtocolStatus) -> Unit,
     private val onProtocolAttempt: (ProtocolAttemptStatus) -> Unit,
+    private val onBatteryPercent: (Int?) -> Unit = {},
     private val onLog: (String) -> Unit,
     private val onTrace: (AiToyTraceEvent) -> Unit,
 ) {
@@ -63,6 +64,7 @@ class AndroidBleController(
     private var keepaliveRunnable: Runnable? = null
     private var keepaliveProtocol: BleDeviceProtocol? = null
     private var keepaliveOperations: List<BleProtocolOperation> = emptyList()
+    private var batteryReadRequested = false
     private val scanSignatures = mutableMapOf<String, String>()
     private val advertiser = AndroidBleAdvertiser(::trace)
 
@@ -306,6 +308,8 @@ class AndroidBleController(
         failedProtocolNames.clear()
         disconnectingAfterProtocolFailure = false
         resolvedWriteCharacteristic = null
+        batteryReadRequested = false
+        onBatteryPercent(null)
         cancelProtocolKeepalive()
         cancelProtocolReadyWait()
         operationQueue.clear()
@@ -1017,8 +1021,17 @@ class AndroidBleController(
         trace("读取回调 uuid=$uuid status=$status bytes=${bytes.toHexString()}")
         operationInProgress = false
         if (status != BluetoothGatt.GATT_SUCCESS) {
+            if (uuid == BATTERY_LEVEL_CHARACTERISTIC_UUID) {
+                trace("标准电量读取失败 status=$status")
+                mainHandler.post { onBatteryPercent(null) }
+                executeNextOperation()
+                return
+            }
             handleProtocolOperationFailed("协议确认读取失败 status=$status")
             return
+        }
+        if (uuid == BATTERY_LEVEL_CHARACTERISTIC_UUID) {
+            handleBatteryLevel(bytes)
         }
         runCatching {
             activeProtocol?.onRead(uuid, bytes)?.let(operationQueue::addAll)
@@ -1030,6 +1043,9 @@ class AndroidBleController(
     }
 
     private fun handleCharacteristicNotify(uuid: UUID, bytes: ByteArray) {
+        if (uuid == BATTERY_LEVEL_CHARACTERISTIC_UUID) {
+            handleBatteryLevel(bytes)
+        }
         runCatching {
             val protocol = activeProtocol
             val operations = protocol?.onNotify(uuid, bytes).orEmpty()
@@ -1119,6 +1135,45 @@ class AndroidBleController(
     private fun connectionStateNeedsReady(): Boolean =
         activeProtocol != null
 
+    private fun requestStandardBatteryLevel() {
+        if (batteryReadRequested) return
+        val currentGatt = gatt ?: return
+        val batteryService = currentGatt.getService(BATTERY_SERVICE_UUID) ?: run {
+            trace("设备没有标准电量服务")
+            return
+        }
+        val batteryLevel = batteryService.getCharacteristic(BATTERY_LEVEL_CHARACTERISTIC_UUID) ?: run {
+            trace("设备没有标准电量特征")
+            return
+        }
+        val canRead = batteryLevel.properties and BluetoothGattCharacteristic.PROPERTY_READ != 0
+        val canNotify =
+            batteryLevel.properties and BluetoothGattCharacteristic.PROPERTY_NOTIFY != 0 ||
+                batteryLevel.properties and BluetoothGattCharacteristic.PROPERTY_INDICATE != 0
+        if (!canRead && !canNotify) {
+            trace("标准电量特征不支持读取或通知")
+            return
+        }
+        batteryReadRequested = true
+        if (canRead) {
+            trace("准备读取标准电量")
+            operationQueue.add(BleProtocolOperation.Read(batteryLevel.uuid))
+        } else {
+            trace("准备订阅标准电量")
+            operationQueue.add(BleProtocolOperation.SubscribeNotify(batteryLevel.uuid))
+        }
+        executeNextOperation()
+    }
+
+    private fun handleBatteryLevel(bytes: ByteArray) {
+        val percent = bytes.firstOrNull()
+            ?.toInt()
+            ?.and(0xff)
+            ?.takeIf { it in 1..100 }
+        trace("读取到设备电量 ${percent?.let { "$it%" } ?: "未知"}")
+        mainHandler.post { onBatteryPercent(percent) }
+    }
+
     private fun gattControlWarmupMs(): Long {
         if (gattReadyAtMs <= 0L) return 0L
         val elapsedMs = System.currentTimeMillis() - gattReadyAtMs
@@ -1126,6 +1181,9 @@ class AndroidBleController(
     }
 
     private fun updateState(state: BleConnectionState) {
+        if (state == BleConnectionState.Ready) {
+            requestStandardBatteryLevel()
+        }
         mainHandler.post { onState(state) }
     }
 
@@ -1201,5 +1259,9 @@ class AndroidBleController(
         private const val GATT_CONTROL_WARMUP_MS = 1_200L
         private val CLIENT_CHARACTERISTIC_CONFIG_UUID =
             UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+        private val BATTERY_SERVICE_UUID =
+            UUID.fromString("0000180f-0000-1000-8000-00805f9b34fb")
+        private val BATTERY_LEVEL_CHARACTERISTIC_UUID =
+            UUID.fromString("00002a19-0000-1000-8000-00805f9b34fb")
     }
 }

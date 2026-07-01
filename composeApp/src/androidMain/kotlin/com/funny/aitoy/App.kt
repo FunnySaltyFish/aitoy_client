@@ -398,6 +398,20 @@ private fun DeviceStatePill(state: ToyRuntimeState) {
 }
 
 @Composable
+private fun BatteryPill(percent: Int) {
+    Text(
+        text = "电量 ${percent.coerceIn(1, 100)}%",
+        color = Mint,
+        modifier = Modifier
+            .background(Mint.copy(alpha = 0.12f), RoundedCornerShape(50))
+            .padding(horizontal = 9.dp, vertical = 5.dp),
+        style = MaterialTheme.typography.labelSmall,
+        fontWeight = FontWeight.Bold,
+        maxLines = 1,
+    )
+}
+
+@Composable
 private fun RemotePager(vm: BridgeViewModel) {
     val connectedToys = vm.managedToys
         .filter { it.runtimeState == ToyRuntimeState.Connected }
@@ -613,6 +627,11 @@ private fun ManagedDeviceRow(vm: BridgeViewModel, toy: ManagedToy) {
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
+            toy.batteryPercent?.let {
+                Spacer(Modifier.width(8.dp))
+                BatteryPill(it)
+            }
+            Spacer(Modifier.width(8.dp))
             DeviceStatePill(toy.runtimeState)
         }
         Spacer(Modifier.height(4.dp))
@@ -763,7 +782,12 @@ private fun ControlRoom(vm: BridgeViewModel, toy: ManagedToy? = null) {
     val status = if (address.isBlank()) vm.protocolStatus else vm.protocolStatusForAddress(address)
     val targetMode = if (address.isBlank()) vm.mode else vm.modeForAddress(address)
     val targetIntensity = if (address.isBlank()) vm.intensity else vm.intensityForAddress(address)
+    val batteryPercent = if (address.isBlank()) null else vm.batteryPercentForAddress(address)
     Panel(title = toy?.name ?: "遥控器", icon = Icons.Outlined.AutoAwesome) {
+        batteryPercent?.let {
+            BatteryPill(it)
+            Spacer(Modifier.height(10.dp))
+        }
         Text(
             text = when {
                 !status.controllable -> "还没有可用的控制指令。"
