@@ -142,6 +142,7 @@ private class SequenceScriptFormatException : IllegalArgumentException("序列�
 private const val LegacyDefaultUserToken = "ut_fishfish"
 private const val DefaultCommunityUrl = "https://qm.qq.com/q/ytRVIe6O7m"
 private const val DefaultTutorialUrl = "https://docs.qq.com/s/4dhBqBSu1u5900Qh7qvYHW/folder/YFZTdLuzaIxv"
+private const val UnlimitedSequenceDurationSec = -1
 private const val MaxSequenceDurationSec = 300
 
 private fun generateDefaultUserToken(): String = "ut_${UUID.randomUUID().toString().replace("-", "")}"
@@ -1285,24 +1286,34 @@ class BridgeViewModel : ViewModel() {
     ) {
         val safeDefaultDuration = (defaultDurationSec ?: 30).coerceIn(1, MaxSequenceDurationSec)
         var running = false
+        var shouldStopRunning = true
         try {
             steps.forEach { step ->
                 when (step) {
                     is RelaySequenceStep.Set -> {
                         val durationSec = step.durationSec ?: safeDefaultDuration
+                        val unlimited = durationSec == UnlimitedSequenceDurationSec
+                        val actionDurationSec = if (unlimited) safeDefaultDuration else durationSec
                         delayControlWarmup(address)
                         val action = sendToySet(
                             intensityPercent = step.intensity,
                             requestedMode = step.mode,
-                            autoStopSec = durationSec,
+                            autoStopSec = actionDurationSec,
                             address = address,
                             scheduleAutoStop = false,
+                            keepAliveDurationSec = if (unlimited) null else actionDurationSec,
                         )
                         running = actionKeepsDeviceRunning(action)
-                        delay(durationSec.coerceIn(1, MaxSequenceDurationSec) * 1_000L)
+                        if (unlimited) {
+                            shouldStopRunning = false
+                            return
+                        }
+                        delay(actionDurationSec * 1_000L)
                     }
                     is RelaySequenceStep.Dual -> {
                         val durationSec = step.durationSec ?: safeDefaultDuration
+                        val unlimited = durationSec == UnlimitedSequenceDurationSec
+                        val actionDurationSec = if (unlimited) safeDefaultDuration else durationSec
                         val status = protocolStatusFor(address)
                         val mappedMode = step.mode.coerceIn(1, status.modeMax.coerceAtLeast(1))
                         val mappedInternalIntensity = mapIntensityPercent(step.internalIntensity, address)
@@ -1314,7 +1325,13 @@ class BridgeViewModel : ViewModel() {
                             status = status,
                         )
                         delayControlWarmup(address)
-                        sendToyAction(action, durationSec, address, scheduleAutoStop = false)
+                        sendToyAction(
+                            action,
+                            actionDurationSec,
+                            address,
+                            scheduleAutoStop = false,
+                            keepAliveDurationSec = if (unlimited) null else actionDurationSec,
+                        )
                         deviceModes[address] = mappedMode
                         deviceIntensities[address] = mappedInternalIntensity
                         deviceSecondaryIntensities[address] = mappedExternalIntensity
@@ -1325,10 +1342,16 @@ class BridgeViewModel : ViewModel() {
                         }
                         syncRelayDevice()
                         running = actionKeepsDeviceRunning(action)
-                        delay(durationSec.coerceIn(1, MaxSequenceDurationSec) * 1_000L)
+                        if (unlimited) {
+                            shouldStopRunning = false
+                            return
+                        }
+                        delay(actionDurationSec * 1_000L)
                     }
                     is RelaySequenceStep.Pattern -> {
                         val durationSec = step.durationSec ?: safeDefaultDuration
+                        val unlimited = durationSec == UnlimitedSequenceDurationSec
+                        val actionDurationSec = if (unlimited) safeDefaultDuration else durationSec
                         val status = protocolStatusFor(address)
                         val mappedMode = step.mode.coerceIn(1, status.modeMax.coerceAtLeast(1))
                         val action = patternAction(
@@ -1338,15 +1361,27 @@ class BridgeViewModel : ViewModel() {
                             status = status,
                         )
                         delayControlWarmup(address)
-                        sendToyAction(action, durationSec, address, scheduleAutoStop = false)
+                        sendToyAction(
+                            action,
+                            actionDurationSec,
+                            address,
+                            scheduleAutoStop = false,
+                            keepAliveDurationSec = if (unlimited) null else actionDurationSec,
+                        )
                         deviceModes[address] = mappedMode
                         if (address == selectedAddress) mode = mappedMode
                         syncRelayDevice()
                         running = actionKeepsDeviceRunning(action)
-                        delay(durationSec.coerceIn(1, MaxSequenceDurationSec) * 1_000L)
+                        if (unlimited) {
+                            shouldStopRunning = false
+                            return
+                        }
+                        delay(actionDurationSec * 1_000L)
                     }
                     is RelaySequenceStep.Intensity -> {
                         val durationSec = step.durationSec ?: safeDefaultDuration
+                        val unlimited = durationSec == UnlimitedSequenceDurationSec
+                        val actionDurationSec = if (unlimited) safeDefaultDuration else durationSec
                         val mappedIntensity = mapIntensityPercent(step.value, address)
                         val status = protocolStatusFor(address)
                         val action = intensityAction(
@@ -1356,7 +1391,13 @@ class BridgeViewModel : ViewModel() {
                             status = status,
                         )
                         delayControlWarmup(address)
-                        sendToyAction(action, durationSec, address, scheduleAutoStop = false)
+                        sendToyAction(
+                            action,
+                            actionDurationSec,
+                            address,
+                            scheduleAutoStop = false,
+                            keepAliveDurationSec = if (unlimited) null else actionDurationSec,
+                        )
                         deviceIntensities[address] = mappedIntensity
                         if (status.supportsDualIntensity()) {
                             deviceSecondaryIntensities[address] = mappedIntensity
@@ -1367,7 +1408,11 @@ class BridgeViewModel : ViewModel() {
                         }
                         syncRelayDevice()
                         running = actionKeepsDeviceRunning(action)
-                        delay(durationSec.coerceIn(1, MaxSequenceDurationSec) * 1_000L)
+                        if (unlimited) {
+                            shouldStopRunning = false
+                            return
+                        }
+                        delay(actionDurationSec * 1_000L)
                     }
                     is RelaySequenceStep.Sleep -> delay(step.durationSec.coerceIn(0, 300) * 1_000L)
                     RelaySequenceStep.Stop -> {
@@ -1377,7 +1422,7 @@ class BridgeViewModel : ViewModel() {
                 }
             }
         } finally {
-            if (running) sendToyStop(address)
+            if (running && shouldStopRunning) sendToyStop(address)
         }
     }
 
@@ -1402,7 +1447,7 @@ class BridgeViewModel : ViewModel() {
                     val args = parseSequenceArguments(part.removePrefix("set(").removeSuffix(")"))
                     val mode = args["mode"]?.coerceAtLeast(1) ?: throw SequenceScriptFormatException()
                     val intensity = args["intensity"]?.coerceIn(0, 100) ?: throw SequenceScriptFormatException()
-                    val duration = args["duration"]?.coerceIn(1, MaxSequenceDurationSec)
+                    val duration = parseSequenceDuration(args)
                     RelaySequenceStep.Set(mode = mode, intensity = intensity, durationSec = duration)
                 }
                 part.startsWith("dual(") && part.endsWith(")") -> {
@@ -1413,14 +1458,14 @@ class BridgeViewModel : ViewModel() {
                             ?: throw SequenceScriptFormatException(),
                         externalIntensity = args["external"]?.coerceIn(0, 100)
                             ?: throw SequenceScriptFormatException(),
-                        durationSec = args["duration"]?.coerceIn(1, MaxSequenceDurationSec),
+                        durationSec = parseSequenceDuration(args),
                     )
                 }
                 part.startsWith("pattern(") && part.endsWith(")") -> {
                     val args = parseSequenceArguments(part.removePrefix("pattern(").removeSuffix(")"))
                     RelaySequenceStep.Pattern(
                         mode = args["mode"]?.coerceAtLeast(1) ?: throw SequenceScriptFormatException(),
-                        durationSec = args["duration"]?.coerceIn(1, MaxSequenceDurationSec),
+                        durationSec = parseSequenceDuration(args),
                     )
                 }
                 part.startsWith("intensity(") && part.endsWith(")") -> {
@@ -1429,11 +1474,20 @@ class BridgeViewModel : ViewModel() {
                         value = args["value"]?.coerceIn(0, 100)
                             ?: args["intensity"]?.coerceIn(0, 100)
                             ?: throw SequenceScriptFormatException(),
-                        durationSec = args["duration"]?.coerceIn(1, MaxSequenceDurationSec),
+                        durationSec = parseSequenceDuration(args),
                     )
                 }
                 else -> throw SequenceScriptFormatException()
             }
+        }
+    }
+
+    private fun parseSequenceDuration(args: Map<String, Int>): Int? {
+        val duration = args["duration"] ?: return null
+        return if (duration == UnlimitedSequenceDurationSec) {
+            UnlimitedSequenceDurationSec
+        } else {
+            duration.coerceIn(1, MaxSequenceDurationSec)
         }
     }
 
@@ -1454,6 +1508,7 @@ class BridgeViewModel : ViewModel() {
         autoStopSec: Int,
         address: String = selectedAddress,
         scheduleAutoStop: Boolean = true,
+        keepAliveDurationSec: Int? = autoStopSec,
     ): ToyControlAction {
         val status = protocolStatusFor(address)
         val mappedIntensity = mapIntensityPercent(intensityPercent, address)
@@ -1470,7 +1525,7 @@ class BridgeViewModel : ViewModel() {
             ToyControlStyle.PatternAndDualIntensity ->
                 ToyControlAction.DualMotor(mappedMode, mappedIntensity, mappedIntensity)
         }
-        sendToyAction(action, autoStopSec, address, scheduleAutoStop)
+        sendToyAction(action, autoStopSec, address, scheduleAutoStop, keepAliveDurationSec)
         deviceModes[address] = mappedMode
         deviceIntensities[address] = mappedIntensity
         if (status.supportsDualIntensity()) {
@@ -1499,12 +1554,13 @@ class BridgeViewModel : ViewModel() {
         autoStopSec: Int,
         address: String = selectedAddress,
         scheduleAutoStop: Boolean = true,
+        keepAliveDurationSec: Int? = autoStopSec,
     ) {
         val status = protocolStatusFor(address)
         appendLog("准备发送控制 address=$address action=$action autoStopSec=$autoStopSec protocol=${status.id.ifBlank { "<none>" }}")
         cancelAutoStop(address)
         controllerFor(address).sendAction(action)
-        startKeepAlive(action, address, autoStopSec)
+        startKeepAlive(action, address, keepAliveDurationSec)
         if (address == selectedAddress) busyHint = "设备正在运行"
         if (!scheduleAutoStop) return
         val task = Runnable {
