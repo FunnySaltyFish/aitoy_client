@@ -381,6 +381,13 @@ class AndroidBleController(
                 key = "ble_command_summary:broadcast:${protocol.status.id}:$action",
                 intervalMs = 2_000L,
             )
+            trace(
+                "广播载荷 protocol=${protocol.status.id} payload=${commands.joinToString { it.describe() }}",
+                type = "ble_broadcast_payload",
+                uploadPolicy = AiToyTraceUploadPolicy.RateLimited,
+                key = "ble_broadcast_payload:${protocol.status.id}:$action",
+                intervalMs = 2_000L,
+            )
             commands.forEach(advertiser::start)
             return
         }
@@ -433,6 +440,39 @@ class AndroidBleController(
             error = true,
         )
         activeBroadcastProtocol?.let {
+            val currentIndex = broadcastProtocolCandidates.indexOfFirst { candidate ->
+                candidate.status.id == failed.id
+            }.coerceAtLeast(0)
+            val nextIndex = (currentIndex + 1 until broadcastProtocolCandidates.size)
+                .firstOrNull { index ->
+                    broadcastProtocolCandidates[index].status.displayName !in failedProtocolNames
+                }
+            if (nextIndex != null) {
+                val next = broadcastProtocolCandidates[nextIndex]
+                activeBroadcastProtocol = next
+                activeProtocol = null
+                protocolReady = true
+                next.status.let(onProtocol)
+                updateProtocolAttempt(
+                    ProtocolAttemptStatus(
+                        success = true,
+                        title = "${next.status.displayName} 已准备好",
+                        message = "已切换协议，请从低强度再试一次",
+                        protocolName = next.status.displayName,
+                        currentIndex = nextIndex + 1,
+                        total = broadcastProtocolCandidates.size,
+                        failedNames = failedProtocolNames.toList(),
+                    ),
+                )
+                trace(
+                    "协议适配反馈 event=protocol_adapter_feedback result=switch " +
+                        "failed=${failed.id} next=${next.status.id} total=${broadcastProtocolCandidates.size}",
+                    type = "protocol_adapter_feedback",
+                    uploadPolicy = AiToyTraceUploadPolicy.Always,
+                )
+                updateState(BleConnectionState.Ready)
+                return ProtocolFallbackResult(failed, switchedToNext = true)
+            }
             protocolReady = false
             activeBroadcastProtocol = null
             activeProtocol = null
@@ -783,19 +823,24 @@ class AndroidBleController(
     private fun finishUnsupportedAfterUserFeedback() {
         val failed = failedProtocolNames.toList()
         val currentGatt = gatt
+        val totalCandidates = if (broadcastProtocolCandidates.isNotEmpty()) {
+            broadcastProtocolCandidates.size
+        } else {
+            protocolCandidates.size
+        }
         updateProtocolAttempt(
             ProtocolAttemptStatus(
                 title = "仍未适配成功",
                 message = "已尝试所有协议，目前仍不支持，请加群提交反馈，开发者会尝试支持。",
-                currentIndex = protocolCandidates.size.coerceAtLeast(failed.size),
-                total = protocolCandidates.size,
+                currentIndex = totalCandidates.coerceAtLeast(failed.size),
+                total = totalCandidates,
                 failedNames = failed,
                 exhausted = true,
             ),
         )
         trace(
             "协议适配反馈 event=protocol_adapter_feedback result=exhausted " +
-                "failed=${failed.joinToString("|")} total=${protocolCandidates.size}",
+                "failed=${failed.joinToString("|")} total=$totalCandidates",
             error = true,
         )
         activeProtocol = null
@@ -1228,6 +1273,14 @@ class AndroidBleController(
             is BleProtocolOperation.WaitForProtocolReady -> "WaitForProtocolReady timeoutMs=$timeoutMs"
             is BleProtocolOperation.Write ->
                 "Write uuid=$characteristicUuid withResponse=$withResponse bytes=${bytes.toHexString()}"
+        }
+
+    private fun BleAdvertiseOperation.describe(): String =
+        when {
+            serviceUuid.isNotBlank() -> "serviceUuid=$serviceUuid"
+            serviceDataUuid.isNotBlank() -> "serviceDataUuid=$serviceDataUuid bytes=${serviceData.toHexString()}"
+            manufacturerId != null -> "manufacturer=0x${manufacturerId.toString(16)} bytes=${manufacturerData.toHexString()}"
+            else -> "<empty>"
         }
 
     private fun BluetoothGattCharacteristic.propertiesText(): String {

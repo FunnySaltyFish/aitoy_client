@@ -145,8 +145,20 @@ internal object BleBroadcastProtocolRegistry {
         CachitoDaxiuBroadcastProtocol,
     ) + cachitoTemplateProtocols
 
-    fun resolveAll(device: ScannedBleDevice): List<BleBroadcastProtocol> =
-        protocols.filter { it.matches(device) }
+    private val shikongFallbackProtocols = listOf(
+        CachitoShikong3BroadcastProtocol,
+        CachitoShikong25BroadcastProtocol,
+        CachitoShikong4BroadcastProtocol,
+        CachitoShikong2BroadcastProtocol,
+    )
+
+    private val shikongProtocolIds = shikongFallbackProtocols.map { it.status.id }.toSet()
+
+    fun resolveAll(device: ScannedBleDevice): List<BleBroadcastProtocol> {
+        val matched = protocols.filter { it.matches(device) }
+        if (matched.none { it.status.id in shikongProtocolIds }) return matched
+        return (matched + shikongFallbackProtocols).distinctBy { it.status.id }
+    }
 
     fun resolveFirstName(device: ScannedBleDevice): String =
         resolveAll(device).firstOrNull()?.status?.displayName.orEmpty()
@@ -388,7 +400,9 @@ internal object CachitoShikong3BroadcastProtocol : BleBroadcastProtocol {
 
     private fun stop(): List<BleAdvertiseOperation> =
         listOf(
-            BleAdvertiseOperation(CachitoBroadcastCodec.finalUuid(stopTemplate())),
+            BleAdvertiseOperation(CachitoBroadcastCodec.finalUuid(suctionStopTemplate())),
+            BleAdvertiseOperation(CachitoBroadcastCodec.finalUuid(vibrationStopTemplate())),
+            BleAdvertiseOperation(CachitoBroadcastCodec.finalUuid(stopAllTemplate())),
         )
 
     private fun suctionTemplate(progress: Int): String =
@@ -397,7 +411,13 @@ internal object CachitoShikong3BroadcastProtocol : BleBroadcastProtocol {
     private fun vibrationTemplate(progress: Int): String =
         "71000B**-8100-####-0100-0A" + shikong3VibrationProgress(progress) + "1c0002"
 
-    private fun stopTemplate(): String =
+    private fun suctionStopTemplate(): String =
+        "71000B**-0200-####-0100-6400000002"
+
+    private fun vibrationStopTemplate(): String =
+        "71000B**-0100-####-0100-6400000002"
+
+    private fun stopAllTemplate(): String =
         "71000B**-0F00-####-0100-6400000002"
 
     private fun shikong3SuctionProgress(progress: Int): String {
@@ -485,7 +505,9 @@ internal object CachitoShikong25BroadcastProtocol : BleBroadcastProtocol {
 
     private fun stop(): List<BleAdvertiseOperation> =
         listOf(
-            BleAdvertiseOperation(CachitoBroadcastCodec.finalUuid(stopTemplate())),
+            BleAdvertiseOperation(CachitoBroadcastCodec.finalUuid(suctionStopTemplate())),
+            BleAdvertiseOperation(CachitoBroadcastCodec.finalUuid(vibrationStopTemplate())),
+            BleAdvertiseOperation(CachitoBroadcastCodec.finalUuid(stopAllTemplate())),
         )
 
     private fun suctionTemplate(progress: Int): String =
@@ -494,7 +516,13 @@ internal object CachitoShikong25BroadcastProtocol : BleBroadcastProtocol {
     private fun vibrationTemplate(progress: Int): String =
         "710007**-8100-####-0100-0A" + shikong25VibrationProgress(progress) + "1c0002"
 
-    private fun stopTemplate(): String =
+    private fun suctionStopTemplate(): String =
+        "710007**-0200-####-0100-6400000002"
+
+    private fun vibrationStopTemplate(): String =
+        "710007**-0100-####-0100-6400000002"
+
+    private fun stopAllTemplate(): String =
         "710007**-0F00-####-0100-6400000002"
 
     private fun shikong25SuctionProgress(progress: Int): String {

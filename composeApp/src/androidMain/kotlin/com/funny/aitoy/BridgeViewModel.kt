@@ -31,6 +31,7 @@ import com.funny.aitoy.core.kmp.toast
 import com.funny.aitoy.core.prefs.DataSaverUtils
 import com.funny.aitoy.diagnostics.AiToyCrashReporter
 import com.funny.aitoy.diagnostics.AiToyTraceEvent
+import com.funny.aitoy.diagnostics.AiToyTraceUploadPolicy
 import com.funny.aitoy.diagnostics.AiToyTraceUploader
 import com.funny.aitoy.network.OkHttpUtils
 import com.funny.aitoy.network.api.AiToyServices
@@ -1825,10 +1826,17 @@ class BridgeViewModel : ViewModel() {
     }
 
     private fun recordProtocolAdapterFeedback(result: String) {
-        appendLog(
-            "协议适配反馈 event=protocol_adapter_feedback result=$result " +
-                "deviceName=${selectedName.ifBlank { "<none>" }} address=${selectedAddress.ifBlank { "<none>" }} " +
-                "protocol=${protocolStatus.id.ifBlank { "<none>" }} name=${protocolStatus.displayName}",
+        val message = "协议适配反馈 event=protocol_adapter_feedback result=$result " +
+            "deviceName=${selectedName.ifBlank { "<none>" }} address=${selectedAddress.ifBlank { "<none>" }} " +
+            "protocol=${protocolStatus.id.ifBlank { "<none>" }} name=${protocolStatus.displayName}"
+        appendLog(message)
+        appendTrace(
+            AiToyTraceEvent(
+                message = message,
+                error = result != "success",
+                type = "protocol_adapter_feedback",
+                uploadPolicy = AiToyTraceUploadPolicy.Always,
+            )
         )
     }
 
