@@ -60,6 +60,34 @@ class KissToyProtocolTest {
         assertEquals(ToyControlStyle.DualIntensityOnly, protocol.status.controlStyle)
     }
 
+    @Test
+    fun qcttWithHistoricalKissToyRouteCanTryTutuBeforeHistoricalProtocol() {
+        val protocols = BleProtocolRegistry.resolveNativeAll(qcttHistoricalKissToyFingerprint())
+
+        assertEquals(
+            listOf("kisstoy_tutu2", "kisstoy_tutu2_kisstoy_gatt", "kisstoy_gatt"),
+            protocols.take(3).map { it.status.id },
+        )
+
+        val route = protocols.first { it.status.id == "kisstoy_tutu2_kisstoy_gatt" }
+        val init = route.initialize(qcttHistoricalKissToyFingerprint())
+        assertEquals(KISSTOY_NOTIFY_UUID, assertIs<BleProtocolOperation.SubscribeNotify>(init[0]).characteristicUuid)
+
+        val auth = route.onNotify(KISSTOY_NOTIFY_UUID, "58000102030405060708090a0b".hexBytes()).first()
+        assertEquals(KISSTOY_WRITE_UUID, assertIs<BleProtocolOperation.Write>(auth).characteristicUuid)
+    }
+
+    @Test
+    fun qcttA0d7RouteIsOfferedAsTutuCandidate() {
+        val protocols = BleProtocolRegistry.resolveNativeAll(qcttA0d7Fingerprint())
+
+        assertEquals(
+            listOf("kisstoy_tutu2", "kisstoy_tutu2_a0d7"),
+            protocols.take(2).map { it.status.id },
+        )
+        assertEquals(A0D7_NOTIFY_UUID, assertIs<BleProtocolOperation.SubscribeNotify>(protocols[1].initialize(qcttA0d7Fingerprint())[0]).characteristicUuid)
+    }
+
     private fun ByteArray.hexUpper(): String =
         joinToString("") { byte -> "%02X".format(byte.toInt() and 0xff) }
 
@@ -97,6 +125,22 @@ class KissToyProtocolTest {
         },
     )
 
+    private fun qcttHistoricalKissToyFingerprint() = BleGattFingerprint(
+        name = "QCTT",
+        manufacturerData = "0x5d6:08 00 4A 4C 41 49 53 44 4B",
+        scanRecordHex = "",
+        serviceUuids = setOf(KISSTOY_SERVICE_UUID),
+        characteristicUuids = setOf(KISSTOY_WRITE_UUID, KISSTOY_NOTIFY_UUID),
+    )
+
+    private fun qcttA0d7Fingerprint() = BleGattFingerprint(
+        name = "QCTT",
+        manufacturerData = "0x5d6:08 00 4A 4C 41 49 53 44 4B",
+        scanRecordHex = "",
+        serviceUuids = setOf(A0D7_SERVICE_UUID),
+        characteristicUuids = setOf(A0D7_WRITE_UUID, A0D7_NOTIFY_UUID),
+    )
+
     private companion object {
         val KISSTOY_SERVICE_UUID: UUID = UUID.fromString("00001000-0000-1000-8000-00805f9b34fb")
         val KISSTOY_WRITE_UUID: UUID = UUID.fromString("00001001-0000-1000-8000-00805f9b34fb")
@@ -105,5 +149,9 @@ class KissToyProtocolTest {
         val TUTU_SERVICE_UUID: UUID = UUID.fromString("0000dddd-0000-1000-8000-00805f9b34fb")
         val TUTU_WRITE_UUID: UUID = UUID.fromString("0000ddd1-0000-1000-8000-00805f9b34fb")
         val TUTU_NOTIFY_UUID: UUID = UUID.fromString("0000ddd2-0000-1000-8000-00805f9b34fb")
+
+        val A0D7_SERVICE_UUID: UUID = UUID.fromString("a0d70001-4c16-4ba7-977a-d394920e13a3")
+        val A0D7_WRITE_UUID: UUID = UUID.fromString("a0d70002-4c16-4ba7-977a-d394920e13a3")
+        val A0D7_NOTIFY_UUID: UUID = UUID.fromString("a0d70003-4c16-4ba7-977a-d394920e13a3")
     }
 }

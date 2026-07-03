@@ -110,6 +110,9 @@ internal object BleProtocolRegistry {
                     AnkniQd1GattProtocol,
                     Ankni0010Protocol,
                     KissToyTutuIIProtocol,
+                    KissToyTutuIIA0d7Protocol,
+                    KissToyTutuIIKissToyGattProtocol,
+                    KissToyTutuIIAe00Protocol,
                     AnkniYwtdProtocol,
                     KissToyProtocol,
                     WeVibeSyncLiteProtocol,
@@ -131,14 +134,15 @@ internal object BleProtocolRegistry {
         resolveAll(fingerprint).firstOrNull()
 
     internal fun resolveNative(fingerprint: BleGattFingerprint): BleDeviceProtocol? =
-        nativeProtocols.firstNotNullOfOrNull { protocol ->
+        resolveNativeAll(fingerprint).firstOrNull()
+
+    internal fun resolveNativeAll(fingerprint: BleGattFingerprint): List<BleDeviceProtocol> =
+        nativeProtocols.mapNotNull { protocol ->
             protocol.takeIf { it.matches(fingerprint) }?.createInstance(fingerprint)
         }
 
     suspend fun resolveAll(fingerprint: BleGattFingerprint): List<BleDeviceProtocol> {
-        val native = nativeProtocols.mapNotNull { protocol ->
-            protocol.takeIf { it.matches(fingerprint) }?.createInstance(fingerprint)
-        }
+        val native = resolveNativeAll(fingerprint)
         val nativeIds = native.map { it.status.id }.toSet()
         val buttplug = ButtplugConfigRepository
             .matchAll(fingerprint.toButtplugFingerprint())
@@ -2221,15 +2225,64 @@ private object SenseeCcpa10S2Protocol : BleDeviceProtocol {
     )
 }
 
-private object KissToyTutuIIProtocol : BleDeviceProtocol {
-    private val serviceUuid = uuid("0000dddd-0000-1000-8000-00805f9b34fb")
-    private val writeUuid = uuid("0000ddd1-0000-1000-8000-00805f9b34fb")
-    private val notifyUuid = uuid("0000ddd2-0000-1000-8000-00805f9b34fb")
+private data class KissToyTutuIIRoute(
+    val id: String,
+    val displayName: String,
+    val serviceUuid: UUID,
+    val writeUuid: UUID,
+    val notifyUuid: UUID,
+    val requireRouteForMatch: Boolean = true,
+)
+
+private val KissToyTutuIIProtocol = KissToyTutuIIProtocolVariant(
+    KissToyTutuIIRoute(
+        id = "kisstoy_tutu2",
+        displayName = "KissToy 突突二代",
+        serviceUuid = uuid("0000dddd-0000-1000-8000-00805f9b34fb"),
+        writeUuid = uuid("0000ddd1-0000-1000-8000-00805f9b34fb"),
+        notifyUuid = uuid("0000ddd2-0000-1000-8000-00805f9b34fb"),
+        requireRouteForMatch = false,
+    )
+)
+
+private val KissToyTutuIIA0d7Protocol = KissToyTutuIIProtocolVariant(
+    KissToyTutuIIRoute(
+        id = "kisstoy_tutu2_a0d7",
+        displayName = "KissToy 突突二代",
+        serviceUuid = uuid("a0d70001-4c16-4ba7-977a-d394920e13a3"),
+        writeUuid = uuid("a0d70002-4c16-4ba7-977a-d394920e13a3"),
+        notifyUuid = uuid("a0d70003-4c16-4ba7-977a-d394920e13a3"),
+    )
+)
+
+private val KissToyTutuIIKissToyGattProtocol = KissToyTutuIIProtocolVariant(
+    KissToyTutuIIRoute(
+        id = "kisstoy_tutu2_kisstoy_gatt",
+        displayName = "KissToy 突突二代",
+        serviceUuid = uuid("00001000-0000-1000-8000-00805f9b34fb"),
+        writeUuid = uuid("00001001-0000-1000-8000-00805f9b34fb"),
+        notifyUuid = uuid("00001002-0000-1000-8000-00805f9b34fb"),
+    )
+)
+
+private val KissToyTutuIIAe00Protocol = KissToyTutuIIProtocolVariant(
+    KissToyTutuIIRoute(
+        id = "kisstoy_tutu2_ae00",
+        displayName = "KissToy 突突二代",
+        serviceUuid = uuid("0000ae00-0000-1000-8000-00805f9b34fb"),
+        writeUuid = uuid("0000ae01-0000-1000-8000-00805f9b34fb"),
+        notifyUuid = uuid("0000ae02-0000-1000-8000-00805f9b34fb"),
+    )
+)
+
+private class KissToyTutuIIProtocolVariant(
+    private val route: KissToyTutuIIRoute,
+) : BleDeviceProtocol {
     private val aliases = listOf("QCTT", "迷路", "突突", "tutu", "tutu2", "tutuii", "kisstoytutu")
 
     override val status = BleProtocolStatus(
-        id = "kisstoy_tutu2",
-        displayName = "KissToy 突突二代",
+        id = route.id,
+        displayName = route.displayName,
         controllable = true,
         intensityMax = 100,
         supportsMode = false,
@@ -2240,39 +2293,38 @@ private object KissToyTutuIIProtocol : BleDeviceProtocol {
     )
 
     override fun matches(fingerprint: BleGattFingerprint): Boolean {
-        if (!fingerprint.serviceUuids.contains(serviceUuid)) return false
-        if (!fingerprint.characteristicUuids.contains(writeUuid)) return false
-        if (!fingerprint.characteristicUuids.contains(notifyUuid)) return false
         val name = fingerprint.name.normalizedDeviceName()
-        return aliases.any { alias -> name.contains(alias.normalizedDeviceName()) }
+        if (aliases.none { alias -> name.contains(alias.normalizedDeviceName()) }) return false
+        return !route.requireRouteForMatch || fingerprint.hasRoute(route)
     }
 
     override fun createInstance(fingerprint: BleGattFingerprint): BleDeviceProtocol =
-        KissToyTutuIIProtocolSession()
+        KissToyTutuIIProtocolSession(route, status)
 
     override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> = emptyList()
 
-    private class KissToyTutuIIProtocolSession : BleDeviceProtocol {
+    private class KissToyTutuIIProtocolSession(
+        private val route: KissToyTutuIIRoute,
+        override val status: BleProtocolStatus,
+    ) : BleDeviceProtocol {
         private var authenticated = false
 
-        override val status: BleProtocolStatus = KissToyTutuIIProtocol.status
-
         override fun matches(fingerprint: BleGattFingerprint): Boolean =
-            KissToyTutuIIProtocol.matches(fingerprint)
+            fingerprint.hasRoute(route)
 
         override fun initialize(fingerprint: BleGattFingerprint): List<BleProtocolOperation> =
             listOf(
-                BleProtocolOperation.SubscribeNotify(notifyUuid),
-                BleProtocolOperation.WaitForProtocolReady(AUTH_TIMEOUT_MS),
+                BleProtocolOperation.SubscribeNotify(route.notifyUuid),
+                BleProtocolOperation.WaitForProtocolReady(KISS_TOY_TUTU_AUTH_TIMEOUT_MS),
             )
 
         override fun onNotify(characteristicUuid: UUID, bytes: ByteArray): List<BleProtocolOperation> {
-            if (characteristicUuid != notifyUuid || authenticated) return emptyList()
-            if (bytes.size < AUTH_CHALLENGE_SIZE || bytes[0] != PACKET_PREFIX) return emptyList()
+            if (characteristicUuid != route.notifyUuid || authenticated) return emptyList()
+            if (bytes.size < KISS_TOY_TUTU_AUTH_CHALLENGE_SIZE || bytes[0] != KISS_TOY_TUTU_PACKET_PREFIX) return emptyList()
             authenticated = true
             return listOf(
                 write(authPacket(bytes)),
-                BleProtocolOperation.Sleep(AUTH_SETTLE_MS),
+                BleProtocolOperation.Sleep(KISS_TOY_TUTU_AUTH_SETTLE_MS),
             )
         }
 
@@ -2291,47 +2343,60 @@ private object KissToyTutuIIProtocol : BleDeviceProtocol {
             listOf(
                 write(
                     motorPacket(
-                        stretchIntensity.scalePercentTo(max = MOTOR1_MAX),
-                        vibrateIntensity.scalePercentTo(max = MOTOR2_MAX),
+                        stretchIntensity.scaleKissToyTutuPercent(
+                            max = KISS_TOY_TUTU_MOTOR1_MAX,
+                            intensityMax = status.intensityMax,
+                        ),
+                        vibrateIntensity.scaleKissToyTutuPercent(
+                            max = KISS_TOY_TUTU_MOTOR2_MAX,
+                            intensityMax = status.intensityMax,
+                        ),
                     )
                 )
             )
 
         private fun authPacket(challenge: ByteArray): ByteArray =
-            byteArrayOf(PACKET_PREFIX) + challenge.copyOfRange(1, AUTH_CHALLENGE_SIZE).xorFixedKey()
+            byteArrayOf(KISS_TOY_TUTU_PACKET_PREFIX) +
+                challenge.copyOfRange(1, KISS_TOY_TUTU_AUTH_CHALLENGE_SIZE).xorKissToyTutuFixedKey()
 
         private fun motorPacket(motor1: Int, motor2: Int): ByteArray {
-            val plain = MOTOR_PLAINTEXT_BASE.copyOf()
+            val plain = KISS_TOY_TUTU_MOTOR_PLAINTEXT_BASE.copyOf()
             plain[4] = motor1.coerceIn(0, 255).toByte()
             plain[5] = motor2.coerceIn(0, 255).toByte()
-            return byteArrayOf(PACKET_PREFIX) + plain.xorFixedKey()
+            return byteArrayOf(KISS_TOY_TUTU_PACKET_PREFIX) + plain.xorKissToyTutuFixedKey()
         }
 
         private fun write(bytes: ByteArray): BleProtocolOperation.Write =
             BleProtocolOperation.Write(
-                characteristicUuid = writeUuid,
+                characteristicUuid = route.writeUuid,
                 bytes = bytes,
                 withResponse = false,
             )
     }
 
-    private fun Int.scalePercentTo(max: Int): Int =
-        (coerceIn(0, status.intensityMax) * max / status.intensityMax.coerceAtLeast(1)).coerceIn(0, max)
-
-    private fun ByteArray.xorFixedKey(): ByteArray =
-        ByteArray(size.coerceAtMost(K_FIXED.size)) { index ->
-            (this[index].toInt() xor K_FIXED[index].toInt()).toByte()
-        }
-
-    private val K_FIXED = bytes(0xea, 0x30, 0xbb, 0xdb, 0xad, 0xb6, 0xc6, 0x2f, 0xcf, 0xe9, 0xe9, 0x96)
-    private val MOTOR_PLAINTEXT_BASE = bytes(0x15, 0x31, 0xb9, 0x00, 0x00, 0x00, 0x00, 0xd0, 0x00, 0x16, 0x16, 0x69)
-    private const val PACKET_PREFIX: Byte = 0x58
-    private const val AUTH_CHALLENGE_SIZE = 13
-    private const val AUTH_TIMEOUT_MS = 4_000L
-    private const val AUTH_SETTLE_MS = 1_000L
-    private const val MOTOR1_MAX = 82
-    private const val MOTOR2_MAX = 73
 }
+
+private fun BleGattFingerprint.hasRoute(route: KissToyTutuIIRoute): Boolean =
+    serviceUuids.contains(route.serviceUuid) &&
+        characteristicUuids.contains(route.writeUuid) &&
+        characteristicUuids.contains(route.notifyUuid)
+
+private fun Int.scaleKissToyTutuPercent(max: Int, intensityMax: Int): Int =
+    (coerceIn(0, intensityMax) * max / intensityMax.coerceAtLeast(1)).coerceIn(0, max)
+
+private fun ByteArray.xorKissToyTutuFixedKey(): ByteArray =
+    ByteArray(size.coerceAtMost(KISS_TOY_TUTU_FIXED_KEY.size)) { index ->
+        (this[index].toInt() xor KISS_TOY_TUTU_FIXED_KEY[index].toInt()).toByte()
+    }
+
+private val KISS_TOY_TUTU_FIXED_KEY = bytes(0xea, 0x30, 0xbb, 0xdb, 0xad, 0xb6, 0xc6, 0x2f, 0xcf, 0xe9, 0xe9, 0x96)
+private val KISS_TOY_TUTU_MOTOR_PLAINTEXT_BASE = bytes(0x15, 0x31, 0xb9, 0x00, 0x00, 0x00, 0x00, 0xd0, 0x00, 0x16, 0x16, 0x69)
+private const val KISS_TOY_TUTU_PACKET_PREFIX: Byte = 0x58
+private const val KISS_TOY_TUTU_AUTH_CHALLENGE_SIZE = 13
+private const val KISS_TOY_TUTU_AUTH_TIMEOUT_MS = 4_000L
+private const val KISS_TOY_TUTU_AUTH_SETTLE_MS = 1_000L
+private const val KISS_TOY_TUTU_MOTOR1_MAX = 82
+private const val KISS_TOY_TUTU_MOTOR2_MAX = 73
 
 private object KissToyProtocol : BleDeviceProtocol {
     private val serviceUuid = uuid("00001000-0000-1000-8000-00805f9b34fb")
