@@ -67,6 +67,7 @@ class RelayClient(
     private var lastUserToken = ""
     private var userRequestedOnline = false
     private var connecting = false
+    private var onlineConfirmed = false
     private var retryCount = 0
     private var connectionGeneration = 0
     private val reconnect = Runnable {
@@ -86,6 +87,8 @@ class RelayClient(
                 mainHandler.postDelayed(this, HEARTBEAT_INTERVAL_MS)
             } else {
                 trace("AI 伙伴保活失败，正在准备重连", error = true, type = "relay_heartbeat_failed")
+                onlineConfirmed = false
+                emitState("等待重连")
                 currentSocket.cancel()
                 if (socket === currentSocket) socket = null
                 scheduleReconnect()
@@ -105,6 +108,7 @@ class RelayClient(
         stopHeartbeat()
         socket?.close(1000, "Reconnect")
         socket = null
+        onlineConfirmed = false
         if (resetRetry) retryCount = 0
         connecting = true
         val generation = ++connectionGeneration
@@ -119,13 +123,14 @@ class RelayClient(
                 override fun onOpen(webSocket: WebSocket, response: Response) {
                     if (generation != connectionGeneration) return
                     connecting = false
+                    onlineConfirmed = false
                     retryCount = 0
                     trace(
-                        "AI 伙伴已在线",
-                        type = "relay_online",
+                        "AI 伙伴连接已建立，正在同步设备",
+                        type = "relay_socket_open",
                         uploadPolicy = AiToyTraceUploadPolicy.SessionOnce,
                     )
-                    emitState("已在线")
+                    emitState("正在同步")
                     startHeartbeat()
                 }
 
@@ -156,6 +161,17 @@ class RelayClient(
                         }
 
                         "heartbeat_ack" -> Unit
+                        "device_status_ack" -> {
+                            if (onlineConfirmed) return
+                            onlineConfirmed = true
+                            trace(
+                                "AI 伙伴已在线",
+                                type = "relay_online",
+                                uploadPolicy = AiToyTraceUploadPolicy.SessionOnce,
+                            )
+                            retryCount = 0
+                            emitState("已在线")
+                        }
                         else -> trace("AI 伙伴收到消息 type=$messageType")
                     }
                 }
@@ -171,6 +187,7 @@ class RelayClient(
                     stopHeartbeat()
                     socket = null
                     connecting = false
+                    onlineConfirmed = false
                     if (userRequestedOnline) {
                         trace(
                             "AI 伙伴连接已断开，正在准备重连",
@@ -194,6 +211,7 @@ class RelayClient(
                     stopHeartbeat()
                     socket = null
                     connecting = false
+                    onlineConfirmed = false
                     trace("AI 伙伴连接中断：${t.message ?: "网络不可用"}", error = true)
                     if (userRequestedOnline) {
                         emitState("等待重连")
@@ -272,6 +290,7 @@ class RelayClient(
     fun disconnect() {
         userRequestedOnline = false
         connecting = false
+        onlineConfirmed = false
         retryCount = 0
         connectionGeneration += 1
         mainHandler.removeCallbacks(reconnect)
@@ -293,6 +312,8 @@ class RelayClient(
         val accepted = currentSocket?.send(text) == true
         trace("AI 伙伴同步状态 accepted=$accepted payload=$text")
         if (!accepted) {
+            onlineConfirmed = false
+            emitState("等待重连")
             onTrace(
                 AiToyTraceEvent(
                     message = "AI 伙伴同步状态 accepted=false",

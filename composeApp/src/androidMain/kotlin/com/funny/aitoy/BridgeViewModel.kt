@@ -436,9 +436,12 @@ class BridgeViewModel : ViewModel() {
     private val relay = RelayClient(
         onState = {
             relayState = it
-            if (it == "已在线") {
-                syncRelayDevice()
-                toast("手机已上线", ToastType.Success)
+            when (it) {
+                "正在同步" -> syncRelayDevice()
+                "已在线" -> {
+                    syncRelayDevice()
+                    toast("手机已上线", ToastType.Success)
+                }
             }
         },
         onLog = ::appendLog,
