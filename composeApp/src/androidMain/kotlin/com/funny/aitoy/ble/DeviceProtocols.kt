@@ -112,6 +112,7 @@ internal object BleProtocolRegistry {
                     Ankni0010Protocol,
                     KissToyTutuIIProtocol,
                     KissToyTutuIIA0d7Protocol,
+                    KissToyTutuIIAe3aProtocol,
                     KissToyTutuIIKissToyGattProtocol,
                     KissToyTutuIIAe00Protocol,
                     AnkniYwtdProtocol,
@@ -2352,6 +2353,16 @@ private val KissToyTutuIIA0d7Protocol = KissToyTutuIIProtocolVariant(
         serviceUuid = uuid("a0d70001-4c16-4ba7-977a-d394920e13a3"),
         writeUuid = uuid("a0d70002-4c16-4ba7-977a-d394920e13a3"),
         notifyUuid = uuid("a0d70003-4c16-4ba7-977a-d394920e13a3"),
+    )
+)
+
+private val KissToyTutuIIAe3aProtocol = KissToyTutuIIProtocolVariant(
+    KissToyTutuIIRoute(
+        id = "kisstoy_tutu2_ae3a",
+        displayName = "KissToy 突突二代",
+        serviceUuid = uuid("0000ae3a-0000-1000-8000-00805f9b34fb"),
+        writeUuid = uuid("0000ae3b-0000-1000-8000-00805f9b34fb"),
+        notifyUuid = uuid("0000ae3c-0000-1000-8000-00805f9b34fb"),
     )
 )
 

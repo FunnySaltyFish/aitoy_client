@@ -89,6 +89,23 @@ class KissToyProtocolTest {
     }
 
     @Test
+    fun qcttLiveGattSummaryPrefersAe3aTutuRoute() {
+        val protocols = BleProtocolRegistry.resolveNativeAll(qcttLiveAe3aFingerprint())
+
+        assertEquals(
+            listOf("kisstoy_tutu2_ae3a", "kisstoy_tutu2_kisstoy_gatt", "kisstoy_tutu2_ae00", "kisstoy_gatt"),
+            protocols.map { it.status.id },
+        )
+
+        val route = protocols.first()
+        val init = route.initialize(qcttLiveAe3aFingerprint())
+        assertEquals(AE3A_NOTIFY_UUID, assertIs<BleProtocolOperation.SubscribeNotify>(init[0]).characteristicUuid)
+
+        val auth = route.onNotify(AE3A_NOTIFY_UUID, "58000102030405060708090a0b".hexBytes()).first()
+        assertEquals(AE3A_WRITE_UUID, assertIs<BleProtocolOperation.Write>(auth).characteristicUuid)
+    }
+
+    @Test
     fun qcttNameAloneDoesNotSelectTutuRoute() {
         val protocol = BleProtocolRegistry.resolveNative(qcttNameOnlyFingerprint())
 
@@ -148,6 +165,21 @@ class KissToyProtocolTest {
         characteristicUuids = setOf(A0D7_WRITE_UUID, A0D7_NOTIFY_UUID),
     )
 
+    private fun qcttLiveAe3aFingerprint() = BleGattFingerprint(
+        name = "QCTT",
+        manufacturerData = "0x5d6:08 00 4A 4C 41 49 53 44 4B",
+        scanRecordHex = "",
+        serviceUuids = setOf(KISSTOY_SERVICE_UUID, AE3A_SERVICE_UUID, AE00_SERVICE_UUID),
+        characteristicUuids = setOf(
+            KISSTOY_WRITE_UUID,
+            KISSTOY_NOTIFY_UUID,
+            AE3A_WRITE_UUID,
+            AE3A_NOTIFY_UUID,
+            AE00_WRITE_UUID,
+            AE00_NOTIFY_UUID,
+        ),
+    )
+
     private fun qcttNameOnlyFingerprint() = BleGattFingerprint(
         name = "QCTT",
         manufacturerData = "0x5d6:08 00 4A 4C 41 49 53 44 4B",
@@ -168,5 +200,13 @@ class KissToyProtocolTest {
         val A0D7_SERVICE_UUID: UUID = UUID.fromString("a0d70001-4c16-4ba7-977a-d394920e13a3")
         val A0D7_WRITE_UUID: UUID = UUID.fromString("a0d70002-4c16-4ba7-977a-d394920e13a3")
         val A0D7_NOTIFY_UUID: UUID = UUID.fromString("a0d70003-4c16-4ba7-977a-d394920e13a3")
+
+        val AE3A_SERVICE_UUID: UUID = UUID.fromString("0000ae3a-0000-1000-8000-00805f9b34fb")
+        val AE3A_WRITE_UUID: UUID = UUID.fromString("0000ae3b-0000-1000-8000-00805f9b34fb")
+        val AE3A_NOTIFY_UUID: UUID = UUID.fromString("0000ae3c-0000-1000-8000-00805f9b34fb")
+
+        val AE00_SERVICE_UUID: UUID = UUID.fromString("0000ae00-0000-1000-8000-00805f9b34fb")
+        val AE00_WRITE_UUID: UUID = UUID.fromString("0000ae01-0000-1000-8000-00805f9b34fb")
+        val AE00_NOTIFY_UUID: UUID = UUID.fromString("0000ae02-0000-1000-8000-00805f9b34fb")
     }
 }
