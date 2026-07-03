@@ -44,6 +44,7 @@ class AndroidBleController(
     private var gatt: BluetoothGatt? = null
     private var template: ProtocolTemplate? = null
     private var connectedName = ""
+    private var connectedAddress = ""
     private var connectedManufacturerData = ""
     private var connectedScanRecordHex = ""
     private var activeProtocol: BleDeviceProtocol? = null
@@ -183,6 +184,7 @@ class AndroidBleController(
             val config = template ?: return
             val fingerprint = BleGattFingerprint(
                 name = connectedName,
+                address = connectedAddress,
                 manufacturerData = connectedManufacturerData,
                 scanRecordHex = connectedScanRecordHex,
                 serviceUuids = gatt.services.map { it.uuid }.toSet(),
@@ -295,6 +297,7 @@ class AndroidBleController(
         stopScan()
         disconnect()
         connectedName = device.name
+        connectedAddress = device.address
         connectedManufacturerData = device.manufacturerData
         connectedScanRecordHex = device.scanRecordHex
         template = protocolTemplate
@@ -495,6 +498,7 @@ class AndroidBleController(
         operationInProgress = false
         val fingerprint = BleGattFingerprint(
             name = connectedName,
+            address = connectedAddress,
             manufacturerData = connectedManufacturerData,
             scanRecordHex = connectedScanRecordHex,
             serviceUuids = currentGatt.services.map { it.uuid }.toSet(),
@@ -1155,6 +1159,7 @@ class AndroidBleController(
             if (currentGatt != null && currentTemplate != null) {
                 val fingerprint = BleGattFingerprint(
                     name = connectedName,
+                    address = connectedAddress,
                     manufacturerData = connectedManufacturerData,
                     scanRecordHex = connectedScanRecordHex,
                     serviceUuids = currentGatt.services.map { it.uuid }.toSet(),

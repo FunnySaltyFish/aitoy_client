@@ -70,6 +70,7 @@ internal sealed interface BleProtocolOperation {
 
 internal data class BleGattFingerprint(
     val name: String,
+    val address: String = "",
     val manufacturerData: String,
     val scanRecordHex: String,
     val serviceUuids: Set<UUID>,
@@ -126,6 +127,7 @@ internal object BleProtocolRegistry {
                     MizzzeeXhtkjProtocol,
                     SenseeCcpa10S2Protocol,
                     OhMiBodEsca2Protocol,
+                    XiuxiudaOfficialProtocol,
                     PinkPunchProtocol,
                     LovenutsProtocol,
                 )
@@ -2159,6 +2161,105 @@ private object MizzzeeXhtkjProtocol : BleDeviceProtocol {
     }
 }
 
+private object XiuxiudaOfficialProtocol : BleDeviceProtocol {
+    private val serviceUuid = uuid("53300001-0023-4bd4-bbd5-a6920e4c5653")
+    private val notifyUuid = uuid("53300002-0023-4bd4-bbd5-a6920e4c5653")
+    private val writeUuid = uuid("53300003-0023-4bd4-bbd5-a6920e4c5653")
+    private val highPowerNames = setOf(
+        "XXD-Lush12C",
+        "XXD-Lush12D",
+        "XXD-Lush12E",
+        "XXD-Lush12L",
+        "XXD-Lush12R",
+        "XXD-Lush12S",
+        "XXD-Lush12T",
+        "XXD-Lush12V",
+        "XXD-Lush141",
+        "XXD-Lush142",
+        "XXD-Lush143",
+        "XXD-Lush144",
+        "XXD-Lush145",
+        "XXD-Lush146",
+        "XXD-Lush149",
+        "XXD-Lush14E",
+    ).map { it.normalizedDeviceName() }.toSet()
+
+    override val status = BleProtocolStatus(
+        id = "xiuxiuda_official",
+        displayName = "羞羞哒",
+        controllable = true,
+        intensityMax = 19,
+        supportsMode = false,
+        controlStyle = ToyControlStyle.IntensityOnly,
+        intensityLabel = "强度",
+        automatic = true,
+    )
+
+    override fun matches(fingerprint: BleGattFingerprint): Boolean {
+        val name = fingerprint.name.normalizedDeviceName()
+        return name.startsWith("xxdlush") &&
+                fingerprint.address.xiuxiudaAddressPrefix() != null &&
+                fingerprint.serviceUuids.contains(serviceUuid) &&
+                fingerprint.characteristicUuids.contains(writeUuid)
+    }
+
+    override fun initialize(fingerprint: BleGattFingerprint): List<BleProtocolOperation> =
+        buildList {
+            if (fingerprint.characteristicUuids.contains(notifyUuid)) {
+                add(BleProtocolOperation.SubscribeNotify(notifyUuid))
+                add(write(fingerprint, command(0x65, 0x3D, 0x33, 0x01)))
+                add(BleProtocolOperation.Sleep(300))
+            }
+            add(write(fingerprint, controlCommand(fingerprint.name, 0)))
+        }
+
+    override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> = emptyList()
+
+    override fun createInstance(fingerprint: BleGattFingerprint): BleDeviceProtocol =
+        Session(fingerprint)
+
+    private class Session(
+        private val fingerprint: BleGattFingerprint,
+    ) : BleDeviceProtocol {
+        override val status: BleProtocolStatus = XiuxiudaOfficialProtocol.status
+
+        override fun matches(fingerprint: BleGattFingerprint): Boolean =
+            XiuxiudaOfficialProtocol.matches(fingerprint)
+
+        override fun initialize(fingerprint: BleGattFingerprint): List<BleProtocolOperation> =
+            XiuxiudaOfficialProtocol.initialize(fingerprint)
+
+        override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
+            when (action) {
+                is ToyControlAction.Intensity -> listOf(write(fingerprint, controlCommand(fingerprint.name, action.value)))
+                is ToyControlAction.Combined -> listOf(write(fingerprint, controlCommand(fingerprint.name, action.intensity)))
+                is ToyControlAction.DualMotor -> listOf(write(fingerprint, controlCommand(fingerprint.name, action.strongestIntensity(status.intensityMax))))
+                is ToyControlAction.Pattern -> listOf(write(fingerprint, controlCommand(fingerprint.name, status.intensityMax)))
+                ToyControlAction.Stop -> listOf(write(fingerprint, controlCommand(fingerprint.name, 0)))
+            }
+    }
+
+    private fun controlCommand(name: String, intensity: Int): IntArray {
+        val normalizedName = name.normalizedDeviceName()
+        val gear = intensity.coerceIn(0, status.intensityMax)
+        return if (normalizedName in highPowerNames) {
+            command(0x95, 0x3C, 0x30, gear)
+        } else {
+            command(0x65, 0x3A, 0x30, gear)
+        }
+    }
+
+    private fun write(fingerprint: BleGattFingerprint, command: IntArray): BleProtocolOperation.Write =
+        BleProtocolOperation.Write(
+            characteristicUuid = writeUuid,
+            bytes = fingerprint.address.xiuxiudaPacket(command),
+            withResponse = false,
+        )
+
+    private fun command(logo: Int, category1: Int, category2: Int, gear: Int): IntArray =
+        intArrayOf(logo, category1, category2, gear)
+}
+
 private object SenseeCcpa10S2Protocol : BleDeviceProtocol {
     private val serviceUuid = uuid("0000fff0-0000-1000-8000-00805f9b34fb")
     private val writeUuid = uuid("0000fff5-0000-1000-8000-00805f9b34fb")
@@ -3332,6 +3433,29 @@ private fun BleGattFingerprint.hasAnkniDdddGatt(): Boolean =
     serviceUuids.contains(uuid("0000dddd-0000-1000-8000-00805f9b34fb")) &&
             characteristicUuids.contains(uuid("0000ddd1-0000-1000-8000-00805f9b34fb")) &&
             characteristicUuids.contains(uuid("0000ddd2-0000-1000-8000-00805f9b34fb"))
+
+private fun String.xiuxiudaPacket(command: IntArray): ByteArray {
+    require(command.size == 4) { "羞羞哒指令必须是 4 字节" }
+    val prefix = requireNotNull(xiuxiudaAddressPrefix()) { "羞羞哒设备地址无效" }
+    val payload = prefix + command.map { it.coerceIn(0, 0xFF) }
+    val checksum = payload.fold(0) { acc, value -> acc xor value }
+    return (payload + checksum).map { it.toByte() }.toByteArray()
+}
+
+private fun String.xiuxiudaAddressPrefix(): IntArray? {
+    val addressBytes = split(':')
+        .takeIf { it.size == 6 }
+        ?.map { part -> part.toIntOrNull(16) ?: return null }
+        ?: return null
+    val key = 0x04 xor addressBytes.fold(0) { acc, value -> acc xor value }
+    val high = (key ushr 4) and 0x0F
+    val low = key and 0x0F
+    val z1 = 0x80 or high
+    val z2 = 0x80 or low
+    val z3 = key
+    val z4 = z1 xor z2 xor z3
+    return intArrayOf(z1, z2, z3, z4)
+}
 
 private fun String.firstManufacturerByte(): Int? {
     val payload = substringAfter(':', missingDelimiterValue = this)
