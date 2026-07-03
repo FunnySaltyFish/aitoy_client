@@ -65,8 +65,8 @@ class KissToyProtocolTest {
         val protocols = BleProtocolRegistry.resolveNativeAll(qcttHistoricalKissToyFingerprint())
 
         assertEquals(
-            listOf("kisstoy_tutu2", "kisstoy_tutu2_kisstoy_gatt", "kisstoy_gatt"),
-            protocols.take(3).map { it.status.id },
+            listOf("kisstoy_tutu2_kisstoy_gatt", "kisstoy_gatt"),
+            protocols.take(2).map { it.status.id },
         )
 
         val route = protocols.first { it.status.id == "kisstoy_tutu2_kisstoy_gatt" }
@@ -82,10 +82,17 @@ class KissToyProtocolTest {
         val protocols = BleProtocolRegistry.resolveNativeAll(qcttA0d7Fingerprint())
 
         assertEquals(
-            listOf("kisstoy_tutu2", "kisstoy_tutu2_a0d7"),
-            protocols.take(2).map { it.status.id },
+            listOf("kisstoy_tutu2_a0d7"),
+            protocols.map { it.status.id },
         )
-        assertEquals(A0D7_NOTIFY_UUID, assertIs<BleProtocolOperation.SubscribeNotify>(protocols[1].initialize(qcttA0d7Fingerprint())[0]).characteristicUuid)
+        assertEquals(A0D7_NOTIFY_UUID, assertIs<BleProtocolOperation.SubscribeNotify>(protocols[0].initialize(qcttA0d7Fingerprint())[0]).characteristicUuid)
+    }
+
+    @Test
+    fun qcttNameAloneDoesNotSelectTutuRoute() {
+        val protocol = BleProtocolRegistry.resolveNative(qcttNameOnlyFingerprint())
+
+        assertEquals(null, protocol)
     }
 
     private fun ByteArray.hexUpper(): String =
@@ -139,6 +146,14 @@ class KissToyProtocolTest {
         scanRecordHex = "",
         serviceUuids = setOf(A0D7_SERVICE_UUID),
         characteristicUuids = setOf(A0D7_WRITE_UUID, A0D7_NOTIFY_UUID),
+    )
+
+    private fun qcttNameOnlyFingerprint() = BleGattFingerprint(
+        name = "QCTT",
+        manufacturerData = "0x5d6:08 00 4A 4C 41 49 53 44 4B",
+        scanRecordHex = "",
+        serviceUuids = emptySet(),
+        characteristicUuids = emptySet(),
     )
 
     private companion object {

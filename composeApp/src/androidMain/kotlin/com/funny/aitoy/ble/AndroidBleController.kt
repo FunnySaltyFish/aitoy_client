@@ -177,6 +177,15 @@ class AndroidBleController(
                     )
                 }
             }
+            if (status == BluetoothGatt.GATT_SUCCESS && shouldUploadGattDiscoverySummary()) {
+                trace(
+                    "GATT 能力摘要 name=$connectedName address=${gatt.device.address} " +
+                        "services=${gatt.gattDiscoverySummary()}",
+                    type = "ble_gatt_discovery_summary",
+                    uploadPolicy = AiToyTraceUploadPolicy.Always,
+                    key = "ble_gatt_discovery_summary:$operationId",
+                )
+            }
             if (status != BluetoothGatt.GATT_SUCCESS) {
                 updateState(BleConnectionState.Error)
                 return
@@ -1298,6 +1307,23 @@ class AndroidBleController(
         }
         return names.joinToString(prefix = "[", postfix = "]").ifBlank { "[]" }
     }
+
+    private fun shouldUploadGattDiscoverySummary(): Boolean {
+        val probe = "$connectedName $connectedManufacturerData $connectedScanRecordHex".lowercase()
+        return listOf("qctt", "kisstoy", "tutu", "tutuii", "突突", "迷路", "4a 4c 41 49 53 44 4b")
+            .any(probe::contains)
+    }
+
+    private fun BluetoothGatt.gattDiscoverySummary(): String =
+        services.joinToString("; ") { service ->
+            val characteristics = service.characteristics.joinToString(",") { characteristic ->
+                val descriptors = characteristic.descriptors
+                    .joinToString(prefix = "{", postfix = "}") { descriptor -> descriptor.uuid.toString() }
+                "${characteristic.uuid}@0x${characteristic.instanceId.toString(16)}" +
+                    ":0x${characteristic.properties.toString(16)}$descriptors"
+            }
+            "${service.uuid}[$characteristics]"
+        }
 
     private fun String.toUuidOrNull(): UUID? = trim().takeIf { it.isNotEmpty() }?.let {
         runCatching { UUID.fromString(it) }.getOrNull()

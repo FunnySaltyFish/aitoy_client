@@ -2342,7 +2342,6 @@ private val KissToyTutuIIProtocol = KissToyTutuIIProtocolVariant(
         serviceUuid = uuid("0000dddd-0000-1000-8000-00805f9b34fb"),
         writeUuid = uuid("0000ddd1-0000-1000-8000-00805f9b34fb"),
         notifyUuid = uuid("0000ddd2-0000-1000-8000-00805f9b34fb"),
-        requireRouteForMatch = false,
     )
 )
 
@@ -2379,8 +2378,6 @@ private val KissToyTutuIIAe00Protocol = KissToyTutuIIProtocolVariant(
 private class KissToyTutuIIProtocolVariant(
     private val route: KissToyTutuIIRoute,
 ) : BleDeviceProtocol {
-    private val aliases = listOf("QCTT", "迷路", "突突", "tutu", "tutu2", "tutuii", "kisstoytutu")
-
     override val status = BleProtocolStatus(
         id = route.id,
         displayName = route.displayName,
@@ -2394,8 +2391,7 @@ private class KissToyTutuIIProtocolVariant(
     )
 
     override fun matches(fingerprint: BleGattFingerprint): Boolean {
-        val name = fingerprint.name.normalizedDeviceName()
-        if (aliases.none { alias -> name.contains(alias.normalizedDeviceName()) }) return false
+        if (!fingerprint.hasKissToyTutuName()) return false
         return !route.requireRouteForMatch || fingerprint.hasRoute(route)
     }
 
@@ -2482,6 +2478,11 @@ private fun BleGattFingerprint.hasRoute(route: KissToyTutuIIRoute): Boolean =
         characteristicUuids.contains(route.writeUuid) &&
         characteristicUuids.contains(route.notifyUuid)
 
+private fun BleGattFingerprint.hasKissToyTutuName(): Boolean {
+    val normalizedName = name.normalizedDeviceName()
+    return KISS_TOY_TUTU_ALIASES.any { alias -> normalizedName.contains(alias) }
+}
+
 private fun Int.scaleKissToyTutuPercent(max: Int, intensityMax: Int): Int =
     (coerceIn(0, intensityMax) * max / intensityMax.coerceAtLeast(1)).coerceIn(0, max)
 
@@ -2498,6 +2499,8 @@ private const val KISS_TOY_TUTU_AUTH_TIMEOUT_MS = 4_000L
 private const val KISS_TOY_TUTU_AUTH_SETTLE_MS = 1_000L
 private const val KISS_TOY_TUTU_MOTOR1_MAX = 82
 private const val KISS_TOY_TUTU_MOTOR2_MAX = 73
+private val KISS_TOY_TUTU_ALIASES = listOf("QCTT", "迷路", "突突", "tutu", "tutu2", "tutuii", "kisstoytutu")
+    .map { it.normalizedDeviceName() }
 
 private object KissToyProtocol : BleDeviceProtocol {
     private val serviceUuid = uuid("00001000-0000-1000-8000-00805f9b34fb")
@@ -2720,8 +2723,13 @@ private object OhMiBodEsca2Protocol : BleDeviceProtocol {
         automatic = true,
     )
 
-    override fun matches(fingerprint: BleGattFingerprint): Boolean =
-        fingerprint.characteristicUuids.contains(writeUuid)
+    override fun matches(fingerprint: BleGattFingerprint): Boolean {
+        val name = fingerprint.name.normalizedDeviceName()
+        val knownName = name.contains("ohmibod") || name.contains("esca")
+        return knownName &&
+            !fingerprint.hasKissToyTutuName() &&
+            fingerprint.characteristicUuids.contains(writeUuid)
+    }
 
     override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
         when (action) {
