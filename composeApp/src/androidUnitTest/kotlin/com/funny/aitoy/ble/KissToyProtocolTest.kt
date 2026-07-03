@@ -49,6 +49,17 @@ class KissToyProtocolTest {
         assertEquals(TUTU_WRITE_UUID, write.characteristicUuid)
         assertFalse(write.withResponse)
         assertEquals("58FF0102DB8492C6FFCFFFFFFF", write.bytes.hexUpper())
+
+        assertEquals(200L, protocol.keepaliveIntervalMs())
+
+        val stop = protocol.commandsFor(ToyControlAction.Stop)
+        assertEquals(5, stop.size)
+        val stopWrites = stop.filterIsInstance<BleProtocolOperation.Write>()
+        assertEquals(3, stopWrites.size)
+        stopWrites.forEach {
+            assertEquals(TUTU_WRITE_UUID, it.characteristicUuid)
+            assertEquals("58FF0102DBADB6C6FFCFFFFFFF", it.bytes.hexUpper())
+        }
     }
 
     @Test

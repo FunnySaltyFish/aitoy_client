@@ -1219,7 +1219,10 @@ class BridgeViewModel : ViewModel() {
                     mode = if (isCurrent) mode else deviceModes[address] ?: 1,
                     intensityMax = status.intensityMax,
                     modeMax = status.modeMax,
+                    modeLabel = status.modeLabel,
                     modeNames = status.modeNames,
+                    intensityLabel = status.intensityLabel,
+                    channelNames = status.channelNames,
                     controlStyle = status.controlStyle.name,
                     batteryPercent = if (deviceConnectionStates[address] == BleConnectionState.Ready) {
                         deviceBatteryPercents[address]

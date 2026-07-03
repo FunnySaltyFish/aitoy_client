@@ -37,7 +37,10 @@ data class RelayDevice(
     val mode: Int,
     val intensityMax: Int,
     val modeMax: Int,
+    val modeLabel: String = "模式",
     val modeNames: List<String> = emptyList(),
+    val intensityLabel: String = "强度",
+    val channelNames: List<String> = emptyList(),
     val controlStyle: String,
     val batteryPercent: Int? = null,
     val features: List<RelayDeviceFeature> = emptyList(),
@@ -248,7 +251,10 @@ class RelayClient(
                             .put("mode", device.mode)
                             .put("intensityMax", device.intensityMax)
                             .put("modeMax", device.modeMax)
+                            .put("modeLabel", device.modeLabel)
                             .put("modeNames", JSONArray(device.modeNames))
+                            .put("intensityLabel", device.intensityLabel)
+                            .put("channelNames", JSONArray(device.channelNames))
                             .put("controlStyle", device.controlStyle)
                             .put(
                                 "features",

@@ -2399,6 +2399,7 @@ private class KissToyTutuIIProtocolVariant(
         intensityLabel = "强度",
         channelNames = listOf("伸缩", "震动"),
         automatic = true,
+        repeatIntervalMs = KISS_TOY_TUTU_REPEAT_MS,
     )
 
     override fun matches(fingerprint: BleGattFingerprint): Boolean {
@@ -2438,17 +2439,20 @@ private class KissToyTutuIIProtocolVariant(
 
         override fun isProtocolReady(): Boolean = authenticated
 
+        override fun keepaliveIntervalMs(): Long = KISS_TOY_TUTU_REPEAT_MS.toLong()
+
         override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
             when (action) {
                 is ToyControlAction.DualMotor -> runDual(action.internalIntensity, action.externalIntensity)
                 is ToyControlAction.Intensity -> runDual(action.value, action.value)
                 is ToyControlAction.Combined -> runDual(action.intensity, action.intensity)
                 is ToyControlAction.Pattern -> runDual(50, 50)
-                ToyControlAction.Stop -> runDual(0, 0)
+                ToyControlAction.Stop -> stopBurst()
             }
 
-        private fun runDual(stretchIntensity: Int, vibrateIntensity: Int): List<BleProtocolOperation> =
-            listOf(
+        private fun runDual(stretchIntensity: Int, vibrateIntensity: Int): List<BleProtocolOperation> {
+            if (stretchIntensity <= 0 && vibrateIntensity <= 0) return stopBurst()
+            return listOf(
                 write(
                     motorPacket(
                         stretchIntensity.scaleKissToyTutuPercent(
@@ -2461,6 +2465,16 @@ private class KissToyTutuIIProtocolVariant(
                         ),
                     )
                 )
+            )
+        }
+
+        private fun stopBurst(): List<BleProtocolOperation> =
+            listOf(
+                write(motorPacket(0, 0)),
+                BleProtocolOperation.Sleep(KISS_TOY_TUTU_STOP_REPEAT_DELAY_MS),
+                write(motorPacket(0, 0)),
+                BleProtocolOperation.Sleep(KISS_TOY_TUTU_STOP_REPEAT_DELAY_MS),
+                write(motorPacket(0, 0)),
             )
 
         private fun authPacket(challenge: ByteArray): ByteArray =
@@ -2510,6 +2524,8 @@ private const val KISS_TOY_TUTU_AUTH_TIMEOUT_MS = 4_000L
 private const val KISS_TOY_TUTU_AUTH_SETTLE_MS = 1_000L
 private const val KISS_TOY_TUTU_MOTOR1_MAX = 82
 private const val KISS_TOY_TUTU_MOTOR2_MAX = 73
+private const val KISS_TOY_TUTU_REPEAT_MS = 200
+private const val KISS_TOY_TUTU_STOP_REPEAT_DELAY_MS = 80L
 private val KISS_TOY_TUTU_ALIASES = listOf("QCTT", "迷路", "突突", "tutu", "tutu2", "tutuii", "kisstoytutu")
     .map { it.normalizedDeviceName() }
 
