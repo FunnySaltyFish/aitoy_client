@@ -15,14 +15,9 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 
 class MainActivity : ComponentActivity() {
-    private var pendingImportLink by mutableStateOf<String?>(null)
-
     private val backgroundSettingsLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
     ) { }
@@ -41,16 +36,10 @@ class MainActivity : ComponentActivity() {
             statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
         )
-        pendingImportLink = intent?.dataString
-        setContent { App(pendingImportLink) }
+        setContent { App() }
         window.decorView.post {
             startPermissionFlowIfNeeded()
         }
-    }
-
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        pendingImportLink = intent.dataString
     }
 
     private fun startPermissionFlowIfNeeded() {

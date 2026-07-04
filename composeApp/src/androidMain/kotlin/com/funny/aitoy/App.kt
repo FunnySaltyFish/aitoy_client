@@ -96,13 +96,10 @@ internal val Line = Color(0xFF41323D)
 internal val Danger = Color(0xFFFF5E76)
 
 @Composable
-fun App(initialImportLink: String? = null) {
+fun App() {
     val vm = viewModel { BridgeViewModel() }
     val chatVm = viewModel { ChatViewModel(vm) }
     var selectedTab by remember { mutableIntStateOf(0) }
-    LaunchedEffect(initialImportLink) {
-        vm.importFromLink(initialImportLink)
-    }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         vm.resumeRelay()
     }
@@ -176,7 +173,6 @@ private fun DeviceHome(vm: BridgeViewModel) {
                 item { ConnectFlow(vm) }
                 item { AiCompanion(vm) }
                 item { HelpSettingsPanel(vm) }
-                item { AdvancedPanel(vm) }
             }
             item { Spacer(Modifier.height(24.dp)) }
         }
@@ -1047,6 +1043,7 @@ internal fun FlowStep(index: String, title: String, text: String) {
 internal fun Panel(
     title: String,
     icon: ImageVector,
+    onTitleClick: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Column(
@@ -1063,7 +1060,12 @@ internal fun Panel(
                 title,
                 color = TextMain,
                 fontWeight = FontWeight.Bold,
-                style = MaterialTheme.typography.titleLarge
+                style = MaterialTheme.typography.titleLarge,
+                modifier = if (onTitleClick == null) {
+                    Modifier
+                } else {
+                    Modifier.clickable { onTitleClick() }
+                },
             )
         }
         Spacer(Modifier.height(14.dp))

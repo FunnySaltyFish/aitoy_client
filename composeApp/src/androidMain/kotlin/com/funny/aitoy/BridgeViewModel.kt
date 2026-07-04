@@ -36,7 +36,6 @@ import com.funny.aitoy.diagnostics.AiToyTraceUploader
 import com.funny.aitoy.network.OkHttpUtils
 import com.funny.aitoy.network.api.AiToyServices
 import com.funny.aitoy.network.api.apiRequest
-import com.funny.aitoy.network.api.service.CreateProtocolShareRequest
 import com.funny.aitoy.relay.RelayClient
 import com.funny.aitoy.relay.RelayCommand
 import com.funny.aitoy.relay.RelayDevice
@@ -50,12 +49,6 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.booleanOrNull
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonPrimitive
 import org.json.JSONArray
 import org.json.JSONObject
 import java.security.MessageDigest
@@ -91,17 +84,6 @@ data class ManagedToy(
 
 private fun ManagedToy.lastSeenKey(saved: List<RememberedToy>): Long =
     saved.firstOrNull { it.address == address }?.lastSeenAt ?: 0L
-
-data class ProtocolPreset(
-    val name: String,
-    val description: String,
-    val serviceUuid: String,
-    val writeUuid: String,
-    val notifyUuid: String,
-    val commandTemplate: String,
-    val stopTemplate: String,
-    val writeWithResponse: Boolean,
-)
 
 data class AppUpdateState(
     val checked: Boolean = false,
@@ -150,7 +132,6 @@ private fun generateDefaultUserToken(): String = "ut_${UUID.randomUUID().toStrin
 
 class BridgeViewModel : ViewModel() {
     val devices = mutableStateListOf<ScannedBleDevice>()
-    val logs = mutableStateListOf<String>()
     val toyRuntimeStates = mutableStateMapOf<String, ToyRuntimeState>()
     private val deviceConnectionStates = mutableStateMapOf<String, BleConnectionState>()
     private val deviceProtocolStatuses = mutableStateMapOf<String, BleProtocolStatus>()
@@ -175,14 +156,7 @@ class BridgeViewModel : ViewModel() {
         private set
     var protocolAttemptStatus by mutableStateOf(ProtocolAttemptStatus())
         private set
-    var showAdvanced by mutableStateOf(false)
     var showGuide by mutableStateOf(false)
-    var showTemplateLibrary by mutableStateOf(false)
-    var shareMessage by mutableStateOf("")
-        private set
-    var importCode by mutableStateOf("")
-    var importMessage by mutableStateOf("")
-        private set
     var communityUrl by mutableStateOf(DefaultCommunityUrl)
         private set
     var tutorialUrl by mutableStateOf(DefaultTutorialUrl)
@@ -213,41 +187,6 @@ class BridgeViewModel : ViewModel() {
         "",
     )
 
-    var serviceUuid: String by mutableDataSaverStateOf(
-        DataSaverUtils,
-        "BLE_SERVICE_UUID",
-        "0000dddd-0000-1000-8000-00805f9b34fb",
-    )
-    var writeUuid: String by mutableDataSaverStateOf(
-        DataSaverUtils,
-        "BLE_WRITE_UUID",
-        "0000ddd1-0000-1000-8000-00805f9b34fb",
-    )
-    var notifyUuid: String by mutableDataSaverStateOf(
-        DataSaverUtils,
-        "BLE_NOTIFY_UUID",
-        "0000ddd2-0000-1000-8000-00805f9b34fb",
-    )
-    var commandTemplate: String by mutableDataSaverStateOf(
-        DataSaverUtils,
-        "BLE_COMMAND_TEMPLATE",
-        "AA 08 02 {intensity} C8 {checksum}",
-    )
-    var stopTemplate: String by mutableDataSaverStateOf(
-        DataSaverUtils,
-        "BLE_STOP_TEMPLATE",
-        "AA 0F 01 00 BA",
-    )
-    var writeWithResponse: Boolean by mutableDataSaverStateOf(
-        DataSaverUtils,
-        "BLE_WRITE_WITH_RESPONSE",
-        false,
-    )
-    var manualControlEnabled: Boolean by mutableDataSaverStateOf(
-        DataSaverUtils,
-        "BLE_MANUAL_CONTROL_ENABLED",
-        false,
-    )
     var rememberedDevicesJson: String by mutableDataSaverStateOf(
         DataSaverUtils,
         "BLE_REMEMBERED_DEVICES",
@@ -342,59 +281,6 @@ class BridgeViewModel : ViewModel() {
             )
         }
 
-    val protocolPresets = listOf(
-        ProtocolPreset(
-            name = "ANKNI / Mizzzee DDDD",
-            description = "ANKNI 名称、DDDD/DDD1 服务的谜姬/安可尼设备；自动识别优先，也可手动套用此模板。",
-            serviceUuid = "0000dddd-0000-1000-8000-00805f9b34fb",
-            writeUuid = "0000ddd1-0000-1000-8000-00805f9b34fb",
-            notifyUuid = "0000ddd2-0000-1000-8000-00805f9b34fb",
-            commandTemplate = "AA 08 02 {intensity} C8 {checksum}",
-            stopTemplate = "AA 0F 01 00 BA",
-            writeWithResponse = false,
-        ),
-        ProtocolPreset(
-            name = "Roselex / DSJM",
-            description = "已验证的 DSJM/Roselex 系列模板，适合无法自动识别时手动尝试。",
-            serviceUuid = "0000fffe-0000-1000-8000-00805f9b34fb",
-            writeUuid = "0000fe02-0000-1000-8000-00805f9b34fb",
-            notifyUuid = "",
-            commandTemplate = "03 12 {intensity} 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
-            stopTemplate = "03 12 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00",
-            writeWithResponse = true,
-        ),
-        ProtocolPreset(
-            name = "OhMiBod Esca 2",
-            description = "OhMiBod 4.0 广播名设备可自动识别；这里保留手动写入模板。",
-            serviceUuid = "a0d70001-4c16-4ba7-977a-d394920e13a3",
-            writeUuid = "a0d70002-4c16-4ba7-977a-d394920e13a3",
-            notifyUuid = "a0d70003-4c16-4ba7-977a-d394920e13a3",
-            commandTemplate = "01 {intensity}",
-            stopTemplate = "01 00",
-            writeWithResponse = false,
-        ),
-        ProtocolPreset(
-            name = "Pink Punch",
-            description = "Pink_Punch 设备可自动识别；常量振动模式使用 09 + 强度。",
-            serviceUuid = "0000ffe0-0000-1000-8000-00805f9b34fb",
-            writeUuid = "0000ffe1-0000-1000-8000-00805f9b34fb",
-            notifyUuid = "0000ffe2-0000-1000-8000-00805f9b34fb",
-            commandTemplate = "09 {intensity}",
-            stopTemplate = "09 00",
-            writeWithResponse = false,
-        ),
-        ProtocolPreset(
-            name = "通用 BLE 写入模板",
-            description = "给群友分析后快速填写用，保留占位符和停止指令格式。",
-            serviceUuid = "",
-            writeUuid = "",
-            notifyUuid = "",
-            commandTemplate = "{intensity}",
-            stopTemplate = "00",
-            writeWithResponse = false,
-        ),
-    )
-
     val builtInTools = listOf(
         ToyTool(
             name = "get_toy_status",
@@ -449,7 +335,7 @@ class BridgeViewModel : ViewModel() {
         onTrace = ::appendTrace,
     )
     private val relaySequenceJobs = mutableMapOf<String, Job>()
-    private var debugLogTapCount = 0
+    private var developerTitleTapCount = 0
     private var autoOnlineAddress = ""
 
     init {
@@ -868,10 +754,6 @@ class BridgeViewModel : ViewModel() {
         ToyToolResult(false, it.message ?: "操作没有完成。")
     }
 
-    fun clearLogs() {
-        logs.clear()
-    }
-
     fun connectRelay() {
         AiToyForegroundService.start(appCtx)
         relay.connect(OkHttpUtils.currentBaseUrl, userToken)
@@ -912,6 +794,26 @@ class BridgeViewModel : ViewModel() {
         }
     }
 
+    fun openNotificationSettings() {
+        val packageName = appCtx.packageName
+        val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                .putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+        } else {
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                .setData(Uri.parse("package:$packageName"))
+        }
+        runCatching {
+            appCtx.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }.onFailure {
+            appCtx.startActivity(
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                    .setData(Uri.parse("package:$packageName"))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        }
+    }
+
     fun dismissCrashNotice() {
         crashNotice = ""
     }
@@ -934,14 +836,14 @@ class BridgeViewModel : ViewModel() {
         appCtx.openUrl(communityUrl.ifBlank { DefaultCommunityUrl })
     }
 
-    fun onDebugLogTitleClick() {
+    fun onHelpSettingsTitleClick() {
         if (developerMode) return
-        debugLogTapCount += 1
-        baseUrlMessage = if (debugLogTapCount >= 5) {
+        developerTitleTapCount += 1
+        baseUrlMessage = if (developerTitleTapCount >= 5) {
             developerMode = true
             "开发者模式已开启"
         } else {
-            "再点 ${5 - debugLogTapCount} 次可打开开发者设置"
+            "再点 ${5 - developerTitleTapCount} 次可打开开发者设置"
         }
     }
 
@@ -1041,147 +943,14 @@ class BridgeViewModel : ViewModel() {
         }
     }
 
-    fun applyPreset(preset: ProtocolPreset) {
-        serviceUuid = preset.serviceUuid
-        writeUuid = preset.writeUuid
-        notifyUuid = preset.notifyUuid
-        commandTemplate = preset.commandTemplate
-        stopTemplate = preset.stopTemplate
-        writeWithResponse = preset.writeWithResponse
-        manualControlEnabled = true
-        showAdvanced = true
-        showTemplateLibrary = false
-        importMessage = "已选择 ${preset.name}，下一步重新连接设备"
-        busyHint = "手动指令已准备好，请重新连接"
-        appendLog("已应用模板：${preset.name}")
-    }
-
-    fun importFromLink(link: String?) {
-        val resolved = link?.trim().orEmpty()
-        if (resolved.isBlank()) return
-        val uri = runCatching { Uri.parse(resolved) }.getOrNull()
-        val server = uri?.getQueryParameter("server")?.trim().orEmpty()
-        if (developerMode && server.isNotBlank() && OkHttpUtils.isHttpUrl(OkHttpUtils.normalizeBaseUrl(server))) {
-            OkHttpUtils.saveBaseUrl(server)
-            refreshBaseUrlState()
-        }
-        importCode = resolved
-        showAdvanced = true
-        showTemplateLibrary = false
-        importSharedTemplate()
-    }
-
-    fun shareCurrentTemplate() {
-        shareMessage = "正在生成分享链接..."
-        viewModelScope.launch {
-            runCatching {
-                apiRequest {
-                    AiToyServices.protocolShareService.create(
-                        CreateProtocolShareRequest(
-                            title = selectedName.ifBlank { "设备指令" },
-                            baseUrl = publicBaseUrl(),
-                            payload = buildJsonObject {
-                                put("serviceUuid", JsonPrimitive(serviceUuid.trim()))
-                                put("writeUuid", JsonPrimitive(writeUuid.trim()))
-                                put("notifyUuid", JsonPrimitive(notifyUuid.trim()))
-                                put("commandTemplate", JsonPrimitive(commandTemplate.trim()))
-                                put("stopTemplate", JsonPrimitive(stopTemplate.trim()))
-                                put("writeWithResponse", JsonPrimitive(writeWithResponse))
-                                put("manualControlEnabled", JsonPrimitive(true))
-                                put("sourceDeviceName", JsonPrimitive(selectedName.ifBlank { "我的小玩具" }))
-                                put("protocolName", JsonPrimitive(protocolStatus.displayName.ifBlank { "手动指令" }))
-                            },
-                        )
-                    )
-                }
-            }.onSuccess { result ->
-                shareMessage = result.url.ifBlank { result.importCode }
-                appendLog("已生成指令分享：$shareMessage")
-            }.onFailure {
-                shareMessage = it.message ?: "分享失败"
-            }
-        }
-    }
-
-    fun importSharedTemplate() {
-        val code = importCode.trim()
-        if (code.isBlank()) {
-            importMessage = "请先粘贴分享链接或口令"
-            return
-        }
-        importMessage = "正在导入..."
-        val uri = runCatching { Uri.parse(code) }.getOrNull()
-        val linkBaseUrl = if (uri?.scheme == "http" || uri?.scheme == "https") {
-            "${uri.scheme}://${uri.authority}"
-        } else {
-            uri?.getQueryParameter("server")?.takeIf {
-                it.isNotBlank() && OkHttpUtils.isHttpUrl(OkHttpUtils.normalizeBaseUrl(it))
-            }
-        }?.trimEnd('/')
-        if (developerMode && linkBaseUrl != null) {
-            OkHttpUtils.saveBaseUrl(linkBaseUrl)
-            refreshBaseUrlState()
-        }
-        val shareId = code.trimEnd('/')
-            .substringBefore('?')
-            .substringAfterLast('/')
-            .substringAfterLast('=')
-        viewModelScope.launch {
-            runCatching {
-                apiRequest { AiToyServices.protocolShareService.get(shareId) }
-            }.onSuccess { result ->
-                val payload = result.payload
-                serviceUuid = payload.stringValue("serviceUuid", serviceUuid)
-                writeUuid = payload.stringValue("writeUuid", writeUuid)
-                notifyUuid = payload.stringValue("notifyUuid", notifyUuid)
-                commandTemplate = payload.stringValue("commandTemplate", commandTemplate)
-                stopTemplate = payload.stringValue("stopTemplate", stopTemplate)
-                writeWithResponse = payload.booleanValue("writeWithResponse", writeWithResponse)
-                manualControlEnabled = true
-                showAdvanced = true
-                showTemplateLibrary = false
-                importMessage = "已导入，下一步重新连接设备"
-                busyHint = "手动指令已准备好，请重新连接"
-                appendLog("已导入分享指令：${result.title}")
-            }.onFailure {
-                importMessage = it.message ?: "导入失败"
-            }
-        }
-    }
-
-    fun reconnectWithCurrentTemplate() {
-        if (selectedAddress.isBlank()) {
-            if (!scanning) toggleScan()
-            busyHint = "请选择要连接的设备"
-            return
-        }
-        val device = devices.firstOrNull { it.address == selectedAddress }
-            ?: ScannedBleDevice(
-                name = selectedName.ifBlank { "蓝牙设备" },
-                address = selectedAddress,
-                rssi = 0,
-                connectable = true,
-            )
-        disconnect()
-        connect(device)
-    }
-
-    private fun JsonObject.stringValue(key: String, default: String): String {
-        return this[key]?.jsonPrimitive?.contentOrNull ?: default
-    }
-
-    private fun JsonObject.booleanValue(key: String, default: Boolean): Boolean {
-        return this[key]?.jsonPrimitive?.booleanOrNull ?: default
-    }
-
     private fun currentTemplate() = ProtocolTemplate(
-        serviceUuid = serviceUuid.trim(),
-        writeUuid = writeUuid.trim(),
-        notifyUuid = notifyUuid.trim(),
-        writeWithResponse = writeWithResponse,
-        manualControlEnabled = manualControlEnabled,
-        commandTemplate = commandTemplate,
-        stopTemplate = stopTemplate,
+        serviceUuid = "",
+        writeUuid = "",
+        notifyUuid = "",
+        writeWithResponse = false,
+        manualControlEnabled = false,
+        commandTemplate = "",
+        stopTemplate = "",
     )
 
     private fun onDeviceFound(device: ScannedBleDevice) {
@@ -1210,12 +979,8 @@ class BridgeViewModel : ViewModel() {
             broadcastProtocolName = latest.broadcastProtocolName.ifBlank { broadcastProtocolName },
         )
 
-    private fun appendLog(message: String) {
-        mainHandler.post {
-            logs += message
-            while (logs.size > 200) logs.removeAt(0)
-        }
-    }
+    @Suppress("UNUSED_PARAMETER")
+    private fun appendLog(message: String) = Unit
 
     private fun appendTrace(event: AiToyTraceEvent) {
         AiToyTraceUploader.recordBle(event)
@@ -1936,10 +1701,6 @@ class BridgeViewModel : ViewModel() {
         busyHint = "设备已就绪，手机正在上线"
         toast("设备已就绪，正在上线", ToastType.Info)
         connectRelay()
-    }
-
-    private fun publicBaseUrl(): String {
-        return OkHttpUtils.currentBaseUrl
     }
 
     private fun refreshBaseUrlState() {
