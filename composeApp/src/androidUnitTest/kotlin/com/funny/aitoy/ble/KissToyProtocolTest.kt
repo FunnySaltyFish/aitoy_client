@@ -66,7 +66,7 @@ class KissToyProtocolTest {
         assertEquals(500L, protocol.keepaliveIntervalMs())
 
         val stop = protocol.commandsFor(ToyControlAction.Stop)
-        assertEquals(7, stop.size)
+        assertEquals(6, stop.size)
         val stopWrites = stop.filterIsInstance<BleProtocolOperation.Write>()
         assertEquals(4, stopWrites.size)
         stopWrites.forEach { assertEquals(TUTU_WRITE_UUID, it.characteristicUuid) }
@@ -77,20 +77,11 @@ class KissToyProtocolTest {
     }
 
     @Test
-    fun qcttWithDdddRouteDoesNotFallBackToHistoricalKissToy() {
-        val protocol = BleProtocolRegistry.resolveNative(tutuFingerprint(name = "QCTT", includeHistoricalKissToyGatt = true))
-            ?: error("QCTT protocol not resolved")
-
-        assertEquals("kisstoy_tutu2", protocol.status.id)
-        assertEquals(ToyControlStyle.DualIntensityOnly, protocol.status.controlStyle)
-    }
-
-    @Test
-    fun qcttWithHistoricalKissToyRouteUsesHistoricalProtocolOnly() {
+    fun qcttWithoutOfficialAe3aRouteDoesNotFallBackToHistoricalKissToy() {
         val protocols = BleProtocolRegistry.resolveNativeAll(qcttHistoricalKissToyFingerprint())
 
         assertEquals(
-            listOf("kisstoy_gatt"),
+            emptyList(),
             protocols.map { it.status.id },
         )
     }
@@ -118,18 +109,18 @@ class KissToyProtocolTest {
         val run = protocol.commandsFor(ToyControlAction.DualMotor(mode = 1, internalIntensity = 50, externalIntensity = 25))
         assertEquals(3, run.size)
         val vibrateWrite = assertIs<BleProtocolOperation.Write>(run[0])
-        assertEquals(TUTU_WRITE_UUID, vibrateWrite.characteristicUuid)
+        assertEquals(DDDD_WRITE_UUID, vibrateWrite.characteristicUuid)
         assertFalse(vibrateWrite.withResponse)
         assertEquals("4602A64694D888666676B6D6", vibrateWrite.bytes.hexUpper())
         val suckingWrite = assertIs<BleProtocolOperation.Write>(run[2])
-        assertEquals(TUTU_WRITE_UUID, suckingWrite.characteristicUuid)
+        assertEquals(DDDD_WRITE_UUID, suckingWrite.characteristicUuid)
         assertFalse(suckingWrite.withResponse)
         assertEquals("4602A64694D29F466676B6BF", suckingWrite.bytes.hexUpper())
 
         val stop = protocol.commandsFor(ToyControlAction.Stop)
         val stopWrites = stop.filterIsInstance<BleProtocolOperation.Write>()
         assertEquals(4, stopWrites.size)
-        stopWrites.forEach { assertEquals(TUTU_WRITE_UUID, it.characteristicUuid) }
+        stopWrites.forEach { assertEquals(DDDD_WRITE_UUID, it.characteristicUuid) }
         assertEquals("4602A64694D876866676B6A4", stopWrites[0].bytes.hexUpper())
         assertEquals("4602A64694D2A6866676B6A6", stopWrites[1].bytes.hexUpper())
         assertEquals("4602A64694D876866676B6A4", stopWrites[2].bytes.hexUpper())
@@ -190,22 +181,11 @@ class KissToyProtocolTest {
     }
 
     @Test
-    fun qcttA0d7RouteIsOfferedAsTutuCandidate() {
-        val protocols = BleProtocolRegistry.resolveNativeAll(qcttA0d7Fingerprint())
-
-        assertEquals(
-            listOf("kisstoy_tutu2_a0d7"),
-            protocols.map { it.status.id },
-        )
-        assertEquals(A0D7_NOTIFY_UUID, assertIs<BleProtocolOperation.SubscribeNotify>(protocols[0].initialize(qcttA0d7Fingerprint())[0]).characteristicUuid)
-    }
-
-    @Test
-    fun qcttLiveGattSummaryPrefersAe3aTutuRoute() {
+    fun qcttLiveGattSummaryUsesOfficialAe3aTutuRouteOnly() {
         val protocols = BleProtocolRegistry.resolveNativeAll(qcttLiveAe3aFingerprint())
 
         assertEquals(
-            listOf("kisstoy_tutu2_ae3a", "kisstoy_tutu2_ae00", "kisstoy_gatt"),
+            listOf("kisstoy_tutu2"),
             protocols.map { it.status.id },
         )
 
@@ -279,9 +259,9 @@ class KissToyProtocolTest {
 
     private fun officialV2Fingerprint(
         name: String,
-        serviceUuid: UUID = TUTU_SERVICE_UUID,
-        writeUuid: UUID = TUTU_WRITE_UUID,
-        notifyUuid: UUID = TUTU_NOTIFY_UUID,
+        serviceUuid: UUID = DDDD_SERVICE_UUID,
+        writeUuid: UUID = DDDD_WRITE_UUID,
+        notifyUuid: UUID = DDDD_NOTIFY_UUID,
     ) = BleGattFingerprint(
         name = name,
         manufacturerData = "",
@@ -293,26 +273,16 @@ class KissToyProtocolTest {
         preferredNotifyUuid = notifyUuid,
     )
 
-    private fun qcttA0d7Fingerprint() = BleGattFingerprint(
-        name = "QCTT",
-        manufacturerData = "0x5d6:08 00 4A 4C 41 49 53 44 4B",
-        scanRecordHex = "",
-        serviceUuids = setOf(A0D7_SERVICE_UUID),
-        characteristicUuids = setOf(A0D7_WRITE_UUID, A0D7_NOTIFY_UUID),
-    )
-
     private fun qcttLiveAe3aFingerprint() = BleGattFingerprint(
         name = "QCTT",
         manufacturerData = "0x5d6:08 00 4A 4C 41 49 53 44 4B",
         scanRecordHex = "",
-        serviceUuids = setOf(KISSTOY_SERVICE_UUID, AE3A_SERVICE_UUID, AE00_SERVICE_UUID),
+        serviceUuids = setOf(KISSTOY_SERVICE_UUID, AE3A_SERVICE_UUID),
         characteristicUuids = setOf(
             KISSTOY_WRITE_UUID,
             KISSTOY_NOTIFY_UUID,
             AE3A_WRITE_UUID,
             AE3A_NOTIFY_UUID,
-            AE00_WRITE_UUID,
-            AE00_NOTIFY_UUID,
         ),
     )
 
@@ -329,24 +299,20 @@ class KissToyProtocolTest {
         val KISSTOY_WRITE_UUID: UUID = UUID.fromString("00001001-0000-1000-8000-00805f9b34fb")
         val KISSTOY_NOTIFY_UUID: UUID = UUID.fromString("00001002-0000-1000-8000-00805f9b34fb")
 
-        val TUTU_SERVICE_UUID: UUID = UUID.fromString("0000dddd-0000-1000-8000-00805f9b34fb")
-        val TUTU_WRITE_UUID: UUID = UUID.fromString("0000ddd1-0000-1000-8000-00805f9b34fb")
-        val TUTU_NOTIFY_UUID: UUID = UUID.fromString("0000ddd2-0000-1000-8000-00805f9b34fb")
+        val DDDD_SERVICE_UUID: UUID = UUID.fromString("0000dddd-0000-1000-8000-00805f9b34fb")
+        val DDDD_WRITE_UUID: UUID = UUID.fromString("0000ddd1-0000-1000-8000-00805f9b34fb")
+        val DDDD_NOTIFY_UUID: UUID = UUID.fromString("0000ddd2-0000-1000-8000-00805f9b34fb")
+
+        val TUTU_SERVICE_UUID: UUID = UUID.fromString("0000ae3a-0000-1000-8000-00805f9b34fb")
+        val TUTU_WRITE_UUID: UUID = UUID.fromString("0000ae3b-0000-1000-8000-00805f9b34fb")
+        val TUTU_NOTIFY_UUID: UUID = UUID.fromString("0000ae3c-0000-1000-8000-00805f9b34fb")
 
         val FFE0_SERVICE_UUID: UUID = UUID.fromString("0000ffe0-0000-1000-8000-00805f9b34fb")
         val FFE0_WRITE_UUID: UUID = UUID.fromString("0000ffe1-0000-1000-8000-00805f9b34fb")
         val FFE0_NOTIFY_UUID: UUID = UUID.fromString("0000ffe2-0000-1000-8000-00805f9b34fb")
 
-        val A0D7_SERVICE_UUID: UUID = UUID.fromString("a0d70001-4c16-4ba7-977a-d394920e13a3")
-        val A0D7_WRITE_UUID: UUID = UUID.fromString("a0d70002-4c16-4ba7-977a-d394920e13a3")
-        val A0D7_NOTIFY_UUID: UUID = UUID.fromString("a0d70003-4c16-4ba7-977a-d394920e13a3")
-
         val AE3A_SERVICE_UUID: UUID = UUID.fromString("0000ae3a-0000-1000-8000-00805f9b34fb")
         val AE3A_WRITE_UUID: UUID = UUID.fromString("0000ae3b-0000-1000-8000-00805f9b34fb")
         val AE3A_NOTIFY_UUID: UUID = UUID.fromString("0000ae3c-0000-1000-8000-00805f9b34fb")
-
-        val AE00_SERVICE_UUID: UUID = UUID.fromString("0000ae00-0000-1000-8000-00805f9b34fb")
-        val AE00_WRITE_UUID: UUID = UUID.fromString("0000ae01-0000-1000-8000-00805f9b34fb")
-        val AE00_NOTIFY_UUID: UUID = UUID.fromString("0000ae02-0000-1000-8000-00805f9b34fb")
     }
 }
