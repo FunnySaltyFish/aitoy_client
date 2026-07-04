@@ -65,6 +65,7 @@ class AndroidBleController(
     private var keepaliveRunnable: Runnable? = null
     private var keepaliveProtocol: BleDeviceProtocol? = null
     private var keepaliveOperations: List<BleProtocolOperation> = emptyList()
+    private var writeBusyRetryCount = 0
     private var batteryReadRequested = false
     private val scanSignatures = mutableMapOf<String, String>()
     private val advertiser = AndroidBleAdvertiser(::trace)
@@ -558,9 +559,18 @@ class AndroidBleController(
         trace("写入已提交 result=$result")
         if (result != 0) {
             operationInProgress = false
+            if (result == ANDROID_GATT_WRITE_REQUEST_BUSY && writeBusyRetryCount < ANDROID_GATT_WRITE_BUSY_MAX_RETRIES) {
+                writeBusyRetryCount += 1
+                trace("GATT 写入繁忙，延后重试 retry=$writeBusyRetryCount/${ANDROID_GATT_WRITE_BUSY_MAX_RETRIES}")
+                enqueueFirst(listOf(operation))
+                mainHandler.postDelayed(::executeNextOperation, ANDROID_GATT_WRITE_BUSY_RETRY_DELAY_MS)
+                return
+            }
+            writeBusyRetryCount = 0
             handleProtocolOperationFailed("提交写入失败：$result")
             return
         }
+        writeBusyRetryCount = 0
         if (!writeWithResponse) {
             operationInProgress = false
             mainHandler.postDelayed(::executeNextOperation, 40)
@@ -1360,3 +1370,7 @@ class AndroidBleController(
             UUID.fromString("00002a19-0000-1000-8000-00805f9b34fb")
     }
 }
+
+private const val ANDROID_GATT_WRITE_REQUEST_BUSY = 201
+private const val ANDROID_GATT_WRITE_BUSY_MAX_RETRIES = 8
+private const val ANDROID_GATT_WRITE_BUSY_RETRY_DELAY_MS = 180L

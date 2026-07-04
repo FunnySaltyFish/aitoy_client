@@ -26,12 +26,12 @@ class KissToyProtocolTest {
     }
 
     @Test
-    fun tutuIIUsesChallengeAuthAndFixedXorMotorPacket() {
+    fun tutuIIUsesChallengeAuthAndOfficialV2MotorPackets() {
         val protocol = BleProtocolRegistry.resolveNative(tutuFingerprint()) ?: error("KissToy Tutu II protocol not resolved")
 
         assertEquals("kisstoy_tutu2", protocol.status.id)
         assertEquals(ToyControlStyle.DualIntensityOnly, protocol.status.controlStyle)
-        assertEquals(listOf("震动", "伸缩"), protocol.status.channelNames)
+        assertEquals(listOf("底座伸缩", "头部伸缩"), protocol.status.channelNames)
 
         val init = protocol.initialize(tutuFingerprint())
         assertIs<BleProtocolOperation.SubscribeNotify>(init[0])
@@ -45,28 +45,35 @@ class KissToyProtocolTest {
         assertEquals("58EA31B9D8A9B3C028C7E0E39D", authWrite.bytes.hexUpper())
 
         val run = protocol.commandsFor(ToyControlAction.DualMotor(mode = 1, internalIntensity = 50, externalIntensity = 50))
-        assertEquals(2, run.size)
-        val write = assertIs<BleProtocolOperation.Write>(run[0])
-        assertEquals(TUTU_WRITE_UUID, write.characteristicUuid)
-        assertFalse(write.withResponse)
-        assertEquals("58FF0102DB8492C6FFCFFFFFFF", write.bytes.hexUpper())
+        assertEquals(4, run.size)
+        val baseWrite = assertIs<BleProtocolOperation.Write>(run[0])
+        assertEquals(TUTU_WRITE_UUID, baseWrite.characteristicUuid)
+        assertFalse(baseWrite.withResponse)
+        assertEquals("4602A64694D888666676B6D6", baseWrite.bytes.hexUpper())
+        val headWrite = assertIs<BleProtocolOperation.Write>(run[2])
+        assertEquals(TUTU_WRITE_UUID, headWrite.characteristicUuid)
+        assertFalse(headWrite.withResponse)
+        assertEquals("4602A646945888666676B656", headWrite.bytes.hexUpper())
 
-        val vibrateOnly = protocol.commandsFor(ToyControlAction.DualMotor(mode = 1, internalIntensity = 50, externalIntensity = 0))
-        assertEquals("58FF0102DB84B6C6FFCFFFFFFF", assertIs<BleProtocolOperation.Write>(vibrateOnly[0]).bytes.hexUpper())
+        val baseOnly = protocol.commandsFor(ToyControlAction.DualMotor(mode = 1, internalIntensity = 50, externalIntensity = 0))
+        assertEquals("4602A64694D888666676B6D6", assertIs<BleProtocolOperation.Write>(baseOnly[0]).bytes.hexUpper())
+        assertEquals("4602A646945876866676B624", assertIs<BleProtocolOperation.Write>(baseOnly[2]).bytes.hexUpper())
 
-        val stretchOnly = protocol.commandsFor(ToyControlAction.DualMotor(mode = 1, internalIntensity = 0, externalIntensity = 50))
-        assertEquals("58FF0102DBAD92C6FFCFFFFFFF", assertIs<BleProtocolOperation.Write>(stretchOnly[0]).bytes.hexUpper())
+        val headOnly = protocol.commandsFor(ToyControlAction.DualMotor(mode = 1, internalIntensity = 0, externalIntensity = 50))
+        assertEquals("4602A64694D876866676B6A4", assertIs<BleProtocolOperation.Write>(headOnly[0]).bytes.hexUpper())
+        assertEquals("4602A646945888666676B656", assertIs<BleProtocolOperation.Write>(headOnly[2]).bytes.hexUpper())
 
-        assertEquals(200L, protocol.keepaliveIntervalMs())
+        assertEquals(500L, protocol.keepaliveIntervalMs())
 
         val stop = protocol.commandsFor(ToyControlAction.Stop)
-        assertEquals(5, stop.size)
+        assertEquals(7, stop.size)
         val stopWrites = stop.filterIsInstance<BleProtocolOperation.Write>()
-        assertEquals(3, stopWrites.size)
-        stopWrites.forEach {
-            assertEquals(TUTU_WRITE_UUID, it.characteristicUuid)
-            assertEquals("58FF0102DBADB6C6FFCFFFFFFF", it.bytes.hexUpper())
-        }
+        assertEquals(4, stopWrites.size)
+        stopWrites.forEach { assertEquals(TUTU_WRITE_UUID, it.characteristicUuid) }
+        assertEquals("4602A64694D876866676B6A4", stopWrites[0].bytes.hexUpper())
+        assertEquals("4602A646945876866676B624", stopWrites[1].bytes.hexUpper())
+        assertEquals("4602A64694D876866676B6A4", stopWrites[2].bytes.hexUpper())
+        assertEquals("4602A646945876866676B624", stopWrites[3].bytes.hexUpper())
     }
 
     @Test
@@ -79,20 +86,66 @@ class KissToyProtocolTest {
     }
 
     @Test
-    fun qcttWithHistoricalKissToyRouteCanTryTutuBeforeHistoricalProtocol() {
+    fun qcttWithHistoricalKissToyRouteUsesHistoricalProtocolOnly() {
         val protocols = BleProtocolRegistry.resolveNativeAll(qcttHistoricalKissToyFingerprint())
 
         assertEquals(
-            listOf("kisstoy_tutu2_kisstoy_gatt", "kisstoy_gatt"),
-            protocols.take(2).map { it.status.id },
+            listOf("kisstoy_gatt"),
+            protocols.map { it.status.id },
         )
+    }
 
-        val route = protocols.first { it.status.id == "kisstoy_tutu2_kisstoy_gatt" }
-        val init = route.initialize(qcttHistoricalKissToyFingerprint())
-        assertEquals(KISSTOY_NOTIFY_UUID, assertIs<BleProtocolOperation.SubscribeNotify>(init[0]).characteristicUuid)
+    @Test
+    fun localizedLostWithHistoricalKissToyRouteUsesHistoricalProtocolOnly() {
+        val protocols = BleProtocolRegistry.resolveNativeAll(lostHistoricalKissToyFingerprint())
 
-        val auth = route.onNotify(KISSTOY_NOTIFY_UUID, "58000102030405060708090a0b".hexBytes()).first()
-        assertEquals(KISSTOY_WRITE_UUID, assertIs<BleProtocolOperation.Write>(auth).characteristicUuid)
+        assertEquals(
+            listOf("kisstoy_gatt"),
+            protocols.map { it.status.id },
+        )
+    }
+
+    @Test
+    fun qcpwDdddRouteUsesOfficialV2LostProfile() {
+        val protocol = BleProtocolRegistry.resolveNative(officialV2Fingerprint("QCPW")) ?: error("QCPW protocol not resolved")
+
+        assertEquals("kisstoy_official_v2_dddd", protocol.status.id)
+        assertEquals("KissToy 迷路-入体版", protocol.status.displayName)
+        assertEquals(ToyControlStyle.DualIntensityOnly, protocol.status.controlStyle)
+        assertEquals(listOf("震动", "吮吸"), protocol.status.channelNames)
+        assertEquals(emptyList(), protocol.initialize(officialV2Fingerprint("QCPW")))
+
+        val run = protocol.commandsFor(ToyControlAction.DualMotor(mode = 1, internalIntensity = 50, externalIntensity = 25))
+        assertEquals(3, run.size)
+        val vibrateWrite = assertIs<BleProtocolOperation.Write>(run[0])
+        assertEquals(TUTU_WRITE_UUID, vibrateWrite.characteristicUuid)
+        assertFalse(vibrateWrite.withResponse)
+        assertEquals("4602A64694D888666676B6D6", vibrateWrite.bytes.hexUpper())
+        val suckingWrite = assertIs<BleProtocolOperation.Write>(run[2])
+        assertEquals(TUTU_WRITE_UUID, suckingWrite.characteristicUuid)
+        assertFalse(suckingWrite.withResponse)
+        assertEquals("4602A64694D29F466676B6BF", suckingWrite.bytes.hexUpper())
+
+        val stop = protocol.commandsFor(ToyControlAction.Stop)
+        val stopWrites = stop.filterIsInstance<BleProtocolOperation.Write>()
+        assertEquals(4, stopWrites.size)
+        stopWrites.forEach { assertEquals(TUTU_WRITE_UUID, it.characteristicUuid) }
+        assertEquals("4602A64694D876866676B6A4", stopWrites[0].bytes.hexUpper())
+        assertEquals("4602A64694D2A6866676B6A6", stopWrites[1].bytes.hexUpper())
+        assertEquals("4602A64694D876866676B6A4", stopWrites[2].bytes.hexUpper())
+        assertEquals("4602A64694D2A6866676B6A6", stopWrites[3].bytes.hexUpper())
+    }
+
+    @Test
+    fun qcvwDdddRouteUsesSecondVibrateCommand() {
+        val protocol = BleProtocolRegistry.resolveNative(officialV2Fingerprint("QCVW")) ?: error("QCVW protocol not resolved")
+
+        assertEquals("KissToy 迷路-震动版", protocol.status.displayName)
+        assertEquals(listOf("震动", "第二震动"), protocol.status.channelNames)
+
+        val run = protocol.commandsFor(ToyControlAction.DualMotor(mode = 1, internalIntensity = 50, externalIntensity = 25))
+        assertEquals("4602A64694D888666676B6D6", assertIs<BleProtocolOperation.Write>(run[0]).bytes.hexUpper())
+        assertEquals("4602A64458D29F466676B6C1", assertIs<BleProtocolOperation.Write>(run[2]).bytes.hexUpper())
     }
 
     @Test
@@ -111,7 +164,7 @@ class KissToyProtocolTest {
         val protocols = BleProtocolRegistry.resolveNativeAll(qcttLiveAe3aFingerprint())
 
         assertEquals(
-            listOf("kisstoy_tutu2_ae3a", "kisstoy_tutu2_kisstoy_gatt", "kisstoy_tutu2_ae00", "kisstoy_gatt"),
+            listOf("kisstoy_tutu2_ae3a", "kisstoy_tutu2_ae00", "kisstoy_gatt"),
             protocols.map { it.status.id },
         )
 
@@ -147,7 +200,7 @@ class KissToyProtocolTest {
     )
 
     private fun tutuFingerprint(
-        name: String = "迷路",
+        name: String = "QCTT",
         includeHistoricalKissToyGatt: Boolean = false,
     ) = BleGattFingerprint(
         name = name,
@@ -173,6 +226,22 @@ class KissToyProtocolTest {
         scanRecordHex = "",
         serviceUuids = setOf(KISSTOY_SERVICE_UUID),
         characteristicUuids = setOf(KISSTOY_WRITE_UUID, KISSTOY_NOTIFY_UUID),
+    )
+
+    private fun lostHistoricalKissToyFingerprint() = BleGattFingerprint(
+        name = "迷路",
+        manufacturerData = "",
+        scanRecordHex = "",
+        serviceUuids = setOf(KISSTOY_SERVICE_UUID),
+        characteristicUuids = setOf(KISSTOY_WRITE_UUID, KISSTOY_NOTIFY_UUID),
+    )
+
+    private fun officialV2Fingerprint(name: String) = BleGattFingerprint(
+        name = name,
+        manufacturerData = "",
+        scanRecordHex = "",
+        serviceUuids = setOf(TUTU_SERVICE_UUID),
+        characteristicUuids = setOf(TUTU_WRITE_UUID, TUTU_NOTIFY_UUID),
     )
 
     private fun qcttA0d7Fingerprint() = BleGattFingerprint(
