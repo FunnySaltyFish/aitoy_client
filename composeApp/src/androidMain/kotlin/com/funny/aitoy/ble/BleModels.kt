@@ -100,6 +100,7 @@ data class ProtocolAttemptStatus(
 data class ProtocolFallbackResult(
     val failedProtocol: BleProtocolStatus,
     val switchedToNext: Boolean,
+    val keptCurrent: Boolean = false,
 )
 
 fun parseHexTemplate(template: String, mode: Int, intensity: Int): ByteArray {

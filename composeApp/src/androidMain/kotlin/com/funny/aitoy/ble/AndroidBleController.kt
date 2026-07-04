@@ -454,6 +454,29 @@ class AndroidBleController(
             error = true,
         )
         activeBroadcastProtocol?.let {
+            if (shouldKeepCachitoShikong3(failed)) {
+                protocolReady = true
+                activeBroadcastProtocol = it
+                updateProtocolAttempt(
+                    ProtocolAttemptStatus(
+                        success = true,
+                        title = "${failed.displayName} 已准备好",
+                        message = "请靠近手机，从低强度再试一次",
+                        protocolName = failed.displayName,
+                        currentIndex = 1,
+                        total = broadcastProtocolCandidates.size,
+                        failedNames = failedProtocolNames.toList(),
+                    ),
+                )
+                trace(
+                    "协议适配反馈 event=protocol_adapter_feedback result=keep " +
+                        "protocol=${failed.id} total=${broadcastProtocolCandidates.size}",
+                    type = "protocol_adapter_feedback",
+                    uploadPolicy = AiToyTraceUploadPolicy.Always,
+                )
+                updateState(BleConnectionState.Ready)
+                return ProtocolFallbackResult(failed, switchedToNext = false, keptCurrent = true)
+            }
             val currentIndex = broadcastProtocolCandidates.indexOfFirst { candidate ->
                 candidate.status.id == failed.id
             }.coerceAtLeast(0)
@@ -529,6 +552,22 @@ class AndroidBleController(
             exhaustedByUserFeedback = true,
         )
         return ProtocolFallbackResult(failed, switchedToNext = hasNext)
+    }
+
+    private fun shouldKeepCachitoShikong3(failed: BleProtocolStatus): Boolean {
+        if (failed.id != "cachito_shikong3_advertise") return false
+        val text = buildString {
+            append(connectedName)
+            append(' ')
+            append(connectedManufacturerData)
+            append(' ')
+            append(connectedScanRecordHex)
+        }
+        val compactText = text.lowercase().replace(" ", "").replace(".", "")
+        return compactText.contains("失控3") ||
+            compactText.contains("shikong3") ||
+            text.contains("71000B", ignoreCase = true) ||
+            connectedManufacturerData.contains("0x6:01 09 20 22", ignoreCase = true)
     }
 
     private fun write(operation: BleProtocolOperation.Write) {

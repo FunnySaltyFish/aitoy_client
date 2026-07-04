@@ -602,12 +602,13 @@ private fun ManagedDevices(vm: BridgeViewModel) {
 
 @Composable
 private fun ManagedDeviceRow(vm: BridgeViewModel, toy: ManagedToy) {
-    val remembered = RememberedToy(
-        name = toy.name,
-        address = toy.address,
-        protocolName = toy.protocolName,
-        lastSeenAt = 0L,
-    )
+    val remembered = vm.rememberedDevices.firstOrNull { it.address == toy.address }
+        ?: RememberedToy(
+            name = toy.name,
+            address = toy.address,
+            protocolName = toy.protocolName,
+            lastSeenAt = 0L,
+        )
     val connected = toy.runtimeState == ToyRuntimeState.Connected
     val current = toy.current
     Column(
@@ -672,9 +673,9 @@ private fun ManagedDeviceRow(vm: BridgeViewModel, toy: ManagedToy) {
                 TextButton(onClick = { vm.editRememberedDevice(remembered) }) {
                     Text("备注")
                 }
-                TextButton(onClick = { vm.deleteRememberedDevice(remembered) }) {
-                    Text("删除")
-                }
+            }
+            TextButton(onClick = { vm.deleteManagedDevice(toy.address) }) {
+                Text("删除")
             }
         }
     }

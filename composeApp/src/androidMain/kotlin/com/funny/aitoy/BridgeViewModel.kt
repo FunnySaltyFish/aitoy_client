@@ -592,14 +592,16 @@ class BridgeViewModel : ViewModel() {
             busyHint = "已切换到 ${toy.name}"
             return
         }
+        val broadcastProtocolName = toy.protocolName.takeIf { it.startsWith("Cachito ") }.orEmpty()
         connect(
             ScannedBleDevice(
                 name = toy.name,
                 address = toy.address,
                 rssi = 0,
-                connectable = true,
+                connectable = broadcastProtocolName.isBlank(),
                 manufacturerData = toy.manufacturerData,
                 scanRecordHex = toy.scanRecordHex,
+                broadcastProtocolName = broadcastProtocolName,
             )
         )
     }
@@ -740,6 +742,9 @@ class BridgeViewModel : ViewModel() {
             fallback.switchedToNext -> {
                 "已切换协议，请从低强度再试一次"
             }
+            fallback.keptCurrent -> {
+                "已保持当前设备类型，请靠近手机并从低强度再试一次"
+            }
             else -> {
                 "已尝试所有协议，目前仍不支持，请加群提交反馈，开发者会尝试支持。"
             }
@@ -754,10 +759,11 @@ class BridgeViewModel : ViewModel() {
         showDeviceRemarkDialog = true
     }
 
-    fun deleteRememberedDevice(toy: RememberedToy) {
+    fun deleteManagedDevice(address: String) {
+        if (address.isBlank()) return
         val merged = JSONArray()
         rememberedDevices
-            .filterNot { it.address == toy.address }
+            .filterNot { it.address == address }
             .forEach {
                 merged.put(
                     JSONObject()
@@ -770,13 +776,32 @@ class BridgeViewModel : ViewModel() {
                 )
             }
         rememberedDevicesJson = merged.toString()
-        toyRuntimeStates.remove(toy.address)
-        if (toy.address == selectedAddress) {
+        cancelAutoStop(address)
+        cancelKeepAlive(address)
+        controllers.remove(address)?.disconnect()
+        devices.removeAll { it.address == address }
+        toyRuntimeStates.remove(address)
+        deviceConnectionStates.remove(address)
+        deviceProtocolStatuses.remove(address)
+        deviceProtocolAttempts.remove(address)
+        deviceDisplayNames.remove(address)
+        deviceModes.remove(address)
+        deviceIntensities.remove(address)
+        deviceSecondaryIntensities.remove(address)
+        deviceBatteryPercents.remove(address)
+        if (address == selectedAddress) {
+            selectedAddress = ""
+            selectedName = ""
+            connectionState = BleConnectionState.Idle
+            protocolStatus = BleProtocolStatus()
+            protocolAttemptStatus = ProtocolAttemptStatus()
             currentDeviceSaved = false
+            controlTrialStarted = false
+            updateTraceContext()
             syncRelayDevice()
             autoOfflineWhenNoConnectedSavedDevice()
         }
-        busyHint = "已从我的设备移除"
+        busyHint = "已移除设备"
     }
 
     fun dismissDeviceRemarkDialog() {
@@ -1160,11 +1185,30 @@ class BridgeViewModel : ViewModel() {
     )
 
     private fun onDeviceFound(device: ScannedBleDevice) {
-        val index = devices.indexOfFirst { it.address == device.address }
-        if (index >= 0) devices[index] = device else devices.add(device)
+        val deviceKey = device.scanIdentityKey()
+        val index = devices.indexOfFirst { it.scanIdentityKey() == deviceKey }
+        val resolvedDevice = if (index >= 0) devices[index].mergeScanUpdate(device) else device
+        if (index >= 0) devices[index] = resolvedDevice else devices.add(resolvedDevice)
         devices.sortByDescending { it.rssi }
-        toyRuntimeStates.putIfAbsent(device.address, ToyRuntimeState.Offline)
+        toyRuntimeStates.putIfAbsent(resolvedDevice.address, ToyRuntimeState.Offline)
     }
+
+    private fun ScannedBleDevice.scanIdentityKey(): String {
+        if (!connectable && broadcastProtocolName.startsWith("Cachito ")) {
+            return "broadcast:$broadcastProtocolName"
+        }
+        return "address:$address"
+    }
+
+    private fun ScannedBleDevice.mergeScanUpdate(latest: ScannedBleDevice): ScannedBleDevice =
+        copy(
+            name = latest.name.takeUnless { it == "未命名设备" } ?: name,
+            rssi = maxOf(rssi, latest.rssi),
+            serviceUuids = latest.serviceUuids.ifEmpty { serviceUuids },
+            manufacturerData = latest.manufacturerData.ifBlank { manufacturerData },
+            scanRecordHex = latest.scanRecordHex.ifBlank { scanRecordHex },
+            broadcastProtocolName = latest.broadcastProtocolName.ifBlank { broadcastProtocolName },
+        )
 
     private fun appendLog(message: String) {
         mainHandler.post {

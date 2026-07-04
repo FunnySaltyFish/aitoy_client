@@ -263,6 +263,8 @@ internal object CachitoShikong2BroadcastProtocol : BleBroadcastProtocol {
         val text = buildString {
             append(device.name)
             append(' ')
+            append(device.broadcastProtocolName)
+            append(' ')
             append(device.serviceUuids.joinToString())
             append(' ')
             append(device.manufacturerData)
@@ -360,6 +362,8 @@ internal object CachitoShikong3BroadcastProtocol : BleBroadcastProtocol {
     override fun matches(device: ScannedBleDevice): Boolean {
         val text = buildString {
             append(device.name)
+            append(' ')
+            append(device.broadcastProtocolName)
             append(' ')
             append(device.serviceUuids.joinToString())
             append(' ')
