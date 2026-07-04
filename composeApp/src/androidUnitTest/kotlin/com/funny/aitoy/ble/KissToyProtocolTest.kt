@@ -161,6 +161,10 @@ class KissToyProtocolTest {
         assertEquals(ToyControlStyle.DualIntensityOnly, protocols.first().status.controlStyle)
         assertEquals(listOf("震动", "吮吸"), protocols.first().status.channelNames)
 
+        val init = protocols.first().initialize(fingerprint)
+        assertEquals(1, init.size)
+        assertEquals(AE3A_NOTIFY_UUID, assertIs<BleProtocolOperation.SubscribeNotify>(init[0]).characteristicUuid)
+
         val run = protocols.first().commandsFor(ToyControlAction.DualMotor(mode = 1, internalIntensity = 50, externalIntensity = 25))
         assertEquals(AE3A_WRITE_UUID, assertIs<BleProtocolOperation.Write>(run[0]).characteristicUuid)
         assertEquals("4602A64694D888666676B6D6", assertIs<BleProtocolOperation.Write>(run[0]).bytes.hexUpper())
