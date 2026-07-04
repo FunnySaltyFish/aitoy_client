@@ -263,6 +263,24 @@ class KissToyProtocolTest {
         assertTrue(broadcastMatches.none { it.status.id == "cachito_mb_pro_advertise" })
     }
 
+    @Test
+    fun cachitoToHuanConnectableScanUsesTouhuanBroadcastRoute() {
+        val matches = BleBroadcastProtocolRegistry.resolveAll(
+            ScannedBleDevice(
+                name = "ToHuan",
+                address = "C6:B6:E8:1D:81:2B",
+                rssi = -52,
+                manufacturerData = "0x5357:38 33 30 30",
+                connectable = true,
+            ),
+        )
+
+        assertEquals(listOf("cachito_touhuan_advertise"), matches.map { it.status.id })
+        assertEquals("Cachito 套环", matches.first().status.displayName)
+        assertEquals(ToyControlStyle.IntensityOnly, matches.first().status.controlStyle)
+        assertFalse(matches.first().preferGattWhenConnectable)
+    }
+
     private fun ByteArray.hexUpper(): String =
         joinToString("") { byte -> "%02X".format(byte.toInt() and 0xff) }
 

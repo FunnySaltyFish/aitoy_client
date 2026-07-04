@@ -26,7 +26,7 @@ internal object BleBroadcastProtocolRegistry {
             CachitoTemplateBroadcastSpec(
                 id = "cachito_touhuan_pro_advertise",
                 displayName = "Cachito 套环 Pro",
-                aliases = listOf("套环pro", "touhuanpro"),
+                aliases = listOf("套环pro", "touhuanpro", "tohuanpro"),
                 framePrefixes = listOf("71000C"),
                 modeNames = listOf("强度"),
                 commandTemplates = listOf({ progress -> cachito8200Template("71000C", progress) }),
@@ -37,7 +37,7 @@ internal object BleBroadcastProtocolRegistry {
             CachitoTemplateBroadcastSpec(
                 id = "cachito_touhuan_mini_advertise",
                 displayName = "Cachito 套环 Mini",
-                aliases = listOf("套环mini", "touhuanmini"),
+                aliases = listOf("套环mini", "touhuanmini", "tohuanmini"),
                 framePrefixes = listOf("71000A"),
                 modeNames = listOf("强度"),
                 commandTemplates = listOf({ progress -> cachito8200Template("71000A", progress) }),
@@ -70,7 +70,7 @@ internal object BleBroadcastProtocolRegistry {
             CachitoTemplateBroadcastSpec(
                 id = "cachito_touhuan_xuegao_advertise",
                 displayName = "Cachito 套环雪糕",
-                aliases = listOf("套环雪糕", "touhuanxuegao"),
+                aliases = listOf("套环雪糕", "touhuanxuegao", "tohuanxuegao"),
                 framePrefixes = listOf("710004", "710000"),
                 modeNames = listOf("吸吮", "震动"),
                 commandTemplates = listOf(
@@ -115,12 +115,22 @@ internal object BleBroadcastProtocolRegistry {
             CachitoTemplateBroadcastSpec(
                 id = "cachito_touhuan_advertise",
                 displayName = "Cachito 套环",
-                aliases = listOf("套环", "touhuan"),
+                aliases = listOf("套环", "touhuan", "tohuan"),
                 framePrefixes = listOf("710004"),
                 modeNames = listOf("强度"),
                 commandTemplates = listOf({ progress -> cachitoSuctionTemplate("710004", progress) }),
                 stopTemplates = listOf("710004**-0400-####-0302-0000000000"),
-                excludedAliases = listOf("套环mini", "套环pro", "套环雪糕", "touhuanmini", "touhuanpro", "touhuanxuegao"),
+                excludedAliases = listOf(
+                    "套环mini",
+                    "套环pro",
+                    "套环雪糕",
+                    "touhuanmini",
+                    "touhuanpro",
+                    "touhuanxuegao",
+                    "tohuanmini",
+                    "tohuanpro",
+                    "tohuanxuegao",
+                ),
             )
         ),
     )
