@@ -157,6 +157,7 @@ class BridgeViewModel : ViewModel() {
     var protocolAttemptStatus by mutableStateOf(ProtocolAttemptStatus())
         private set
     var showGuide by mutableStateOf(false)
+    var nearbyDevicesExpanded by mutableStateOf(false)
     var communityUrl by mutableStateOf(DefaultCommunityUrl)
         private set
     var tutorialUrl by mutableStateOf(DefaultTutorialUrl)
@@ -369,6 +370,7 @@ class BridgeViewModel : ViewModel() {
         }
         when (state) {
             BleConnectionState.Ready -> {
+                nearbyDevicesExpanded = false
                 if (address == selectedAddress) {
                     currentDeviceSaved = rememberedDevices.any { toy -> toy.address == selectedAddress }
                 }
@@ -434,9 +436,14 @@ class BridgeViewModel : ViewModel() {
             scanning = false
         } else {
             devices.clear()
+            nearbyDevicesExpanded = connectedDeviceCount() == 0
             scanController.startScan()
             scanning = true
         }
+    }
+
+    fun toggleNearbyDevicesExpanded() {
+        nearbyDevicesExpanded = !nearbyDevicesExpanded
     }
 
     fun connect(device: ScannedBleDevice) = runAction {
@@ -1530,6 +1537,9 @@ class BridgeViewModel : ViewModel() {
 
     private fun connectedSavedDeviceCount(): Int =
         rememberedDevices.count { toyRuntimeStates[it.address] == ToyRuntimeState.Connected }
+
+    private fun connectedDeviceCount(): Int =
+        toyRuntimeStates.count { it.value == ToyRuntimeState.Connected }
 
     private fun autoOfflineWhenNoConnectedSavedDevice() {
         if (relayState == "已在线" && connectedSavedDeviceCount() == 0) {

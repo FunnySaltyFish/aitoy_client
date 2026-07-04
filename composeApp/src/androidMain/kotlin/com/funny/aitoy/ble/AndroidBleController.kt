@@ -785,7 +785,7 @@ class AndroidBleController(
             updateProtocolAttempt(
                 ProtocolAttemptStatus(
                     title = "自动识别失败",
-                    message = "已断开连接，可以换一个设备或打开高级工具导入指令",
+                    message = "已断开连接，可以换一个设备或加群提交设备信息",
                     currentIndex = protocolCandidates.size,
                     total = protocolCandidates.size,
                     failedNames = failedProtocolNames.toList(),
@@ -873,11 +873,11 @@ class AndroidBleController(
             updateProtocolAttempt(
                 ProtocolAttemptStatus(
                     title = "暂不支持这个设备",
-                    message = "已断开连接。可以打开高级工具导入同款设备指令后再试",
+                    message = "已断开连接。可以加群提交设备信息，后续版本会继续适配。",
                     failedNames = failedProtocolNames.toList(),
                 ),
             )
-            trace("未找到可用内置协议；可导入同款设备指令或按教程补充适配信息")
+            trace("未找到可用内置协议；可按教程补充适配信息")
             disconnectingAfterProtocolFailure = true
             updateState(BleConnectionState.Error)
             gatt.disconnect()

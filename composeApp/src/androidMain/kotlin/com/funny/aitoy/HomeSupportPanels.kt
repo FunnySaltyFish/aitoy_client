@@ -72,19 +72,7 @@ internal fun AiCompanion(vm: BridgeViewModel) {
             title = "手机上线",
             text = "让 AI 工具看到这台手机，并控制当前可用设备。",
             trailing = {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Button(onClick = vm::connectRelay) {
-                        Text("上线给 AI")
-                    }
-                    if (vm.relayState != "未连接") {
-                        OutlinedButton(onClick = vm::disconnectRelay) {
-                            Text("停止上线")
-                        }
-                    }
-                }
+                RelayStateButton(vm)
             },
         )
         Spacer(Modifier.height(10.dp))
@@ -105,11 +93,30 @@ internal fun AiCompanion(vm: BridgeViewModel) {
                 }
             },
         )
-        Spacer(Modifier.height(10.dp))
+    }
+}
+
+@Composable
+private fun RelayStateButton(vm: BridgeViewModel) {
+    val online = vm.relayState == "已在线"
+    val connecting = vm.relayState != "未连接" && !online
+    Button(
+        onClick = {
+            if (online || connecting) vm.disconnectRelay() else vm.connectRelay()
+        },
+        colors = ButtonDefaults.buttonColors(
+            containerColor = if (online) Mint else Rose,
+            contentColor = Ink,
+        ),
+    ) {
+        Icon(Icons.Outlined.PowerSettingsNew, null)
+        Spacer(Modifier.width(8.dp))
         Text(
-            "当前状态：${vm.relayState}",
-            color = if (vm.relayState == "已在线") Mint else TextSoft,
-            fontWeight = FontWeight.SemiBold,
+            when {
+                online -> "已上线，点击下线"
+                connecting -> "${vm.relayState}，点击取消"
+                else -> "上线 AI"
+            },
         )
     }
 }

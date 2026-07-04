@@ -48,7 +48,7 @@ class MainActivity : ComponentActivity() {
         AlertDialog.Builder(this)
             .setTitle("先允许连接设备")
             .setMessage(
-                "AI Toy 需要蓝牙权限来寻找并连接附近设备；通知权限用于在后台连接时保持可见状态。授权后，应用会继续回到当前页面。",
+                "AI Toy 需要蓝牙权限来寻找并连接附近设备；也建议开启通知权限，用于在后台连接时保持应用存活。授权后，应用会继续回到当前页面。",
             )
             .setPositiveButton("继续授权") { _, _ ->
                 permissionLauncher.launch(permissions)

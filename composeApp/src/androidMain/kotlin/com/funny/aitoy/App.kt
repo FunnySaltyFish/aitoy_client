@@ -1,5 +1,10 @@
 package com.funny.aitoy
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -14,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -23,17 +29,19 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.Autorenew
 import androidx.compose.material.icons.outlined.BluetoothSearching
 import androidx.compose.material.icons.outlined.Chat
+import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Favorite
-import androidx.compose.material.icons.outlined.HelpOutline
+import androidx.compose.material.icons.outlined.KeyboardArrowDown
+import androidx.compose.material.icons.outlined.KeyboardArrowUp
 import androidx.compose.material.icons.outlined.SettingsRemote
 import androidx.compose.material.icons.outlined.StopCircle
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -278,9 +286,15 @@ private fun formatBytes(bytes: Long): String {
     return "${bytes / 1024 / 1024} MB"
 }
 
+private data class HeaderStatus(
+    val text: String,
+    val color: Color,
+)
+
 @Composable
 private fun DeviceHeader(vm: BridgeViewModel) {
     val ready = vm.connectionState == BleConnectionState.Ready
+    val status = headerStatus(vm)
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -318,27 +332,7 @@ private fun DeviceHeader(vm: BridgeViewModel) {
             StatusPill(vm.connectionState)
         }
         Spacer(Modifier.height(10.dp))
-        Text(
-            text = if (ready) {
-                if (vm.protocolStatus.verifiedControl) {
-                    "已连接，可以开始使用。"
-                } else {
-                    "已连接，可以按当前设备能力控制。"
-                }
-            } else {
-                "选择一台设备连接，已连接的设备可以随时切换控制。"
-            },
-            color = TextMain,
-            style = MaterialTheme.typography.bodyMedium,
-        )
-        if (vm.busyHint.isNotBlank()) {
-            Spacer(Modifier.height(5.dp))
-            Text(vm.busyHint, color = Honey)
-        }
-        if (!ready && vm.protocolAttemptStatus.title.isNotBlank()) {
-            Spacer(Modifier.height(8.dp))
-            ProtocolAttemptInline(vm.protocolAttemptStatus)
-        }
+        HeaderStatusLine(status)
         Spacer(Modifier.height(10.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Button(
@@ -356,6 +350,63 @@ private fun DeviceHeader(vm: BridgeViewModel) {
                 }
             }
         }
+    }
+}
+
+private fun headerStatus(vm: BridgeViewModel): HeaderStatus {
+    val attempt = vm.protocolAttemptStatus
+    val operationalHint = vm.busyHint.takeIf {
+        it.isNotBlank() &&
+            !it.startsWith("正在为你连接") &&
+            !it.contains("连接不上")
+    }.orEmpty()
+    return when {
+        vm.connectionState == BleConnectionState.Connecting ->
+            HeaderStatus(vm.busyHint.ifBlank { "正在连接设备，请保持手机靠近。" }, Honey)
+        vm.connectionState == BleConnectionState.Discovering || attempt.active ->
+            HeaderStatus(attempt.message.ifBlank { attempt.title.ifBlank { "正在确认设备能力。" } }, Honey)
+        vm.connectionState == BleConnectionState.Error ->
+            HeaderStatus(vm.busyHint.ifBlank { attempt.message.ifBlank { "设备连接不上，请确认已开机并靠近手机。" } }, Danger)
+        vm.connectionState == BleConnectionState.Disconnecting ->
+            HeaderStatus("正在断开当前设备。", Honey)
+        vm.connectionState == BleConnectionState.Ready && operationalHint.isNotBlank() ->
+            HeaderStatus(operationalHint, if (operationalHint.contains("失败")) Danger else Mint)
+        vm.connectionState == BleConnectionState.Ready && vm.protocolStatus.verifiedControl ->
+            HeaderStatus("已连接，可以开始使用。", Mint)
+        vm.connectionState == BleConnectionState.Ready ->
+            HeaderStatus("已连接，可以按当前设备能力控制。", Mint)
+        vm.scanning ->
+            HeaderStatus("正在寻找附近设备，选择你的设备连接。", Honey)
+        vm.busyHint.isNotBlank() ->
+            HeaderStatus(vm.busyHint, Honey)
+        else ->
+            HeaderStatus("选择一台设备连接，已保存设备可直接连接。", TextSoft)
+    }
+}
+
+@Composable
+private fun HeaderStatusLine(status: HeaderStatus) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(status.color.copy(alpha = 0.10f), RoundedCornerShape(14.dp))
+            .border(1.dp, status.color.copy(alpha = 0.28f), RoundedCornerShape(14.dp))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(8.dp)
+                .background(status.color, CircleShape),
+        )
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text = status.text,
+            color = TextMain,
+            style = MaterialTheme.typography.bodyMedium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -494,45 +545,7 @@ private fun ConnectFlow(vm: BridgeViewModel) {
             Text(it, color = Danger)
         }
         ManagedDevices(vm)
-        DeviceList(vm.devices, vm.highlightedDeviceAddress, vm.toyRuntimeStates, vm::connect)
-    }
-}
-
-@Composable
-private fun ProtocolAttemptInline(status: ProtocolAttemptStatus) {
-    val accent = when {
-        status.success -> Mint
-        status.active -> Honey
-        else -> Danger
-    }
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(Color(0xFF221922))
-            .border(1.dp, Color(0x3341323D), RoundedCornerShape(14.dp))
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-    ) {
-        Text(status.title, color = accent, fontWeight = FontWeight.SemiBold)
-        if (status.message.isNotBlank()) {
-            Spacer(Modifier.height(3.dp))
-            Text(
-                status.message,
-                color = TextSoft,
-                style = MaterialTheme.typography.bodySmall,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        if (status.active && status.total > 1) {
-            Spacer(Modifier.height(8.dp))
-            LinearProgressIndicator(
-                progress = { status.currentIndex.toFloat() / status.total.toFloat() },
-                modifier = Modifier.fillMaxWidth(),
-                color = Honey,
-                trackColor = Color(0x33FFFFFF),
-            )
-        }
+        DeviceList(vm)
     }
 }
 
@@ -678,24 +691,56 @@ private fun ManagedDeviceRow(vm: BridgeViewModel, toy: ManagedToy) {
 }
 
 @Composable
-private fun DeviceList(
-    devices: List<ScannedBleDevice>,
-    selectedAddress: String,
-    states: Map<String, ToyRuntimeState>,
-    onConnect: (ScannedBleDevice) -> Unit,
-) {
+private fun DeviceList(vm: BridgeViewModel) {
+    val devices = vm.devices
     if (devices.isEmpty()) return
+    val expanded = vm.nearbyDevicesExpanded
     Spacer(Modifier.height(14.dp))
-    Text("附近发现", color = Honey, fontWeight = FontWeight.Bold)
-    Spacer(Modifier.height(8.dp))
-    devices.forEach { device ->
-        DeviceRow(
-            device = device,
-            selected = selectedAddress == device.address,
-            runtimeState = states[device.address],
-            onConnect = { onConnect(device) },
-        )
-        Spacer(Modifier.height(8.dp))
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color(0xFF211A22))
+            .border(1.dp, Line, RoundedCornerShape(16.dp)),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { vm.toggleNearbyDevicesExpanded() }
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("附近发现", color = Honey, fontWeight = FontWeight.Bold)
+                Text(
+                    "${devices.size} 台设备${if (expanded) "" else "，点击展开"}",
+                    color = TextSoft,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            Icon(
+                imageVector = if (expanded) Icons.Outlined.KeyboardArrowUp else Icons.Outlined.KeyboardArrowDown,
+                contentDescription = null,
+                tint = TextSoft,
+            )
+        }
+        AnimatedVisibility(
+            visible = expanded,
+            enter = fadeIn() + expandVertically(),
+            exit = fadeOut() + shrinkVertically(),
+        ) {
+            Column(Modifier.padding(horizontal = 10.dp, vertical = 2.dp)) {
+                devices.forEach { device ->
+                    DeviceRow(
+                        device = device,
+                        selected = vm.highlightedDeviceAddress == device.address,
+                        runtimeState = vm.toyRuntimeStates[device.address],
+                        onConnect = { vm.connect(device) },
+                    )
+                    Spacer(Modifier.height(8.dp))
+                }
+            }
+        }
     }
 }
 
@@ -829,24 +874,37 @@ private fun ControlRoom(vm: BridgeViewModel, toy: ManagedToy? = null) {
         }
         if (address == vm.selectedAddress && vm.controlTrialStarted && !vm.currentDeviceSaved) {
             Spacer(Modifier.height(8.dp))
-            Text("保存这台设备？", color = TextMain, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Button(
-                    modifier = Modifier
-                        .weight(1f)
-                        .testTag("control_confirm_works"),
-                    onClick = vm::confirmCurrentDeviceWorks,
-                    enabled = vm.protocolStatus.controllable,
-                    colors = ButtonDefaults.buttonColors(containerColor = Mint, contentColor = Ink),
-                ) {
-                    Text("正常")
-                }
-                OutlinedButton(
-                    modifier = Modifier.weight(1f),
-                    onClick = vm::reportCurrentDeviceNotWorking,
-                ) {
-                    Text("没反应")
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color(0xFF211A22))
+                    .border(1.dp, Line, RoundedCornerShape(16.dp))
+                    .padding(12.dp),
+            ) {
+                Text("设备有反应吗？", color = TextMain, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    ControlFeedbackChoice(
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("control_confirm_works"),
+                        icon = Icons.Outlined.CheckCircle,
+                        title = "能控制",
+                        description = "保存到我的设备，后续可直接连接。",
+                        color = Mint,
+                        enabled = vm.protocolStatus.controllable,
+                        onClick = vm::confirmCurrentDeviceWorks,
+                    )
+                    ControlFeedbackChoice(
+                        modifier = Modifier.weight(1f),
+                        icon = Icons.Outlined.Autorenew,
+                        title = "没反应",
+                        description = "继续尝试其他设备类型，直到没有可选项。",
+                        color = Rose,
+                        enabled = true,
+                        onClick = vm::reportCurrentDeviceNotWorking,
+                    )
                 }
             }
         }
@@ -870,6 +928,45 @@ private fun ControlRoom(vm: BridgeViewModel, toy: ManagedToy? = null) {
                 Text("立即停止")
             }
         }
+    }
+}
+
+@Composable
+private fun ControlFeedbackChoice(
+    modifier: Modifier = Modifier,
+    icon: ImageVector,
+    title: String,
+    description: String,
+    color: Color,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    val contentColor = if (enabled) color else TextSoft
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(14.dp))
+            .background(contentColor.copy(alpha = 0.10f))
+            .border(1.dp, contentColor.copy(alpha = 0.30f), RoundedCornerShape(14.dp))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, contentDescription = null, tint = contentColor, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(
+                title,
+                color = TextMain,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            description,
+            color = TextSoft,
+            style = MaterialTheme.typography.bodySmall,
+        )
     }
 }
 
@@ -1077,24 +1174,6 @@ internal fun Panel(
 internal fun SoftTitle(text: String, modifier: Modifier = Modifier) {
     Text(text, color = Honey, fontWeight = FontWeight.Bold, modifier = modifier)
     Spacer(Modifier.height(8.dp))
-}
-
-@Composable
-internal fun InfoTip(title: String, text: String) {
-    var open by remember { mutableIntStateOf(0) }
-    IconButton(onClick = { open += 1 }) {
-        Icon(Icons.Outlined.HelpOutline, contentDescription = title, tint = Honey)
-    }
-    if (open > 0) {
-        AlertDialog(
-            onDismissRequest = { open = 0 },
-            confirmButton = {
-                TextButton(onClick = { open = 0 }) { Text("知道了") }
-            },
-            title = { Text(title) },
-            text = { Text(text) },
-        )
-    }
 }
 
 @Composable
