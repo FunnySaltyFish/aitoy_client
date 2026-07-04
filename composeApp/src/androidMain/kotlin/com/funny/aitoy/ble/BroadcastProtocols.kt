@@ -113,17 +113,6 @@ internal object BleBroadcastProtocolRegistry {
         ),
         CachitoTemplateBroadcastProtocol(
             CachitoTemplateBroadcastSpec(
-                id = "cachito_mb_pro_advertise",
-                displayName = "Cachito MB Pro",
-                aliases = listOf("mbpro", "mb08", "漫步者pro", "漫步pro"),
-                framePrefixes = listOf("710006"),
-                modeNames = listOf("强度"),
-                commandTemplates = listOf({ progress -> cachitoSuctionTemplate("710006", progress) }),
-                stopTemplates = listOf("710006**-0400-####-0302-0000000000"),
-            )
-        ),
-        CachitoTemplateBroadcastProtocol(
-            CachitoTemplateBroadcastSpec(
                 id = "cachito_touhuan_advertise",
                 displayName = "Cachito 套环",
                 aliases = listOf("套环", "touhuan"),

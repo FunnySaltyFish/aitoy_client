@@ -29,6 +29,7 @@ import com.funny.aitoy.buttplug.WeVibeProtocolPlans
 import com.funny.aitoy.buttplug.normalizedUuidText
 import com.funny.aitoy.buttplug.toToyOutputKind
 import java.util.UUID
+import kotlin.random.Random
 
 internal sealed interface BleProtocolOperation {
     data class Read(val characteristicUuid: UUID) : BleProtocolOperation
@@ -113,6 +114,7 @@ internal object BleProtocolRegistry {
                     AnkniQd1Ff12GattProtocol,
                     AnkniQd1GattProtocol,
                     Ankni0010Protocol,
+                    CachitoMbProGattProtocol,
                     KissToyTutuIIProtocol,
                     KissToyOfficialV2Protocol,
                     AnkniYwtdProtocol,
@@ -2325,6 +2327,83 @@ private object SenseeCcpa10S2Protocol : BleDeviceProtocol {
         bytes = payload,
         withResponse = false,
     )
+}
+
+private object CachitoMbProGattProtocol : BleDeviceProtocol {
+    private val serviceUuid = uuid("0000ffe0-0000-1000-8000-00805f9b34fb")
+    private val writeUuid = uuid("0000ffe1-0000-1000-8000-00805f9b34fb")
+    private val notifyUuid = uuid("0000ffe2-0000-1000-8000-00805f9b34fb")
+    private val aliases = listOf("MB08", "MB Pro", "MBPro", "漫步者Pro", "漫步Pro")
+
+    override val status = BleProtocolStatus(
+        id = "cachito_mb_pro_gatt",
+        displayName = "Cachito MB Pro",
+        controllable = true,
+        intensityMax = 100,
+        supportsMode = false,
+        controlStyle = ToyControlStyle.IntensityOnly,
+        intensityLabel = "吮吸强度",
+        automatic = true,
+    )
+
+    override fun matches(fingerprint: BleGattFingerprint): Boolean {
+        val name = fingerprint.name.normalizedDeviceName()
+        val hasKnownName = aliases.any { alias -> name.contains(alias.normalizedDeviceName()) }
+        return hasKnownName &&
+            fingerprint.serviceUuids.contains(serviceUuid) &&
+            fingerprint.characteristicUuids.contains(writeUuid)
+    }
+
+    override fun initialize(fingerprint: BleGattFingerprint): List<BleProtocolOperation> =
+        if (fingerprint.characteristicUuids.contains(notifyUuid)) {
+            listOf(BleProtocolOperation.SubscribeNotify(notifyUuid))
+        } else {
+            emptyList()
+        }
+
+    override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
+        when (action) {
+            is ToyControlAction.Pattern ->
+                listOf(write(command(action.mode.coerceIn(0, status.intensityMax))))
+            is ToyControlAction.Intensity ->
+                listOf(write(command(action.value)))
+            is ToyControlAction.Combined ->
+                listOf(write(command(action.intensity)))
+            is ToyControlAction.DualMotor ->
+                listOf(write(command(action.strongestIntensity(status.intensityMax))))
+            ToyControlAction.Stop ->
+                listOf(write(command(0)))
+        }
+
+    private fun command(intensity: Int): ByteArray {
+        val scaled = (intensity.coerceIn(0, status.intensityMax) * 0.75 + 25).toInt()
+        val commandId = Random.nextInt(0x64, 0x100)
+        val bytes = bytes(
+            0x71,
+            0x00,
+            0x06,
+            commandId,
+            0x00,
+            0x00,
+            0x04,
+            0x31,
+            0x03,
+            0x02,
+            scaled,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+        )
+        return bytes + ((bytes.sumOf { it.toInt() and 0xff } and 0xff).toByte())
+    }
+
+    private fun write(bytes: ByteArray): BleProtocolOperation.Write =
+        BleProtocolOperation.Write(
+            characteristicUuid = writeUuid,
+            bytes = bytes,
+            withResponse = false,
+        )
 }
 
 private data class KissToyTutuIIRoute(

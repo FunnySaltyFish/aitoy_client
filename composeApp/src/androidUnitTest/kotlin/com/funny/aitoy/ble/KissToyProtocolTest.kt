@@ -5,6 +5,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertTrue
 
 class KissToyProtocolTest {
     @Test
@@ -225,6 +226,43 @@ class KissToyProtocolTest {
         assertEquals(null, protocol)
     }
 
+    @Test
+    fun cachitoMb08UsesOfficialFfe0GattRoute() {
+        val fingerprint = cachitoMb08Fingerprint()
+        val protocol = BleProtocolRegistry.resolveNative(fingerprint) ?: error("Cachito MB08 protocol not resolved")
+
+        assertEquals("cachito_mb_pro_gatt", protocol.status.id)
+        assertEquals("Cachito MB Pro", protocol.status.displayName)
+        assertEquals(ToyControlStyle.IntensityOnly, protocol.status.controlStyle)
+        assertEquals("吮吸强度", protocol.status.intensityLabel)
+
+        val init = protocol.initialize(fingerprint)
+        assertEquals(1, init.size)
+        assertEquals(FFE0_NOTIFY_UUID, assertIs<BleProtocolOperation.SubscribeNotify>(init[0]).characteristicUuid)
+
+        val run = protocol.commandsFor(ToyControlAction.Intensity(70))
+        val write = assertIs<BleProtocolOperation.Write>(run.single())
+        assertEquals(FFE0_WRITE_UUID, write.characteristicUuid)
+        assertFalse(write.withResponse)
+        assertEquals(16, write.bytes.size)
+        assertEquals("710006", write.bytes.copyOfRange(0, 3).hexUpper())
+        assertEquals("0000043103024D00000000", write.bytes.copyOfRange(4, 15).hexUpper())
+        assertEquals(
+            write.bytes.take(15).sumOf { it.toInt() and 0xff } and 0xff,
+            write.bytes.last().toInt() and 0xff,
+        )
+
+        val broadcastMatches = BleBroadcastProtocolRegistry.resolveAll(
+            ScannedBleDevice(
+                name = "MB08-V30-469C",
+                address = "EF:32:DF:D8:46:9C",
+                rssi = -45,
+                connectable = true,
+            ),
+        )
+        assertTrue(broadcastMatches.none { it.status.id == "cachito_mb_pro_advertise" })
+    }
+
     private fun ByteArray.hexUpper(): String =
         joinToString("") { byte -> "%02X".format(byte.toInt() and 0xff) }
 
@@ -323,6 +361,21 @@ class KissToyProtocolTest {
         characteristicUuids = setOf(
             KISSTOY_WRITE_UUID,
             KISSTOY_NOTIFY_UUID,
+            AE3A_WRITE_UUID,
+            AE3A_NOTIFY_UUID,
+            AE00_WRITE_UUID,
+            AE00_NOTIFY_UUID,
+        ),
+    )
+
+    private fun cachitoMb08Fingerprint() = BleGattFingerprint(
+        name = "MB08-V30-469C",
+        manufacturerData = "0x5d6:08 00 4A 4C 41 49 53 44 4B",
+        scanRecordHex = "",
+        serviceUuids = setOf(FFE0_SERVICE_UUID, AE3A_SERVICE_UUID, AE00_SERVICE_UUID),
+        characteristicUuids = setOf(
+            FFE0_WRITE_UUID,
+            FFE0_NOTIFY_UUID,
             AE3A_WRITE_UUID,
             AE3A_NOTIFY_UUID,
             AE00_WRITE_UUID,
