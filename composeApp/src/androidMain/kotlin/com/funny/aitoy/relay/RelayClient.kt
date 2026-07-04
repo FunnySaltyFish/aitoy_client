@@ -191,6 +191,18 @@ class RelayClient(
                     socket = null
                     connecting = false
                     onlineConfirmed = false
+                    if (code == SERVER_COMMAND_IDLE_CLOSE_CODE) {
+                        userRequestedOnline = false
+                        retryCount = 0
+                        mainHandler.removeCallbacks(reconnect)
+                        trace(
+                            "AI 伙伴已空闲，下次使用时再上线",
+                            type = "relay_idle_offline",
+                            uploadPolicy = AiToyTraceUploadPolicy.Always,
+                        )
+                        emitState("未连接")
+                        return
+                    }
                     if (userRequestedOnline) {
                         trace(
                             "AI 伙伴连接已断开，正在准备重连",
@@ -319,7 +331,7 @@ class RelayClient(
         trace("AI 伙伴同步状态 accepted=$accepted payload=$text")
         if (!accepted) {
             onlineConfirmed = false
-            emitState("等待重连")
+            emitState(if (userRequestedOnline) "等待重连" else "未连接")
             onTrace(
                 AiToyTraceEvent(
                     message = "AI 伙伴同步状态 accepted=false",
@@ -399,5 +411,6 @@ class RelayClient(
     companion object {
         private const val TAG = "AiToyRelay"
         private const val HEARTBEAT_INTERVAL_MS = 15_000L
+        private const val SERVER_COMMAND_IDLE_CLOSE_CODE = 4001
     }
 }
