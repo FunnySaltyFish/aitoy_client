@@ -75,6 +75,9 @@ internal data class BleGattFingerprint(
     val scanRecordHex: String,
     val serviceUuids: Set<UUID>,
     val characteristicUuids: Set<UUID>,
+    val preferredServiceUuid: UUID? = null,
+    val preferredWriteUuid: UUID? = null,
+    val preferredNotifyUuid: UUID? = null,
 ) {
     val sistalkProtocolVersion: Int
         get() = manufacturerData.firstManufacturerByte() ?: 0
@@ -114,7 +117,7 @@ internal object BleProtocolRegistry {
                     KissToyTutuIIA0d7Protocol,
                     KissToyTutuIIAe3aProtocol,
                     KissToyTutuIIAe00Protocol,
-                    KissToyOfficialV2DdddProtocol,
+                    KissToyOfficialV2Protocol,
                     AnkniYwtdProtocol,
                     KissToyProtocol,
                     WeVibeSyncLiteProtocol,
@@ -2388,18 +2391,16 @@ private data class KissToyOfficialV2Profile(
     val motors: List<KissToyOfficialV2Motor>,
 )
 
-private object KissToyOfficialV2DdddProtocol : BleDeviceProtocol {
-    private val route = KissToyTutuIIRoute(
-        id = "kisstoy_official_v2_dddd",
-        displayName = "KissToy",
-        serviceUuid = uuid("0000dddd-0000-1000-8000-00805f9b34fb"),
-        writeUuid = uuid("0000ddd1-0000-1000-8000-00805f9b34fb"),
-        notifyUuid = uuid("0000ddd2-0000-1000-8000-00805f9b34fb"),
-    )
+private data class KissToyOfficialV2Route(
+    val serviceUuid: UUID?,
+    val writeUuid: UUID,
+    val notifyUuid: UUID?,
+)
 
+private object KissToyOfficialV2Protocol : BleDeviceProtocol {
     override val status = BleProtocolStatus(
-        id = route.id,
-        displayName = route.displayName,
+        id = KISS_TOY_OFFICIAL_V2_PROTOCOL_ID,
+        displayName = "KissToy",
         controllable = true,
         intensityMax = 100,
         supportsMode = false,
@@ -2408,21 +2409,22 @@ private object KissToyOfficialV2DdddProtocol : BleDeviceProtocol {
     )
 
     override fun matches(fingerprint: BleGattFingerprint): Boolean =
-        fingerprint.hasRoute(route) && fingerprint.kissToyOfficialV2Profile() != null
+        fingerprint.kissToyOfficialV2Profile() != null && fingerprint.kissToyOfficialV2Route() != null
 
     override fun createInstance(fingerprint: BleGattFingerprint): BleDeviceProtocol {
         val profile = fingerprint.kissToyOfficialV2Profile() ?: return this
+        val route = fingerprint.kissToyOfficialV2Route() ?: return this
         return Session(route, profile)
     }
 
     override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> = emptyList()
 
     private class Session(
-        private val route: KissToyTutuIIRoute,
+        private val route: KissToyOfficialV2Route,
         private val profile: KissToyOfficialV2Profile,
     ) : BleDeviceProtocol {
         override val status = BleProtocolStatus(
-            id = route.id,
+            id = KISS_TOY_OFFICIAL_V2_PROTOCOL_ID,
             displayName = "KissToy ${profile.displayName}",
             controllable = true,
             intensityMax = 100,
@@ -2434,7 +2436,8 @@ private object KissToyOfficialV2DdddProtocol : BleDeviceProtocol {
         )
 
         override fun matches(fingerprint: BleGattFingerprint): Boolean =
-            fingerprint.hasRoute(route) && fingerprint.kissToyOfficialV2Profile()?.code == profile.code
+            fingerprint.kissToyOfficialV2Route() == route &&
+                fingerprint.kissToyOfficialV2Profile()?.code == profile.code
 
         override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
             when (action) {
@@ -2593,6 +2596,25 @@ private fun BleGattFingerprint.hasRoute(route: KissToyTutuIIRoute): Boolean =
         characteristicUuids.contains(route.writeUuid) &&
         characteristicUuids.contains(route.notifyUuid)
 
+private fun BleGattFingerprint.kissToyOfficialV2Route(): KissToyOfficialV2Route? {
+    val writeUuid = preferredWriteUuid ?: return null
+    val serviceUuid = preferredServiceUuid
+    val notifyUuid = preferredNotifyUuid
+    if (serviceUuid != null && !serviceUuids.contains(serviceUuid)) return null
+    if (!characteristicUuids.contains(writeUuid)) return null
+    if (notifyUuid != null && !characteristicUuids.contains(notifyUuid)) return null
+    if (isKissToyHistoricalGattRoute(serviceUuid, writeUuid)) return null
+    return KissToyOfficialV2Route(
+        serviceUuid = serviceUuid,
+        writeUuid = writeUuid,
+        notifyUuid = notifyUuid,
+    )
+}
+
+private fun isKissToyHistoricalGattRoute(serviceUuid: UUID?, writeUuid: UUID): Boolean =
+    serviceUuid == KISS_TOY_HISTORICAL_GATT_SERVICE_UUID ||
+        writeUuid == KISS_TOY_HISTORICAL_GATT_WRITE_UUID
+
 private fun BleGattFingerprint.hasKissToyTutuName(): Boolean {
     val normalizedName = name.normalizedDeviceName()
     return KISS_TOY_TUTU_ALIASES.any { alias -> normalizedName.contains(alias) }
@@ -2668,6 +2690,9 @@ private fun kissToyOfficialV2Encrypt(bytes: ByteArray): ByteArray {
 }
 
 private val KISS_TOY_TUTU_FIXED_KEY = bytes(0xea, 0x30, 0xbb, 0xdb, 0xad, 0xb6, 0xc6, 0x2f, 0xcf, 0xe9, 0xe9, 0x96)
+private const val KISS_TOY_OFFICIAL_V2_PROTOCOL_ID = "kisstoy_official_v2"
+private val KISS_TOY_HISTORICAL_GATT_SERVICE_UUID = uuid("00001000-0000-1000-8000-00805f9b34fb")
+private val KISS_TOY_HISTORICAL_GATT_WRITE_UUID = uuid("00001001-0000-1000-8000-00805f9b34fb")
 private const val KISS_TOY_TUTU_PACKET_PREFIX: Byte = 0x58
 private const val KISS_TOY_TUTU_AUTH_CHALLENGE_SIZE = 13
 private const val KISS_TOY_TUTU_AUTH_TIMEOUT_MS = 4_000L

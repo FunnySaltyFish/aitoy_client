@@ -202,6 +202,9 @@ class AndroidBleController(
                     .flatMap { it.characteristics }
                     .map { it.uuid }
                     .toSet(),
+                preferredServiceUuid = config.serviceUuid.toUuidOrNull(),
+                preferredWriteUuid = config.writeUuid.toUuidOrNull(),
+                preferredNotifyUuid = config.notifyUuid.toUuidOrNull(),
             )
             val discoveryOperationId = operationId
             val discoveredGatt = gatt
@@ -514,6 +517,9 @@ class AndroidBleController(
                 .flatMap { it.characteristics }
                 .map { it.uuid }
                 .toSet(),
+            preferredServiceUuid = currentTemplate.serviceUuid.toUuidOrNull(),
+            preferredWriteUuid = currentTemplate.writeUuid.toUuidOrNull(),
+            preferredNotifyUuid = currentTemplate.notifyUuid.toUuidOrNull(),
         )
         tryNextProtocol(
             fingerprint = fingerprint,
@@ -1197,6 +1203,9 @@ class AndroidBleController(
                         .flatMap { it.characteristics }
                         .map { it.uuid }
                         .toSet(),
+                    preferredServiceUuid = currentTemplate.serviceUuid.toUuidOrNull(),
+                    preferredWriteUuid = currentTemplate.writeUuid.toUuidOrNull(),
+                    preferredNotifyUuid = currentTemplate.notifyUuid.toUuidOrNull(),
                 )
                 tryNextProtocol(fingerprint, currentGatt, currentTemplate, reason)
                 return
