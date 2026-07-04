@@ -31,7 +31,7 @@ class KissToyProtocolTest {
 
         assertEquals("kisstoy_tutu2", protocol.status.id)
         assertEquals(ToyControlStyle.DualIntensityOnly, protocol.status.controlStyle)
-        assertEquals(listOf("伸缩", "震动"), protocol.status.channelNames)
+        assertEquals(listOf("震动", "伸缩"), protocol.status.channelNames)
 
         val init = protocol.initialize(tutuFingerprint())
         assertIs<BleProtocolOperation.SubscribeNotify>(init[0])
@@ -45,10 +45,17 @@ class KissToyProtocolTest {
         assertEquals("58EA31B9D8A9B3C028C7E0E39D", authWrite.bytes.hexUpper())
 
         val run = protocol.commandsFor(ToyControlAction.DualMotor(mode = 1, internalIntensity = 50, externalIntensity = 50))
-        val write = assertIs<BleProtocolOperation.Write>(run.single())
+        assertEquals(2, run.size)
+        val write = assertIs<BleProtocolOperation.Write>(run[0])
         assertEquals(TUTU_WRITE_UUID, write.characteristicUuid)
         assertFalse(write.withResponse)
         assertEquals("58FF0102DB8492C6FFCFFFFFFF", write.bytes.hexUpper())
+
+        val vibrateOnly = protocol.commandsFor(ToyControlAction.DualMotor(mode = 1, internalIntensity = 50, externalIntensity = 0))
+        assertEquals("58FF0102DB84B6C6FFCFFFFFFF", assertIs<BleProtocolOperation.Write>(vibrateOnly[0]).bytes.hexUpper())
+
+        val stretchOnly = protocol.commandsFor(ToyControlAction.DualMotor(mode = 1, internalIntensity = 0, externalIntensity = 50))
+        assertEquals("58FF0102DBAD92C6FFCFFFFFFF", assertIs<BleProtocolOperation.Write>(stretchOnly[0]).bytes.hexUpper())
 
         assertEquals(200L, protocol.keepaliveIntervalMs())
 

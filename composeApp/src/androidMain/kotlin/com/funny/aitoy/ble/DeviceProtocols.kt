@@ -2397,9 +2397,8 @@ private class KissToyTutuIIProtocolVariant(
         supportsMode = false,
         controlStyle = ToyControlStyle.DualIntensityOnly,
         intensityLabel = "强度",
-        channelNames = listOf("伸缩", "震动"),
+        channelNames = listOf("震动", "伸缩"),
         automatic = true,
-        repeatIntervalMs = KISS_TOY_TUTU_REPEAT_MS,
     )
 
     override fun matches(fingerprint: BleGattFingerprint): Boolean {
@@ -2450,21 +2449,22 @@ private class KissToyTutuIIProtocolVariant(
                 ToyControlAction.Stop -> stopBurst()
             }
 
-        private fun runDual(stretchIntensity: Int, vibrateIntensity: Int): List<BleProtocolOperation> {
-            if (stretchIntensity <= 0 && vibrateIntensity <= 0) return stopBurst()
+        private fun runDual(vibrateIntensity: Int, stretchIntensity: Int): List<BleProtocolOperation> {
+            if (vibrateIntensity <= 0 && stretchIntensity <= 0) return stopBurst()
             return listOf(
                 write(
                     motorPacket(
-                        stretchIntensity.scaleKissToyTutuPercent(
+                        vibrateIntensity.scaleKissToyTutuPercent(
                             max = KISS_TOY_TUTU_MOTOR1_MAX,
                             intensityMax = status.intensityMax,
                         ),
-                        vibrateIntensity.scaleKissToyTutuPercent(
+                        stretchIntensity.scaleKissToyTutuPercent(
                             max = KISS_TOY_TUTU_MOTOR2_MAX,
                             intensityMax = status.intensityMax,
                         ),
                     )
-                )
+                ),
+                BleProtocolOperation.Sleep(KISS_TOY_TUTU_WRITE_SETTLE_MS),
             )
         }
 
@@ -2525,7 +2525,8 @@ private const val KISS_TOY_TUTU_AUTH_SETTLE_MS = 1_000L
 private const val KISS_TOY_TUTU_MOTOR1_MAX = 82
 private const val KISS_TOY_TUTU_MOTOR2_MAX = 73
 private const val KISS_TOY_TUTU_REPEAT_MS = 200
-private const val KISS_TOY_TUTU_STOP_REPEAT_DELAY_MS = 80L
+private const val KISS_TOY_TUTU_WRITE_SETTLE_MS = 160L
+private const val KISS_TOY_TUTU_STOP_REPEAT_DELAY_MS = 200L
 private val KISS_TOY_TUTU_ALIASES = listOf("QCTT", "迷路", "突突", "tutu", "tutu2", "tutuii", "kisstoytutu")
     .map { it.normalizedDeviceName() }
 

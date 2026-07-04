@@ -418,8 +418,7 @@ class AndroidBleController(
                             key = "ble_command_summary:gatt:${protocol.status.id}:$action",
                             intervalMs = 2_000L,
                         )
-                        enqueue(commands)
-                        updateProtocolKeepalive(protocol, action, commands)
+                        enqueueControl(protocol, action, commands)
                     }
                 },
                 warmupMs,
@@ -433,8 +432,7 @@ class AndroidBleController(
             key = "ble_command_summary:gatt:${protocol.status.id}:$action",
             intervalMs = 2_000L,
         )
-        enqueue(commands)
-        updateProtocolKeepalive(protocol, action, commands)
+        enqueueControl(protocol, action, commands)
     }
 
     fun stopDevice() = sendAction(ToyControlAction.Stop)
@@ -920,6 +918,19 @@ class AndroidBleController(
         keepaliveRunnable = null
         keepaliveProtocol = null
         keepaliveOperations = emptyList()
+    }
+
+    private fun enqueueControl(
+        protocol: BleDeviceProtocol,
+        action: ToyControlAction,
+        operations: List<BleProtocolOperation>,
+    ) {
+        if (action == ToyControlAction.Stop) {
+            cancelProtocolKeepalive()
+            operationQueue.clear()
+        }
+        enqueue(operations)
+        updateProtocolKeepalive(protocol, action, operations)
     }
 
     private fun cancelProtocolReadyWait() {
