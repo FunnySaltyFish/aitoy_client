@@ -2510,18 +2510,31 @@ private fun BleGattFingerprint.hasRoute(route: KissToyTutuIIRoute): Boolean =
         characteristicUuids.contains(route.notifyUuid)
 
 private fun BleGattFingerprint.kissToyOfficialV2Route(): KissToyOfficialV2Route? {
-    val writeUuid = preferredWriteUuid ?: return null
-    val serviceUuid = preferredServiceUuid
-    val notifyUuid = preferredNotifyUuid
-    if (serviceUuid != null && !serviceUuids.contains(serviceUuid)) return null
-    if (!characteristicUuids.contains(writeUuid)) return null
-    if (notifyUuid != null && !characteristicUuids.contains(notifyUuid)) return null
-    if (isKissToyHistoricalGattRoute(serviceUuid, writeUuid)) return null
-    return KissToyOfficialV2Route(
-        serviceUuid = serviceUuid,
-        writeUuid = writeUuid,
-        notifyUuid = notifyUuid,
-    )
+    preferredWriteUuid?.let { writeUuid ->
+        val serviceUuid = preferredServiceUuid
+        val notifyUuid = preferredNotifyUuid
+        if (serviceUuid != null && !serviceUuids.contains(serviceUuid)) return null
+        if (!characteristicUuids.contains(writeUuid)) return null
+        if (notifyUuid != null && !characteristicUuids.contains(notifyUuid)) return null
+        if (isKissToyHistoricalGattRoute(serviceUuid, writeUuid)) return null
+        return KissToyOfficialV2Route(
+            serviceUuid = serviceUuid,
+            writeUuid = writeUuid,
+            notifyUuid = notifyUuid,
+        )
+    }
+    return KISS_TOY_OFFICIAL_V2_DISCOVERY_ROUTES.firstOrNull { hasKissToyOfficialV2Route(it) }
+}
+
+private fun BleGattFingerprint.hasKissToyOfficialV2Route(route: KissToyOfficialV2Route): Boolean {
+    val serviceUuid = route.serviceUuid
+    val writeUuid = route.writeUuid
+    val notifyUuid = route.notifyUuid
+    if (serviceUuid != null && !serviceUuids.contains(serviceUuid)) return false
+    if (!characteristicUuids.contains(writeUuid)) return false
+    if (notifyUuid != null && !characteristicUuids.contains(notifyUuid)) return false
+    if (isKissToyHistoricalGattRoute(serviceUuid, writeUuid)) return false
+    return true
 }
 
 private fun isKissToyHistoricalGattRoute(serviceUuid: UUID?, writeUuid: UUID): Boolean =
@@ -2643,6 +2656,23 @@ private val KISS_TOY_TUTU_FIXED_KEY = bytes(0xea, 0x30, 0xbb, 0xdb, 0xad, 0xb6, 
 private const val KISS_TOY_OFFICIAL_V2_PROTOCOL_ID = "kisstoy_official_v2"
 private val KISS_TOY_HISTORICAL_GATT_SERVICE_UUID = uuid("00001000-0000-1000-8000-00805f9b34fb")
 private val KISS_TOY_HISTORICAL_GATT_WRITE_UUID = uuid("00001001-0000-1000-8000-00805f9b34fb")
+private val KISS_TOY_OFFICIAL_V2_DISCOVERY_ROUTES = listOf(
+    KissToyOfficialV2Route(
+        serviceUuid = uuid("0000ae3a-0000-1000-8000-00805f9b34fb"),
+        writeUuid = uuid("0000ae3b-0000-1000-8000-00805f9b34fb"),
+        notifyUuid = uuid("0000ae3c-0000-1000-8000-00805f9b34fb"),
+    ),
+    KissToyOfficialV2Route(
+        serviceUuid = uuid("0000dddd-0000-1000-8000-00805f9b34fb"),
+        writeUuid = uuid("0000ddd1-0000-1000-8000-00805f9b34fb"),
+        notifyUuid = uuid("0000ddd2-0000-1000-8000-00805f9b34fb"),
+    ),
+    KissToyOfficialV2Route(
+        serviceUuid = uuid("0000ffe0-0000-1000-8000-00805f9b34fb"),
+        writeUuid = uuid("0000ffe1-0000-1000-8000-00805f9b34fb"),
+        notifyUuid = uuid("0000ffe2-0000-1000-8000-00805f9b34fb"),
+    ),
+)
 private const val KISS_TOY_TUTU_PACKET_PREFIX: Byte = 0x58
 private const val KISS_TOY_TUTU_AUTH_CHALLENGE_SIZE = 13
 private const val KISS_TOY_TUTU_AUTH_TIMEOUT_MS = 4_000L

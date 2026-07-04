@@ -152,6 +152,23 @@ class KissToyProtocolTest {
     }
 
     @Test
+    fun qcpwLiveAe3aGattSummaryPrefersOfficialV2BeforeHistoricalRoute() {
+        val fingerprint = qcpwLiveAe3aFingerprint()
+        val protocols = BleProtocolRegistry.resolveNativeAll(fingerprint)
+
+        assertEquals("kisstoy_official_v2", protocols.first().status.id)
+        assertEquals("KissToy 迷路-入体版", protocols.first().status.displayName)
+        assertEquals(ToyControlStyle.DualIntensityOnly, protocols.first().status.controlStyle)
+        assertEquals(listOf("震动", "吮吸"), protocols.first().status.channelNames)
+
+        val run = protocols.first().commandsFor(ToyControlAction.DualMotor(mode = 1, internalIntensity = 50, externalIntensity = 25))
+        assertEquals(AE3A_WRITE_UUID, assertIs<BleProtocolOperation.Write>(run[0]).characteristicUuid)
+        assertEquals("4602A64694D888666676B6D6", assertIs<BleProtocolOperation.Write>(run[0]).bytes.hexUpper())
+        assertEquals(AE3A_WRITE_UUID, assertIs<BleProtocolOperation.Write>(run[2]).characteristicUuid)
+        assertEquals("4602A64694D29F466676B6BF", assertIs<BleProtocolOperation.Write>(run[2]).bytes.hexUpper())
+    }
+
+    @Test
     fun qcpwHistoricalKissToyRouteDoesNotUseOfficialV2() {
         val protocols = BleProtocolRegistry.resolveNativeAll(
             officialV2Fingerprint(
@@ -294,6 +311,21 @@ class KissToyProtocolTest {
         characteristicUuids = emptySet(),
     )
 
+    private fun qcpwLiveAe3aFingerprint() = BleGattFingerprint(
+        name = "QCPW",
+        manufacturerData = "0x5d6:08 00 4A 4C 41 49 53 44 4B, 0x5756:E9 AD FE FC F7 35",
+        scanRecordHex = "",
+        serviceUuids = setOf(KISSTOY_SERVICE_UUID, AE3A_SERVICE_UUID, AE00_SERVICE_UUID),
+        characteristicUuids = setOf(
+            KISSTOY_WRITE_UUID,
+            KISSTOY_NOTIFY_UUID,
+            AE3A_WRITE_UUID,
+            AE3A_NOTIFY_UUID,
+            AE00_WRITE_UUID,
+            AE00_NOTIFY_UUID,
+        ),
+    )
+
     private companion object {
         val KISSTOY_SERVICE_UUID: UUID = UUID.fromString("00001000-0000-1000-8000-00805f9b34fb")
         val KISSTOY_WRITE_UUID: UUID = UUID.fromString("00001001-0000-1000-8000-00805f9b34fb")
@@ -314,5 +346,9 @@ class KissToyProtocolTest {
         val AE3A_SERVICE_UUID: UUID = UUID.fromString("0000ae3a-0000-1000-8000-00805f9b34fb")
         val AE3A_WRITE_UUID: UUID = UUID.fromString("0000ae3b-0000-1000-8000-00805f9b34fb")
         val AE3A_NOTIFY_UUID: UUID = UUID.fromString("0000ae3c-0000-1000-8000-00805f9b34fb")
+
+        val AE00_SERVICE_UUID: UUID = UUID.fromString("0000ae00-0000-1000-8000-00805f9b34fb")
+        val AE00_WRITE_UUID: UUID = UUID.fromString("0000ae01-0000-1000-8000-00805f9b34fb")
+        val AE00_NOTIFY_UUID: UUID = UUID.fromString("0000ae02-0000-1000-8000-00805f9b34fb")
     }
 }

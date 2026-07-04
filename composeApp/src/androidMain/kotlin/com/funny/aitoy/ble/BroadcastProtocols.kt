@@ -115,7 +115,7 @@ internal object BleBroadcastProtocolRegistry {
             CachitoTemplateBroadcastSpec(
                 id = "cachito_mb_pro_advertise",
                 displayName = "Cachito MB Pro",
-                aliases = listOf("mbpro"),
+                aliases = listOf("mbpro", "mb08", "漫步者pro", "漫步pro"),
                 framePrefixes = listOf("710006"),
                 modeNames = listOf("强度"),
                 commandTemplates = listOf({ progress -> cachitoSuctionTemplate("710006", progress) }),
