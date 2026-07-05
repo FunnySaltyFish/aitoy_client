@@ -27,52 +27,43 @@ class KissToyProtocolTest {
     }
 
     @Test
-    fun tutuIISubscribesNotifyWithoutFakeAuthAndUsesOfficialV2MotorPackets() {
+    fun tutuIIUsesChallengeAuthAndBtsnoopMotorFrame() {
         val protocol = BleProtocolRegistry.resolveNative(tutuFingerprint()) ?: error("KissToy Tutu II protocol not resolved")
 
         assertEquals("kisstoy_tutu2", protocol.status.id)
         assertEquals(ToyControlStyle.DualIntensityOnly, protocol.status.controlStyle)
         assertEquals(listOf("底座伸缩", "头部伸缩"), protocol.status.channelNames)
 
-        // 对齐官方 App onDeviceConnectSuccess：只订阅 AE3C，不设 ready gate、不发认证帧，订阅即可控制。
+        // 订阅 AE3C 后等待挑战，认证完成才就绪（对齐真机 btsnoop 会话流程）。
         val init = protocol.initialize(tutuFingerprint())
-        assertEquals(1, init.size)
-        assertEquals(TUTU_NOTIFY_UUID, assertIs<BleProtocolOperation.SubscribeNotify>(init[0]).characteristicUuid)
+        assertIs<BleProtocolOperation.SubscribeNotify>(init[0])
+        assertIs<BleProtocolOperation.WaitForProtocolReady>(init[1])
+        assertFalse(protocol.isProtocolReady())
+
+        // 认证响应 = 58 + XOR(challenge[1:13], K_FIXED)。挑战全零 payload 时响应即 58 + K_FIXED。
+        val auth = protocol.onNotify(TUTU_NOTIFY_UUID, "58000000000000000000000000".hexBytes()).first()
+        val authWrite = assertIs<BleProtocolOperation.Write>(auth)
+        assertEquals(TUTU_WRITE_UUID, authWrite.characteristicUuid)
+        assertFalse(authWrite.withResponse)
+        assertEquals("58EA30BBDBADB6C62FCFE9E996", authWrite.bytes.hexUpper())
         assertTrue(protocol.isProtocolReady())
 
-        // AE3C 通知只回传状态/电量，协议不应据此回写任何“认证”帧。
-        assertEquals(emptyList(), protocol.onNotify(TUTU_NOTIFY_UUID, "58000102030405060708090a0b".hexBytes()))
-
-        val run = protocol.commandsFor(ToyControlAction.DualMotor(mode = 1, internalIntensity = 50, externalIntensity = 50))
-        assertEquals(4, run.size)
-        val baseWrite = assertIs<BleProtocolOperation.Write>(run[0])
-        assertEquals(TUTU_WRITE_UUID, baseWrite.characteristicUuid)
-        assertFalse(baseWrite.withResponse)
-        assertEquals("4602A64694D888666676B6D6", baseWrite.bytes.hexUpper())
-        val headWrite = assertIs<BleProtocolOperation.Write>(run[2])
-        assertEquals(TUTU_WRITE_UUID, headWrite.characteristicUuid)
-        assertFalse(headWrite.withResponse)
-        assertEquals("4602A646945888666676B656", headWrite.bytes.hexUpper())
-
-        val baseOnly = protocol.commandsFor(ToyControlAction.DualMotor(mode = 1, internalIntensity = 50, externalIntensity = 0))
-        assertEquals("4602A64694D888666676B6D6", assertIs<BleProtocolOperation.Write>(baseOnly[0]).bytes.hexUpper())
-        assertEquals("4602A646945876866676B624", assertIs<BleProtocolOperation.Write>(baseOnly[2]).bytes.hexUpper())
-
-        val headOnly = protocol.commandsFor(ToyControlAction.DualMotor(mode = 1, internalIntensity = 0, externalIntensity = 50))
-        assertEquals("4602A64694D876866676B6A4", assertIs<BleProtocolOperation.Write>(headOnly[0]).bytes.hexUpper())
-        assertEquals("4602A646945888666676B656", assertIs<BleProtocolOperation.Write>(headOnly[2]).bytes.hexUpper())
+        // 电机帧：明文 15 31 b9 00 <M1> <M2> 00 d0 00 16 16 69，整包 XOR K_FIXED 加 0x58 头。
+        // DualMotor 强度 0..100 线性映射到 0..255；M1=头部(external)、M2=底座(internal)。
+        // 算法与 spec btsnoop Max 示例一致（明文 …24 52 49 17… → 密文 …ff ff ff d1…）。
+        val full = protocol.commandsFor(ToyControlAction.DualMotor(mode = 1, internalIntensity = 100, externalIntensity = 100))
+        val fullWrite = assertIs<BleProtocolOperation.Write>(full.single())
+        assertEquals(TUTU_WRITE_UUID, fullWrite.characteristicUuid)
+        assertFalse(fullWrite.withResponse)
+        assertEquals("58FF0102DB5249C6FFCFFFFFFF", fullWrite.bytes.hexUpper())
 
         assertEquals(500L, protocol.keepaliveIntervalMs())
 
+        // 停止：M1=M2=0，明文 15 31 b9 00 00 00 00 d0 00 16 16 69。
         val stop = protocol.commandsFor(ToyControlAction.Stop)
-        assertEquals(6, stop.size)
-        val stopWrites = stop.filterIsInstance<BleProtocolOperation.Write>()
-        assertEquals(4, stopWrites.size)
-        stopWrites.forEach { assertEquals(TUTU_WRITE_UUID, it.characteristicUuid) }
-        assertEquals("4602A64694D876866676B6A4", stopWrites[0].bytes.hexUpper())
-        assertEquals("4602A646945876866676B624", stopWrites[1].bytes.hexUpper())
-        assertEquals("4602A64694D876866676B6A4", stopWrites[2].bytes.hexUpper())
-        assertEquals("4602A646945876866676B624", stopWrites[3].bytes.hexUpper())
+        val stopWrite = assertIs<BleProtocolOperation.Write>(stop.single())
+        assertEquals(TUTU_WRITE_UUID, stopWrite.characteristicUuid)
+        assertEquals("58FF0102DBADB6C6FFCFFFFFFF", stopWrite.bytes.hexUpper())
     }
 
     @Test
@@ -255,12 +246,15 @@ class KissToyProtocolTest {
 
         val route = protocols.first()
         val init = route.initialize(qcttLiveAe3aFingerprint())
-        assertEquals(1, init.size)
+        assertEquals(2, init.size)
         assertEquals(AE3A_NOTIFY_UUID, assertIs<BleProtocolOperation.SubscribeNotify>(init[0]).characteristicUuid)
-        assertTrue(route.isProtocolReady())
+        assertIs<BleProtocolOperation.WaitForProtocolReady>(init[1])
+        assertFalse(route.isProtocolReady())
 
-        // AE3C 通知不触发认证回写；控制帧直接写 AE3B。
-        assertEquals(emptyList(), route.onNotify(AE3A_NOTIFY_UUID, "58000102030405060708090a0b".hexBytes()))
+        // 收到挑战后回认证帧到 AE3B，认证完成才就绪。
+        val auth = route.onNotify(AE3A_NOTIFY_UUID, "58000102030405060708090a0b".hexBytes()).first()
+        assertEquals(AE3A_WRITE_UUID, assertIs<BleProtocolOperation.Write>(auth).characteristicUuid)
+        assertTrue(route.isProtocolReady())
         val run = route.commandsFor(ToyControlAction.DualMotor(mode = 1, internalIntensity = 50, externalIntensity = 50))
         assertEquals(AE3A_WRITE_UUID, assertIs<BleProtocolOperation.Write>(run[0]).characteristicUuid)
     }

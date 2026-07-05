@@ -2694,14 +2694,8 @@ private val KissToyTutuIIProtocol = KissToyTutuIIProtocolVariant(
 private data class KissToyOfficialV2Motor(
     val type: Int,
     val label: String,
-    val command: ByteArray,
     val startUp: Double = 0.2,
 )
-
-private enum class KissToyOfficialV2ControlFrame {
-    BasicControlMode58,
-    LegacyMotorPacket,
-}
 
 private data class KissToyOfficialV2Profile(
     val code: String,
@@ -2712,9 +2706,8 @@ private data class KissToyOfficialV2Profile(
     val intensityMax: Int = 100,
     val intensityLabel: String = "强度",
     val bleHeader: Int = 0x58,
-    val controlFrame: KissToyOfficialV2ControlFrame = KissToyOfficialV2ControlFrame.BasicControlMode58,
-    // QCTT 突突二代由独立 handler 承接（保留 kisstoy_tutu2 id、专属通道名与保活），
-    // 与通用官方 V2 handler 互斥；官方 App 对该设备并无 challenge-response 认证。
+    // QCTT 突突二代由独立 handler `KissToyTutuIIProtocol` 承接（保留 kisstoy_tutu2 id、专属通道名与保活，
+    // 并按真机 btsnoop 做 challenge-response 认证与 15 31 b9 控制帧），与通用官方 V2 handler 互斥。
     val usesDedicatedTutuRoute: Boolean = false,
 )
 
@@ -2780,7 +2773,6 @@ private object KissToyOfficialV2Protocol : BleDeviceProtocol {
             profile.commandsForOfficialV2(
                 action = action,
                 intensityMax = status.intensityMax,
-                trailingRunSettle = false,
                 write = ::write,
             )
 
@@ -2822,24 +2814,53 @@ private class KissToyTutuIIProtocolVariant(
         private val route: KissToyTutuIIRoute,
         override val status: BleProtocolStatus,
     ) : BleDeviceProtocol {
+        private var authenticated = false
+
         override fun matches(fingerprint: BleGattFingerprint): Boolean =
             fingerprint.kissToyOfficialV2Profile()?.usesDedicatedTutuRoute == true && fingerprint.hasRoute(route)
 
-        // 对齐官方 App onDeviceConnectSuccess：发现 AE3A 后订阅 AE3C 通知即可控制。
-        // 官方 AE3C 通知只用于回传状态/电量（onV2BleCharacteristicValue 仅解密读取，不回写），
-        // 不存在 challenge-response 认证，因此这里不设 ready gate、不发认证帧。
+        // 突突二代帧格式与认证按真机 btsnoop 抓包（OWALabuy/ai-love-machines）：
+        // 订阅 AE3C 后设备下发 13 字节挑战 `58 c0..c11`，客户端回 `58 + XOR(challenge[1:13], K_FIXED)` 完成认证，
+        // 之后才接受电机控制帧。认证前必须等待挑战通知，因此设 ready gate。
         override fun initialize(fingerprint: BleGattFingerprint): List<BleProtocolOperation> =
-            listOf(BleProtocolOperation.SubscribeNotify(route.notifyUuid))
+            listOf(
+                BleProtocolOperation.SubscribeNotify(route.notifyUuid),
+                BleProtocolOperation.WaitForProtocolReady(KISS_TOY_TUTU_AUTH_TIMEOUT_MS),
+            )
+
+        override fun onNotify(characteristicUuid: UUID, bytes: ByteArray): List<BleProtocolOperation> {
+            if (characteristicUuid != route.notifyUuid || authenticated) return emptyList()
+            if (bytes.size < KISS_TOY_TUTU_PACKET_SIZE || bytes[0] != KISS_TOY_TUTU_PACKET_PREFIX) return emptyList()
+            authenticated = true
+            return listOf(
+                write(kissToyTutuAuthResponse(bytes)),
+                BleProtocolOperation.Sleep(KISS_TOY_TUTU_AUTH_SETTLE_MS),
+            )
+        }
+
+        override fun isProtocolReady(): Boolean = authenticated
 
         override fun keepaliveIntervalMs(): Long = KISS_TOY_TUTU_REPEAT_MS.toLong()
 
-        override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
-            KISS_TOY_TUTU_OFFICIAL_V2_PROFILE.commandsForOfficialV2(
-                action = action,
-                intensityMax = status.intensityMax,
-                trailingRunSettle = true,
-                write = ::write,
-            )
+        override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> {
+            val (motor1, motor2) = tutuMotorSpeeds(action)
+            return listOf(write(kissToyTutuMotorPacket(motor1, motor2)))
+        }
+
+        // 通道语义按官方设备表 QCTT motors=[type1, type4]：底座伸缩=type1、头部伸缩=type4。
+        // 帧内 byte4=Motor1(头部/thrusting)、byte5=Motor2(底座/vibration)，映射到界面通道时对应回填。
+        private fun tutuMotorSpeeds(action: ToyControlAction): Pair<Int, Int> =
+            when (action) {
+                is ToyControlAction.DualMotor ->
+                    action.externalIntensity.scaleTutuSpeed() to action.internalIntensity.scaleTutuSpeed()
+                is ToyControlAction.Intensity -> action.value.scaleTutuSpeed().let { it to it }
+                is ToyControlAction.Combined -> action.intensity.scaleTutuSpeed().let { it to it }
+                is ToyControlAction.Pattern -> 50.scaleTutuSpeed().let { it to it }
+                ToyControlAction.Stop -> 0 to 0
+            }
+
+        private fun Int.scaleTutuSpeed(): Int =
+            (coerceIn(0, status.intensityMax) * 255 / status.intensityMax.coerceAtLeast(1)).coerceIn(0, 255)
 
         private fun write(bytes: ByteArray): BleProtocolOperation.Write =
             BleProtocolOperation.Write(
@@ -2850,6 +2871,30 @@ private class KissToyTutuIIProtocolVariant(
     }
 
 }
+
+// 认证响应：`58 + XOR(challenge[1:13], K_FIXED)`，K_FIXED 为会话无关的固定 12 字节共享密钥。
+private fun kissToyTutuAuthResponse(challenge: ByteArray): ByteArray =
+    byteArrayOf(KISS_TOY_TUTU_PACKET_PREFIX) +
+        challenge.copyOfRange(1, KISS_TOY_TUTU_PACKET_SIZE).xorKissToyTutuFixedKey()
+
+// 电机控制明文 `15 31 b9 <seq> <M1> <M2> <seq> d0 <seq> 16 16 69`，再整包异或 K_FIXED 加 `0x58` 头。
+// seq 位设备不校验，固定 0；M1=byte4（头部/thrusting）、M2=byte5（底座/vibration）。
+private fun kissToyTutuMotorPacket(motor1: Int, motor2: Int): ByteArray {
+    val plaintext = intArrayOf(
+        0x15, 0x31, 0xb9, 0x00,
+        motor1 and 0xff, motor2 and 0xff,
+        0x00, 0xd0, 0x00, 0x16, 0x16, 0x69,
+    )
+    return byteArrayOf(KISS_TOY_TUTU_PACKET_PREFIX) +
+        ByteArray(plaintext.size) { index ->
+            (plaintext[index] xor KISS_TOY_TUTU_FIXED_KEY[index].toInt()).toByte()
+        }
+}
+
+private fun ByteArray.xorKissToyTutuFixedKey(): ByteArray =
+    ByteArray(size.coerceAtMost(KISS_TOY_TUTU_FIXED_KEY.size)) { index ->
+        (this[index].toInt() xor KISS_TOY_TUTU_FIXED_KEY[index].toInt()).toByte()
+    }
 
 private fun BleGattFingerprint.hasRoute(route: KissToyTutuIIRoute): Boolean =
     serviceUuids.contains(route.serviceUuid) &&
@@ -2909,54 +2954,27 @@ private fun BleGattFingerprint.kissToyOfficialV2Profile(): KissToyOfficialV2Prof
 private fun KissToyOfficialV2Profile.commandsForOfficialV2(
     action: ToyControlAction,
     intensityMax: Int,
-    trailingRunSettle: Boolean,
     write: (ByteArray) -> BleProtocolOperation.Write,
 ): List<BleProtocolOperation> =
     when (action) {
-        is ToyControlAction.DualMotor -> runOfficialV2(dualIntensities(action.internalIntensity, action.externalIntensity), intensityMax, trailingRunSettle, write)
-        is ToyControlAction.Intensity -> runOfficialV2(sameIntensities(action.value), intensityMax, trailingRunSettle, write)
-        is ToyControlAction.Combined -> runOfficialV2(sameIntensities(action.intensity), intensityMax, trailingRunSettle, write)
-        is ToyControlAction.Pattern -> runOfficialV2(sameIntensities(50), intensityMax, trailingRunSettle, write)
+        is ToyControlAction.DualMotor -> runOfficialV2(dualIntensities(action.internalIntensity, action.externalIntensity), intensityMax, write)
+        is ToyControlAction.Intensity -> runOfficialV2(sameIntensities(action.value), intensityMax, write)
+        is ToyControlAction.Combined -> runOfficialV2(sameIntensities(action.intensity), intensityMax, write)
+        is ToyControlAction.Pattern -> runOfficialV2(sameIntensities(50), intensityMax, write)
         ToyControlAction.Stop -> stopOfficialV2(write)
     }
 
 private fun KissToyOfficialV2Profile.runOfficialV2(
     intensities: List<Int>,
     intensityMax: Int,
-    trailingRunSettle: Boolean,
     write: (ByteArray) -> BleProtocolOperation.Write,
-): List<BleProtocolOperation> {
-    if (controlFrame == KissToyOfficialV2ControlFrame.BasicControlMode58) {
-        return listOf(write(kissToyOfficialV2BasicControlPacket(intensities, intensityMax)))
-    }
-    if (intensities.all { it <= 0 }) return stopOfficialV2(write)
-    val operations = motors.zip(intensities).flatMapIndexed { index, (motor, intensity) ->
-        val chunk = mutableListOf<BleProtocolOperation>()
-        chunk += write(kissToyOfficialV2MotorPacket(motor.command, intensity.scaleKissToyOfficialV2Percent(intensityMax)))
-        if (index != motors.lastIndex || trailingRunSettle) {
-            chunk += BleProtocolOperation.Sleep(KISS_TOY_OFFICIAL_V2_WRITE_SETTLE_MS)
-        }
-        chunk
-    }
-    return operations
-}
+): List<BleProtocolOperation> =
+    listOf(write(kissToyOfficialV2BasicControlPacket(intensities, intensityMax)))
 
 private fun KissToyOfficialV2Profile.stopOfficialV2(
     write: (ByteArray) -> BleProtocolOperation.Write,
-): List<BleProtocolOperation> {
-    if (controlFrame == KissToyOfficialV2ControlFrame.BasicControlMode58) {
-        return listOf(write(kissToyOfficialV2BasicControlPacket(List(motors.size) { 0 }, intensityMax = 100)))
-    }
-    return motors.flatMapIndexed { index, motor ->
-        val operations = mutableListOf<BleProtocolOperation>()
-        operations += write(kissToyOfficialV2MotorPacket(motor.command, 0))
-        if (index != motors.lastIndex) {
-            operations += BleProtocolOperation.Sleep(KISS_TOY_OFFICIAL_V2_STOP_REPEAT_DELAY_MS)
-        }
-        operations
-    } + listOf(BleProtocolOperation.Sleep(KISS_TOY_OFFICIAL_V2_STOP_REPEAT_DELAY_MS)) +
-        motors.map { motor -> write(kissToyOfficialV2MotorPacket(motor.command, 0)) }
-}
+): List<BleProtocolOperation> =
+    listOf(write(kissToyOfficialV2BasicControlPacket(List(motors.size) { 0 }, intensityMax = 100)))
 
 private fun KissToyOfficialV2Profile.sameIntensities(value: Int): List<Int> =
     List(motors.size) { value }
@@ -2969,9 +2987,6 @@ private fun KissToyOfficialV2Profile.dualIntensities(first: Int, second: Int): L
             else -> first.coerceAtLeast(second)
         }
     }
-
-private fun Int.scaleKissToyOfficialV2Percent(intensityMax: Int): Int =
-    (coerceIn(0, intensityMax) * 100 / intensityMax.coerceAtLeast(1)).coerceIn(0, 100)
 
 private fun KissToyOfficialV2Profile.kissToyOfficialV2BasicControlPacket(
     intensities: List<Int>,
@@ -3025,48 +3040,13 @@ private fun kissToyBleEncryptionEncrypt(raw: IntArray): ByteArray {
     return encrypted.map { it.toByte() }.toByteArray()
 }
 
-private fun kissToyOfficialV2Command(command: Int, subType: Int = 0): ByteArray =
-    bytes(
-        0xb4,
-        0x00,
-        subType,
-        0x02,
-        command,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-    )
-
-private fun kissToyOfficialV2MotorPacket(command: ByteArray, intensity: Int): ByteArray {
-    val payloadCommand = command.copyOf(KISS_TOY_OFFICIAL_V2_COMMAND_SIZE)
-    payloadCommand[5] = intensity.coerceIn(0, 100).toByte()
-    return kissToyOfficialV2SendBytes(payloadCommand)
-}
-
-private fun kissToyOfficialV2SendBytes(command: ByteArray): ByteArray {
-    val payload = ByteArray(KISS_TOY_OFFICIAL_V2_FRAME_SIZE)
-    payload[0] = KISS_TOY_OFFICIAL_V2_FRAME_PREFIX
-    command.copyInto(payload, destinationOffset = 1, endIndex = command.size.coerceAtMost(KISS_TOY_OFFICIAL_V2_COMMAND_SIZE))
-    payload[KISS_TOY_OFFICIAL_V2_FRAME_SIZE - 1] =
-        payload.take(KISS_TOY_OFFICIAL_V2_FRAME_SIZE - 1).sumOf { it.toInt() and 0xff }.toByte()
-    return kissToyOfficialV2Encrypt(payload)
-}
-
-private fun kissToyOfficialV2Encrypt(bytes: ByteArray): ByteArray {
-    require(bytes.size == KISS_TOY_OFFICIAL_V2_FRAME_SIZE)
-    val encrypted = ByteArray(KISS_TOY_OFFICIAL_V2_FRAME_SIZE)
-    encrypted[0] = bytes[0]
-    val seed = bytes[0].toInt() and 0xff
-    for (index in 1 until KISS_TOY_OFFICIAL_V2_FRAME_SIZE) {
-        val key = KISS_TOY_OFFICIAL_V2_KEY_TAB[encrypted[index - 1].toInt() and 0x03][index]
-        encrypted[index] = (key + (key xor seed xor (bytes[index].toInt() and 0xff))).toByte()
-    }
-    return encrypted
-}
-
 private const val KISS_TOY_OFFICIAL_V2_PROTOCOL_ID = "kisstoy_official_v2"
+// 突突二代真机 btsnoop 常量：固定共享密钥、13 字节包、挑战头 0x58。
+private val KISS_TOY_TUTU_FIXED_KEY = bytes(0xea, 0x30, 0xbb, 0xdb, 0xad, 0xb6, 0xc6, 0x2f, 0xcf, 0xe9, 0xe9, 0x96)
+private const val KISS_TOY_TUTU_PACKET_PREFIX: Byte = 0x58
+private const val KISS_TOY_TUTU_PACKET_SIZE = 13
+private const val KISS_TOY_TUTU_AUTH_TIMEOUT_MS = 4_000L
+private const val KISS_TOY_TUTU_AUTH_SETTLE_MS = 1_000L
 private val KISS_TOY_HISTORICAL_GATT_SERVICE_UUID = uuid("00001000-0000-1000-8000-00805f9b34fb")
 private val KISS_TOY_HISTORICAL_GATT_WRITE_UUID = uuid("00001001-0000-1000-8000-00805f9b34fb")
 private val KISS_TOY_OFFICIAL_V2_AE3A_SERVICE_UUID = uuid("0000ae3a-0000-1000-8000-00805f9b34fb")
@@ -3091,33 +3071,22 @@ private val KISS_TOY_OFFICIAL_V2_DISCOVERY_ROUTES = listOf(
     ),
 )
 private const val KISS_TOY_TUTU_REPEAT_MS = 500
-private const val KISS_TOY_OFFICIAL_V2_WRITE_SETTLE_MS = 220L
-private const val KISS_TOY_OFFICIAL_V2_STOP_REPEAT_DELAY_MS = 300L
-private const val KISS_TOY_OFFICIAL_V2_COMMAND_SIZE = 10
-private const val KISS_TOY_OFFICIAL_V2_FRAME_SIZE = 12
-private const val KISS_TOY_OFFICIAL_V2_FRAME_PREFIX: Byte = 0x46
 private const val KISS_TOY_BASIC_CONTROL_CMD = 0x02
 private const val KISS_TOY_BASIC_CONTROL_LENGTH = 10
 private const val KISS_TOY_BASIC_CONTROL_CONTENT_SIZE = 5
 private const val KISS_TOY_BASIC_CONTROL_PACKET_DATA_SIZE = 10
 private const val KISS_TOY_BLE_ENCRYPTION_FRAME_SIZE = 12
-private val KISS_TOY_OFFICIAL_V2_KEY_TAB = arrayOf(
-    intArrayOf(0x00, 0x30, 0x30, 0xee, 0x4a, 0x7a, 0x1a, 0x52, 0x4a, 0xa0, 0x88, 0x8c),
-    intArrayOf(0x00, 0x8a, 0xdc, 0xd4, 0xde, 0xf0, 0x40, 0xa6, 0x5a, 0x62, 0x5c, 0x6e),
-    intArrayOf(0x00, 0xca, 0xf0, 0x40, 0xa8, 0xde, 0xf2, 0xe6, 0x14, 0x1c, 0x3a, 0x46),
-    intArrayOf(0x00, 0x8a, 0xac, 0xce, 0xf0, 0x14, 0x64, 0x40, 0xde, 0xc4, 0x1a, 0x14),
-)
 private val KISS_TOY_BLE_ENCRYPTION_KEY_TAB = arrayOf(
     intArrayOf(0x18, 0x5a, 0x64, 0x42, 0x10, 0xc6, 0xf6, 0x86, 0xb2, 0xd4, 0xfe, 0x92),
     intArrayOf(0xec, 0xb0, 0xbc, 0x0e, 0xc8, 0x7a, 0x54, 0xee, 0x00, 0x9a, 0x5a, 0x7a),
     intArrayOf(0x6e, 0x02, 0x06, 0xbc, 0xa6, 0x24, 0x4c, 0x2e, 0xca, 0xfc, 0x60, 0x72),
     intArrayOf(0xfa, 0x84, 0x26, 0x50, 0x6c, 0x4a, 0xe8, 0xd2, 0x88, 0x3a, 0x98, 0x9e),
 )
-private val KISS_TOY_OFFICIAL_V2_TYPE_1 = KissToyOfficialV2Motor(1, "震动", kissToyOfficialV2Command(0x62))
-private val KISS_TOY_OFFICIAL_V2_TYPE_2 = KissToyOfficialV2Motor(2, "第二震动", kissToyOfficialV2Command(0x64, subType = 0x02))
-private val KISS_TOY_OFFICIAL_V2_TYPE_3 = KissToyOfficialV2Motor(3, "吮吸", kissToyOfficialV2Command(0x64))
-private val KISS_TOY_OFFICIAL_V2_TYPE_4 = KissToyOfficialV2Motor(4, "伸缩", kissToyOfficialV2Command(0xe2))
-private val KISS_TOY_OFFICIAL_V2_TYPE_6 = KissToyOfficialV2Motor(6, "拍打", kissToyOfficialV2Command(0x64))
+private val KISS_TOY_OFFICIAL_V2_TYPE_1 = KissToyOfficialV2Motor(1, "震动")
+private val KISS_TOY_OFFICIAL_V2_TYPE_2 = KissToyOfficialV2Motor(2, "第二震动")
+private val KISS_TOY_OFFICIAL_V2_TYPE_3 = KissToyOfficialV2Motor(3, "吮吸")
+private val KISS_TOY_OFFICIAL_V2_TYPE_4 = KissToyOfficialV2Motor(4, "伸缩")
+private val KISS_TOY_OFFICIAL_V2_TYPE_6 = KissToyOfficialV2Motor(6, "拍打")
 private val KISS_TOY_TUTU_CHANNEL_NAMES = listOf("底座伸缩", "头部伸缩")
 private val KISS_TOY_TUTU_OFFICIAL_V2_PROFILE = KissToyOfficialV2Profile(
     code = "QCTT",
@@ -3125,7 +3094,8 @@ private val KISS_TOY_TUTU_OFFICIAL_V2_PROFILE = KissToyOfficialV2Profile(
     motors = listOf(KISS_TOY_OFFICIAL_V2_TYPE_1, KISS_TOY_OFFICIAL_V2_TYPE_4),
     toyType = 8,
     channelNames = KISS_TOY_TUTU_CHANNEL_NAMES,
-    controlFrame = KissToyOfficialV2ControlFrame.LegacyMotorPacket,
+    // 该 profile 仅用于按产品码 QCTT 识别与展示（通道名等）；控制帧由 KissToyTutuIIProtocolSession
+    // 按真机 btsnoop 的 `15 31 b9 … 16 16 69` + XOR(K_FIXED) 格式独立构造，不走通用 V2 的 BasicControlMode。
     usesDedicatedTutuRoute = true,
 )
 private val KISS_TOY_OFFICIAL_V2_PROFILES = listOf(
