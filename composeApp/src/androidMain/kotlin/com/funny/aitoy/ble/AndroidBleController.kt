@@ -541,7 +541,27 @@ class AndroidBleController(
                 handleProtocolOperationFailed("找不到写入通道：${operation.characteristicUuid}")
                 return
             }
-        val writeWithResponse = operation.withResponse
+        val supportsWithResponse =
+            characteristic.properties and BluetoothGattCharacteristic.PROPERTY_WRITE != 0
+        val supportsNoResponse =
+            characteristic.properties and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE != 0
+        // 以协议请求的写入方式为首选，但当特征实际不支持该方式时按其属性回退，
+        // 避免对仅支持 WRITE_NO_RESPONSE 的特征做 with-response 写入而被回 status=3。
+        val writeWithResponse = when {
+            operation.withResponse && supportsWithResponse -> true
+            operation.withResponse && supportsNoResponse -> false
+            !operation.withResponse && supportsNoResponse -> false
+            !operation.withResponse && supportsWithResponse -> true
+            else -> operation.withResponse
+        }
+        if (writeWithResponse != operation.withResponse) {
+            trace(
+                "写入方式按特征属性回退 uuid=${characteristic.uuid} " +
+                    "请求=${if (operation.withResponse) "with-response" else "without-response"} " +
+                    "实际=${if (writeWithResponse) "with-response" else "without-response"} " +
+                    "properties=0x${characteristic.properties.toString(16)}",
+            )
+        }
         val writeType = if (writeWithResponse) {
             BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
         } else {
