@@ -55,11 +55,24 @@ class SvakomSl278hProtocolTest {
         assertEquals(null, BleProtocolRegistry.resolveNative(svakomFingerprint(productCode = 100, manufacturerData = "")))
     }
 
+    @Test
+    fun sl278kLiveAdvertisementMatchesVibrationStickProfile() {
+        val protocol = BleProtocolRegistry.resolveNative(
+            svakomFingerprint(
+                name = "SL278K",
+                manufacturerData = "0x32:53 56 41 02 FF 32 26 01 E8 B0 C9 FF 32 00 00 80 19 04 0A 01 00",
+            ),
+        ) ?: error("SL278K live advertisement did not resolve")
+
+        assertEquals("svakom_sl278h_v", protocol.status.id)
+    }
+
     private fun svakomFingerprint(
-        productCode: Int,
+        productCode: Int = 100,
+        name: String = "SL278H",
         manufacturerData: String = "0xffff:53 56 41 01 ${"%02X".format(productCode)} 00 00 00 00 00 00 00",
     ) = BleGattFingerprint(
-        name = "SL278H",
+        name = name,
         address = "AA:BB:CC:DD:EE:FF",
         manufacturerData = manufacturerData,
         scanRecordHex = "",

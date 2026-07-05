@@ -2046,7 +2046,9 @@ private object SvakomSl278hProtocol : BleDeviceProtocol {
         val productCode = fingerprint.svakomProductCode()
         val isSl278h = productCode == SL278H_V_CODE ||
                 productCode == SL278H_F_CODE ||
-                name.contains("sl278h")
+                productCode == SL278K_V_CODE ||
+                name.contains("sl278h") ||
+                name.contains("sl278k")
         return isSl278h && hasSvakomGatt && fingerprint.hasSvakomManufacturerData()
     }
 
@@ -2057,6 +2059,7 @@ private object SvakomSl278hProtocol : BleDeviceProtocol {
 
     private const val SL278H_V_CODE = 100
     private const val SL278H_F_CODE = 101
+    private const val SL278K_V_CODE = 0x80
 }
 
 private class SvakomSl278hSession(
