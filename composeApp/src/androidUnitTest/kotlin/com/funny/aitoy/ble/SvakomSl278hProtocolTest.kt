@@ -20,7 +20,8 @@ class SvakomSl278hProtocolTest {
         assertEquals(NOTIFY_UUID, assertIs<BleProtocolOperation.SubscribeNotify>(init.single()).characteristicUuid)
 
         val operations = protocol.commandsFor(ToyControlAction.DualMotor(mode = 3, internalIntensity = 6, externalIntensity = 4))
-        assertEquals("55080000030600", assertIs<BleProtocolOperation.Write>(operations[0]).bytes.hexUpper())
+        // 伸缩没有强度滑杆：激活时强度字节固定 0xFF，只按模式驱动。
+        assertEquals("5508000003FF00", assertIs<BleProtocolOperation.Write>(operations[0]).bytes.hexUpper())
         assertEquals("55030000010400", assertIs<BleProtocolOperation.Write>(operations[1]).bytes.hexUpper())
         assertEquals("55050000000000", assertIs<BleProtocolOperation.Write>(operations[2]).bytes.hexUpper())
         operations.forEach { operation ->
@@ -44,7 +45,8 @@ class SvakomSl278hProtocolTest {
 
         assertEquals(WRITE_UUID, write.characteristicUuid)
         assertFalse(write.withResponse)
-        assertEquals("55070000020700", write.bytes.hexUpper())
+        // 拍打同样没有强度滑杆：激活时强度字节固定 0xFF。
+        assertEquals("5507000002FF00", write.bytes.hexUpper())
     }
 
     @Test

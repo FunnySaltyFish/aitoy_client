@@ -2144,13 +2144,19 @@ private class SvakomV2Session(
             }
         }
         val active = state.intensity > 0
+        // 官方规则：震动/吮吸走 0..10 滑杆强度；伸缩/拍打没有滑杆，激活时强度字节固定 0xFF。
+        val level = when {
+            !active -> 0
+            strengthDriven -> state.intensity
+            else -> fixedActiveLevel
+        }
         return bytes(
             0x55,
             command,
             0x00,
             0x00,
             if (active) state.mode.coerceAtLeast(1) else 0,
-            if (active) state.intensity else 0,
+            level,
             0x00,
         )
     }
@@ -2184,18 +2190,30 @@ private data class SvakomV2Function(
     val command: Int,
     val modeMax: Int,
     val intensityMax: Int = 10,
-)
+    /**
+     * 该功能是否由连续强度驱动。
+     * 官方 App(AutoV2ModeViewTools）里伸缩(STRETCH)、拍打(FLAP）没有强度滑杆，
+     * setDefaultStrong(255)，强度字节固定发 0xFF，只靠模式区分动作；
+     * 震动(VIBRATE)、吮吸(SUCK）才 setShowStrongSlider(true)，强度走 0..10 滑杆值。
+     * 之前把伸缩强度当成 0..10 下发，实机在 ~6/255(约 2%）时电机根本推不动，表现为“伸缩无反应”。
+     */
+    val strengthDriven: Boolean = true,
+) {
+    /** 官方无强度滑杆的功能，激活时强度字节固定为 0xFF。 */
+    val fixedActiveLevel: Int = 0xFF
+}
 
 private data class SvakomV2FunctionState(
     val mode: Int = 1,
     val intensity: Int = 0,
 )
 
-private val SvakomV2Stretch = SvakomV2Function(1, "oscillate", "伸缩", 0x08, modeMax = 7)
+// 伸缩、拍打没有强度滑杆：官方固定发 0xFF，只用模式区分动作，intensityMax=1 表示只有开/关。
+private val SvakomV2Stretch = SvakomV2Function(1, "oscillate", "伸缩", 0x08, modeMax = 7, intensityMax = 1, strengthDriven = false)
 private val SvakomV2Vibrate = SvakomV2Function(2, "vibrate", "震动", 0x03, modeMax = 10)
 private val SvakomV2Suck = SvakomV2Function(3, "constrict", "吮吸", 0x09, modeMax = 5)
-private val SvakomV2Flap = SvakomV2Function(4, "flap", "拍打", 0x07, modeMax = 7)
-private val SvakomV2Heat = SvakomV2Function(5, "heat", "加热", 0x05, modeMax = 1, intensityMax = 1)
+private val SvakomV2Flap = SvakomV2Function(4, "flap", "拍打", 0x07, modeMax = 7, intensityMax = 1, strengthDriven = false)
+private val SvakomV2Heat = SvakomV2Function(5, "heat", "加热", 0x05, modeMax = 1, intensityMax = 1, strengthDriven = false)
 
 /** 多功能协议里加热功能的固定功能码。 */
 const val SvakomV2HeatFunctionCode: Int = 5
@@ -2680,13 +2698,24 @@ private data class KissToyOfficialV2Motor(
     val type: Int,
     val label: String,
     val command: ByteArray,
+    val startUp: Double = 0.2,
 )
+
+private enum class KissToyOfficialV2ControlFrame {
+    BasicControlMode58,
+    LegacyMotorPacket,
+}
 
 private data class KissToyOfficialV2Profile(
     val code: String,
     val displayName: String,
     val motors: List<KissToyOfficialV2Motor>,
+    val toyType: Int,
     val channelNames: List<String> = motors.take(2).map { it.label },
+    val intensityMax: Int = 100,
+    val intensityLabel: String = "强度",
+    val bleHeader: Int = 0x58,
+    val controlFrame: KissToyOfficialV2ControlFrame = KissToyOfficialV2ControlFrame.BasicControlMode58,
     val requiresAuth: Boolean = false,
 )
 
@@ -2730,10 +2759,10 @@ private object KissToyOfficialV2Protocol : BleDeviceProtocol {
             id = KISS_TOY_OFFICIAL_V2_PROTOCOL_ID,
             displayName = "KissToy ${profile.displayName}",
             controllable = true,
-            intensityMax = 100,
+            intensityMax = profile.intensityMax,
             supportsMode = false,
             controlStyle = if (profile.motors.size >= 2) ToyControlStyle.DualIntensityOnly else ToyControlStyle.IntensityOnly,
-            intensityLabel = "强度",
+            intensityLabel = profile.intensityLabel,
             channelNames = profile.channelNames,
             automatic = true,
         )
@@ -2916,6 +2945,9 @@ private fun KissToyOfficialV2Profile.runOfficialV2(
     trailingRunSettle: Boolean,
     write: (ByteArray) -> BleProtocolOperation.Write,
 ): List<BleProtocolOperation> {
+    if (controlFrame == KissToyOfficialV2ControlFrame.BasicControlMode58) {
+        return listOf(write(kissToyOfficialV2BasicControlPacket(intensities, intensityMax)))
+    }
     if (intensities.all { it <= 0 }) return stopOfficialV2(write)
     val operations = motors.zip(intensities).flatMapIndexed { index, (motor, intensity) ->
         val chunk = mutableListOf<BleProtocolOperation>()
@@ -2930,8 +2962,11 @@ private fun KissToyOfficialV2Profile.runOfficialV2(
 
 private fun KissToyOfficialV2Profile.stopOfficialV2(
     write: (ByteArray) -> BleProtocolOperation.Write,
-): List<BleProtocolOperation> =
-    motors.flatMapIndexed { index, motor ->
+): List<BleProtocolOperation> {
+    if (controlFrame == KissToyOfficialV2ControlFrame.BasicControlMode58) {
+        return listOf(write(kissToyOfficialV2BasicControlPacket(List(motors.size) { 0 }, intensityMax = 100)))
+    }
+    return motors.flatMapIndexed { index, motor ->
         val operations = mutableListOf<BleProtocolOperation>()
         operations += write(kissToyOfficialV2MotorPacket(motor.command, 0))
         if (index != motors.lastIndex) {
@@ -2940,6 +2975,7 @@ private fun KissToyOfficialV2Profile.stopOfficialV2(
         operations
     } + listOf(BleProtocolOperation.Sleep(KISS_TOY_OFFICIAL_V2_STOP_REPEAT_DELAY_MS)) +
         motors.map { motor -> write(kissToyOfficialV2MotorPacket(motor.command, 0)) }
+}
 
 private fun KissToyOfficialV2Profile.sameIntensities(value: Int): List<Int> =
     List(motors.size) { value }
@@ -2955,6 +2991,58 @@ private fun KissToyOfficialV2Profile.dualIntensities(first: Int, second: Int): L
 
 private fun Int.scaleKissToyOfficialV2Percent(intensityMax: Int): Int =
     (coerceIn(0, intensityMax) * 100 / intensityMax.coerceAtLeast(1)).coerceIn(0, 100)
+
+private fun KissToyOfficialV2Profile.kissToyOfficialV2BasicControlPacket(
+    intensities: List<Int>,
+    intensityMax: Int,
+): ByteArray {
+    val content = IntArray(KISS_TOY_BASIC_CONTROL_CONTENT_SIZE)
+    motors.zip(intensities).forEach { (motor, intensity) ->
+        val value = intensity.scaleKissToyOfficialV2BasicControlValue(intensityMax, motor.startUp)
+        when (motor.type) {
+            1 -> content[0] = value
+            2 -> if (code == "QCVW") content[2] = value else content[1] = value
+            3, 6 -> content[2] = value
+            4 -> content[3] = value
+            5 -> content[4] = value
+        }
+    }
+    val data = IntArray(KISS_TOY_BASIC_CONTROL_PACKET_DATA_SIZE)
+    data[0] = bleHeader and 0xff
+    data[1] = KISS_TOY_BASIC_CONTROL_CMD
+    data[2] = KISS_TOY_BASIC_CONTROL_LENGTH
+    data[3] = if (data[0] == 0x60) 1 else 0
+    content.copyInto(data, destinationOffset = 4)
+    data[data.lastIndex] = data.take(data.lastIndex).sum() and 0xff
+    return byteArrayOf(data[0].toByte()) + kissToyBleEncryptionSendBytes(data.drop(1))
+}
+
+private fun Int.scaleKissToyOfficialV2BasicControlValue(intensityMax: Int, startUp: Double): Int {
+    val normalized = coerceIn(0, intensityMax).toDouble() / intensityMax.coerceAtLeast(1).toDouble()
+    val adjusted = if (normalized <= 0.0) 0.0 else startUp.coerceIn(0.0, 1.0) + normalized * (1.0 - startUp.coerceIn(0.0, 1.0))
+    return (adjusted.coerceIn(0.0, 1.0) * 255.0).toInt().coerceIn(0, 255)
+}
+
+private fun kissToyBleEncryptionSendBytes(data: List<Int>): ByteArray {
+    val raw = IntArray(KISS_TOY_BLE_ENCRYPTION_FRAME_SIZE)
+    raw[0] = Random.nextInt(0x100)
+    data.take(KISS_TOY_BLE_ENCRYPTION_FRAME_SIZE - 1).forEachIndexed { index, value ->
+        raw[index + 1] = value and 0xff
+    }
+    return kissToyBleEncryptionEncrypt(raw)
+}
+
+private fun kissToyBleEncryptionEncrypt(raw: IntArray): ByteArray {
+    require(raw.size == KISS_TOY_BLE_ENCRYPTION_FRAME_SIZE)
+    val encrypted = IntArray(KISS_TOY_BLE_ENCRYPTION_FRAME_SIZE)
+    encrypted[0] = raw[0] and 0xff
+    val seed = encrypted[0]
+    for (index in 1 until KISS_TOY_BLE_ENCRYPTION_FRAME_SIZE) {
+        val key = KISS_TOY_BLE_ENCRYPTION_KEY_TAB[encrypted[index - 1] and 0x03][index]
+        encrypted[index] = (key + (key xor seed xor raw[index])) and 0xff
+    }
+    return encrypted.map { it.toByte() }.toByteArray()
+}
 
 private fun ByteArray.xorKissToyTutuFixedKey(): ByteArray =
     ByteArray(size.coerceAtMost(KISS_TOY_TUTU_FIXED_KEY.size)) { index ->
@@ -3037,11 +3125,22 @@ private const val KISS_TOY_OFFICIAL_V2_STOP_REPEAT_DELAY_MS = 300L
 private const val KISS_TOY_OFFICIAL_V2_COMMAND_SIZE = 10
 private const val KISS_TOY_OFFICIAL_V2_FRAME_SIZE = 12
 private const val KISS_TOY_OFFICIAL_V2_FRAME_PREFIX: Byte = 0x46
+private const val KISS_TOY_BASIC_CONTROL_CMD = 0x02
+private const val KISS_TOY_BASIC_CONTROL_LENGTH = 10
+private const val KISS_TOY_BASIC_CONTROL_CONTENT_SIZE = 5
+private const val KISS_TOY_BASIC_CONTROL_PACKET_DATA_SIZE = 10
+private const val KISS_TOY_BLE_ENCRYPTION_FRAME_SIZE = 12
 private val KISS_TOY_OFFICIAL_V2_KEY_TAB = arrayOf(
     intArrayOf(0x00, 0x30, 0x30, 0xee, 0x4a, 0x7a, 0x1a, 0x52, 0x4a, 0xa0, 0x88, 0x8c),
     intArrayOf(0x00, 0x8a, 0xdc, 0xd4, 0xde, 0xf0, 0x40, 0xa6, 0x5a, 0x62, 0x5c, 0x6e),
     intArrayOf(0x00, 0xca, 0xf0, 0x40, 0xa8, 0xde, 0xf2, 0xe6, 0x14, 0x1c, 0x3a, 0x46),
     intArrayOf(0x00, 0x8a, 0xac, 0xce, 0xf0, 0x14, 0x64, 0x40, 0xde, 0xc4, 0x1a, 0x14),
+)
+private val KISS_TOY_BLE_ENCRYPTION_KEY_TAB = arrayOf(
+    intArrayOf(0x18, 0x5a, 0x64, 0x42, 0x10, 0xc6, 0xf6, 0x86, 0xb2, 0xd4, 0xfe, 0x92),
+    intArrayOf(0xec, 0xb0, 0xbc, 0x0e, 0xc8, 0x7a, 0x54, 0xee, 0x00, 0x9a, 0x5a, 0x7a),
+    intArrayOf(0x6e, 0x02, 0x06, 0xbc, 0xa6, 0x24, 0x4c, 0x2e, 0xca, 0xfc, 0x60, 0x72),
+    intArrayOf(0xfa, 0x84, 0x26, 0x50, 0x6c, 0x4a, 0xe8, 0xd2, 0x88, 0x3a, 0x98, 0x9e),
 )
 private val KISS_TOY_OFFICIAL_V2_TYPE_1 = KissToyOfficialV2Motor(1, "震动", kissToyOfficialV2Command(0x62))
 private val KISS_TOY_OFFICIAL_V2_TYPE_2 = KissToyOfficialV2Motor(2, "第二震动", kissToyOfficialV2Command(0x64, subType = 0x02))
@@ -3053,27 +3152,41 @@ private val KISS_TOY_TUTU_OFFICIAL_V2_PROFILE = KissToyOfficialV2Profile(
     code = "QCTT",
     displayName = "突突二代",
     motors = listOf(KISS_TOY_OFFICIAL_V2_TYPE_1, KISS_TOY_OFFICIAL_V2_TYPE_4),
+    toyType = 8,
     channelNames = KISS_TOY_TUTU_CHANNEL_NAMES,
+    controlFrame = KissToyOfficialV2ControlFrame.LegacyMotorPacket,
     requiresAuth = true,
 )
 private val KISS_TOY_OFFICIAL_V2_PROFILES = listOf(
-    KissToyOfficialV2Profile("JY11", "太正鲸", listOf(KISS_TOY_OFFICIAL_V2_TYPE_1)),
-    KissToyOfficialV2Profile("SYQ1", "糖蛋蛋", listOf(KISS_TOY_OFFICIAL_V2_TYPE_1)),
-    KissToyOfficialV2Profile("PJ01", "炮机", listOf(KISS_TOY_OFFICIAL_V2_TYPE_4)),
-    KissToyOfficialV2Profile("KX01", "Cathy Pro", listOf(KISS_TOY_OFFICIAL_V2_TYPE_3, KISS_TOY_OFFICIAL_V2_TYPE_4)),
-    KissToyOfficialV2Profile("KX02", "Cathy III", listOf(KISS_TOY_OFFICIAL_V2_TYPE_3, KISS_TOY_OFFICIAL_V2_TYPE_4)),
-    KissToyOfficialV2Profile("PLY1", "Polly pro", listOf(KISS_TOY_OFFICIAL_V2_TYPE_1, KISS_TOY_OFFICIAL_V2_TYPE_3)),
-    KissToyOfficialV2Profile("QCKH", "BOBO", listOf(KISS_TOY_OFFICIAL_V2_TYPE_3)),
-    KissToyOfficialV2Profile("PLMX", "Polly max", listOf(KISS_TOY_OFFICIAL_V2_TYPE_1, KISS_TOY_OFFICIAL_V2_TYPE_3)),
-    KissToyOfficialV2Profile("QCPJ", "TUTU", listOf(KISS_TOY_OFFICIAL_V2_TYPE_1, KISS_TOY_OFFICIAL_V2_TYPE_4)),
-    KissToyOfficialV2Profile("QCPW", "迷路-入体版", listOf(KISS_TOY_OFFICIAL_V2_TYPE_1, KISS_TOY_OFFICIAL_V2_TYPE_3)),
-    KissToyOfficialV2Profile("QCSW", "迷路-吮吸版", listOf(KISS_TOY_OFFICIAL_V2_TYPE_1, KISS_TOY_OFFICIAL_V2_TYPE_3)),
-    KissToyOfficialV2Profile("QCVW", "迷路-震动版", listOf(KISS_TOY_OFFICIAL_V2_TYPE_1, KISS_TOY_OFFICIAL_V2_TYPE_2)),
-    KissToyOfficialV2Profile("QCFW", "迷路-拍打版", listOf(KISS_TOY_OFFICIAL_V2_TYPE_1, KISS_TOY_OFFICIAL_V2_TYPE_6)),
+    KissToyOfficialV2Profile("JY11", "太正鲸", listOf(KISS_TOY_OFFICIAL_V2_TYPE_1), toyType = 1),
+    KissToyOfficialV2Profile("SYQ1", "糖蛋蛋", listOf(KISS_TOY_OFFICIAL_V2_TYPE_1), toyType = 3),
+    KissToyOfficialV2Profile("PJ01", "炮机", listOf(KISS_TOY_OFFICIAL_V2_TYPE_4), toyType = 2),
+    KissToyOfficialV2Profile("KX01", "Cathy Pro", listOf(KISS_TOY_OFFICIAL_V2_TYPE_3, KISS_TOY_OFFICIAL_V2_TYPE_4), toyType = 4),
+    KissToyOfficialV2Profile(
+        "KX02",
+        "Cathy III",
+        listOf(KISS_TOY_OFFICIAL_V2_TYPE_3.copy(startUp = 0.4), KISS_TOY_OFFICIAL_V2_TYPE_4),
+        toyType = 4,
+    ),
+    KissToyOfficialV2Profile("PLY1", "Polly pro", listOf(KISS_TOY_OFFICIAL_V2_TYPE_1, KISS_TOY_OFFICIAL_V2_TYPE_3), toyType = 5),
+    KissToyOfficialV2Profile(
+        "QCKH",
+        "BOBO",
+        listOf(KISS_TOY_OFFICIAL_V2_TYPE_3),
+        toyType = 6,
+        intensityMax = 3,
+        intensityLabel = "档位",
+    ),
+    KissToyOfficialV2Profile("PLMX", "Polly max", listOf(KISS_TOY_OFFICIAL_V2_TYPE_1, KISS_TOY_OFFICIAL_V2_TYPE_3.copy(startUp = 0.4)), toyType = 7),
+    KissToyOfficialV2Profile("QCPJ", "TUTU", listOf(KISS_TOY_OFFICIAL_V2_TYPE_1, KISS_TOY_OFFICIAL_V2_TYPE_4), toyType = 8),
+    KissToyOfficialV2Profile("QCPW", "迷路-入体版", listOf(KISS_TOY_OFFICIAL_V2_TYPE_1, KISS_TOY_OFFICIAL_V2_TYPE_3), toyType = 9),
+    KissToyOfficialV2Profile("QCSW", "迷路-吮吸版", listOf(KISS_TOY_OFFICIAL_V2_TYPE_1, KISS_TOY_OFFICIAL_V2_TYPE_3), toyType = 10),
+    KissToyOfficialV2Profile("QCVW", "迷路-震动版", listOf(KISS_TOY_OFFICIAL_V2_TYPE_1, KISS_TOY_OFFICIAL_V2_TYPE_2), toyType = 11),
+    KissToyOfficialV2Profile("QCFW", "迷路-拍打版", listOf(KISS_TOY_OFFICIAL_V2_TYPE_1, KISS_TOY_OFFICIAL_V2_TYPE_6), toyType = 14),
     KISS_TOY_TUTU_OFFICIAL_V2_PROFILE,
-    KissToyOfficialV2Profile("QCFBH25", "粉饼盒", listOf(KISS_TOY_OFFICIAL_V2_TYPE_1)),
-    KissToyOfficialV2Profile("KXMINI25", "Cathy Mini", listOf(KISS_TOY_OFFICIAL_V2_TYPE_1, KISS_TOY_OFFICIAL_V2_TYPE_3)),
-    KissToyOfficialV2Profile("PLY5", "Polly 5", listOf(KISS_TOY_OFFICIAL_V2_TYPE_1, KISS_TOY_OFFICIAL_V2_TYPE_3)),
+    KissToyOfficialV2Profile("QCFBH25", "粉饼盒", listOf(KISS_TOY_OFFICIAL_V2_TYPE_1), toyType = 1),
+    KissToyOfficialV2Profile("KXMINI25", "Cathy Mini", listOf(KISS_TOY_OFFICIAL_V2_TYPE_1, KISS_TOY_OFFICIAL_V2_TYPE_3), toyType = 10),
+    KissToyOfficialV2Profile("PLY5", "Polly 5", listOf(KISS_TOY_OFFICIAL_V2_TYPE_1, KISS_TOY_OFFICIAL_V2_TYPE_3), toyType = 12),
 ).associateBy { it.code.normalizedDeviceName() }
 
 private object KissToyProtocol : BleDeviceProtocol {

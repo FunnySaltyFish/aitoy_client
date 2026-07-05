@@ -1107,6 +1107,7 @@ private fun MultiFunctionControl(
                 title = feature.label.ifBlank { feature.type },
                 functionCode = svakomV2FunctionCode(feature.type),
                 modeMax = svakomV2FunctionModeMax(feature.type),
+                maxIntensity = feature.max.coerceAtLeast(1),
             )
         }
         if (status.features.any { it.type == "heat" }) {
@@ -1144,10 +1145,12 @@ private fun MultiFunctionFeatureControl(
     title: String,
     functionCode: Int,
     modeMax: Int,
+    maxIntensity: Int,
 ) {
-    var selectedMode by remember(address, status.id, functionCode) { mutableIntStateOf(1) }
+    var selectedMode by remember(address, status.id, functionCode) { mutableIntStateOf(0) }
     var intensity by remember(address, status.id, functionCode) { mutableIntStateOf(0) }
-    val maxIntensity = status.intensityMax.coerceAtLeast(1)
+    // 伸缩、拍打没有强度滑杆：官方只按模式驱动、强度固定，UI 上点模式即启动、再点即停。
+    val strengthAdjustable = maxIntensity > 1
 
     Column {
         Row(
@@ -1156,7 +1159,12 @@ private fun MultiFunctionFeatureControl(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(title, color = TextMain, fontWeight = FontWeight.SemiBold)
-            Text("$intensity/$maxIntensity", color = Rose, fontWeight = FontWeight.Bold)
+            Text(
+                if (strengthAdjustable) "$intensity/$maxIntensity"
+                else if (selectedMode > 0) "模式 $selectedMode" else "已停止",
+                color = Rose,
+                fontWeight = FontWeight.Bold,
+            )
         }
         Spacer(Modifier.height(10.dp))
         (1..modeMax.coerceAtLeast(1)).chunked(5).forEach { row ->
@@ -1168,8 +1176,21 @@ private fun MultiFunctionFeatureControl(
                             .weight(1f)
                             .testTag("svakom_plus_${functionCode}_mode_$index"),
                         onClick = {
-                            selectedMode = index
-                            vm.updateIndependentFunction(address, functionCode, selectedMode, intensity)
+                            if (strengthAdjustable) {
+                                selectedMode = index
+                                if (intensity <= 0) intensity = maxIntensity
+                                vm.updateIndependentFunction(address, functionCode, selectedMode, intensity)
+                            } else {
+                                // 模式驱动：再次点击当前模式即停止；否则切换到该模式并以固定强度启动。
+                                if (selected) {
+                                    selectedMode = 0
+                                    intensity = 0
+                                } else {
+                                    selectedMode = index
+                                    intensity = 1
+                                }
+                                vm.updateIndependentFunction(address, functionCode, selectedMode, intensity)
+                            }
                         },
                         enabled = status.controllable,
                         colors = ButtonDefaults.buttonColors(
@@ -1184,17 +1205,20 @@ private fun MultiFunctionFeatureControl(
             }
             Spacer(Modifier.height(8.dp))
         }
-        Slider(
-            value = intensity.toFloat(),
-            onValueChange = {
-                intensity = it.roundToInt()
-                vm.updateIndependentFunction(address, functionCode, selectedMode, intensity)
-            },
-            modifier = Modifier.testTag("svakom_plus_${functionCode}_intensity"),
-            valueRange = 0f..maxIntensity.toFloat(),
-            steps = (maxIntensity - 1).coerceAtLeast(0),
-            enabled = status.controllable,
-        )
+        if (strengthAdjustable) {
+            Slider(
+                value = intensity.toFloat(),
+                onValueChange = {
+                    intensity = it.roundToInt()
+                    if (intensity > 0 && selectedMode <= 0) selectedMode = 1
+                    vm.updateIndependentFunction(address, functionCode, selectedMode, intensity)
+                },
+                modifier = Modifier.testTag("svakom_plus_${functionCode}_intensity"),
+                valueRange = 0f..maxIntensity.toFloat(),
+                steps = (maxIntensity - 1).coerceAtLeast(0),
+                enabled = status.controllable,
+            )
+        }
     }
 }
 

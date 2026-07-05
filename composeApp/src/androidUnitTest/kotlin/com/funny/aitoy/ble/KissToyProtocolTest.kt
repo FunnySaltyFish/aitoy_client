@@ -108,24 +108,20 @@ class KissToyProtocolTest {
         assertEquals(emptyList(), protocol.initialize(officialV2Fingerprint("QCPW")))
 
         val run = protocol.commandsFor(ToyControlAction.DualMotor(mode = 1, internalIntensity = 50, externalIntensity = 25))
-        assertEquals(3, run.size)
-        val vibrateWrite = assertIs<BleProtocolOperation.Write>(run[0])
-        assertEquals(DDDD_WRITE_UUID, vibrateWrite.characteristicUuid)
-        assertFalse(vibrateWrite.withResponse)
-        assertEquals("4602A64694D888666676B6D6", vibrateWrite.bytes.hexUpper())
-        val suckingWrite = assertIs<BleProtocolOperation.Write>(run[2])
-        assertEquals(DDDD_WRITE_UUID, suckingWrite.characteristicUuid)
-        assertFalse(suckingWrite.withResponse)
-        assertEquals("4602A64694D29F466676B6BF", suckingWrite.bytes.hexUpper())
+        val runWrite = assertSingleKissToyBasicControlWrite(run, DDDD_WRITE_UUID)
+        assertKissToyBasicControlData(
+            runWrite.bytes,
+            content = listOf(153, 0, 102, 0, 0),
+        )
 
         val stop = protocol.commandsFor(ToyControlAction.Stop)
         val stopWrites = stop.filterIsInstance<BleProtocolOperation.Write>()
-        assertEquals(4, stopWrites.size)
+        assertEquals(1, stopWrites.size)
         stopWrites.forEach { assertEquals(DDDD_WRITE_UUID, it.characteristicUuid) }
-        assertEquals("4602A64694D876866676B6A4", stopWrites[0].bytes.hexUpper())
-        assertEquals("4602A64694D2A6866676B6A6", stopWrites[1].bytes.hexUpper())
-        assertEquals("4602A64694D876866676B6A4", stopWrites[2].bytes.hexUpper())
-        assertEquals("4602A64694D2A6866676B6A6", stopWrites[3].bytes.hexUpper())
+        assertKissToyBasicControlData(
+            stopWrites.single().bytes,
+            content = listOf(0, 0, 0, 0, 0),
+        )
     }
 
     @Test
@@ -142,14 +138,40 @@ class KissToyProtocolTest {
         assertEquals("KissToy 迷路-入体版", protocol.status.displayName)
 
         val run = protocol.commandsFor(ToyControlAction.DualMotor(mode = 1, internalIntensity = 50, externalIntensity = 25))
-        val vibrateWrite = assertIs<BleProtocolOperation.Write>(run[0])
-        assertEquals(FFE0_WRITE_UUID, vibrateWrite.characteristicUuid)
-        assertFalse(vibrateWrite.withResponse)
-        assertEquals("4602A64694D888666676B6D6", vibrateWrite.bytes.hexUpper())
-        val suckingWrite = assertIs<BleProtocolOperation.Write>(run[2])
-        assertEquals(FFE0_WRITE_UUID, suckingWrite.characteristicUuid)
-        assertFalse(suckingWrite.withResponse)
-        assertEquals("4602A64694D29F466676B6BF", suckingWrite.bytes.hexUpper())
+        val runWrite = assertSingleKissToyBasicControlWrite(run, FFE0_WRITE_UUID)
+        assertKissToyBasicControlData(
+            runWrite.bytes,
+            content = listOf(153, 0, 102, 0, 0),
+        )
+    }
+
+    @Test
+    fun qckhBoboUsesSingleSuckingMotorWithThreeGears() {
+        val protocol = BleProtocolRegistry.resolveNative(officialV2Fingerprint("QCKH")) ?: error("QCKH protocol not resolved")
+
+        assertEquals("kisstoy_official_v2", protocol.status.id)
+        assertEquals("KissToy BOBO", protocol.status.displayName)
+        assertEquals(ToyControlStyle.IntensityOnly, protocol.status.controlStyle)
+        assertEquals(3, protocol.status.intensityMax)
+        assertEquals("档位", protocol.status.intensityLabel)
+        assertEquals(listOf("吮吸"), protocol.status.channelNames)
+        assertFalse(protocol.status.supportsMode)
+
+        val gear1 = protocol.commandsFor(ToyControlAction.Intensity(1)).single()
+        assertKissToyBasicControlData(
+            assertIs<BleProtocolOperation.Write>(gear1).bytes,
+            content = listOf(0, 0, 119, 0, 0),
+        )
+        val gear2 = protocol.commandsFor(ToyControlAction.Intensity(2)).single()
+        assertKissToyBasicControlData(
+            assertIs<BleProtocolOperation.Write>(gear2).bytes,
+            content = listOf(0, 0, 187, 0, 0),
+        )
+        val gear3 = protocol.commandsFor(ToyControlAction.Intensity(3)).single()
+        assertKissToyBasicControlData(
+            assertIs<BleProtocolOperation.Write>(gear3).bytes,
+            content = listOf(0, 0, 255, 0, 0),
+        )
     }
 
     @Test
@@ -167,10 +189,11 @@ class KissToyProtocolTest {
         assertEquals(AE3A_NOTIFY_UUID, assertIs<BleProtocolOperation.SubscribeNotify>(init[0]).characteristicUuid)
 
         val run = protocols.first().commandsFor(ToyControlAction.DualMotor(mode = 1, internalIntensity = 50, externalIntensity = 25))
-        assertEquals(AE3A_WRITE_UUID, assertIs<BleProtocolOperation.Write>(run[0]).characteristicUuid)
-        assertEquals("4602A64694D888666676B6D6", assertIs<BleProtocolOperation.Write>(run[0]).bytes.hexUpper())
-        assertEquals(AE3A_WRITE_UUID, assertIs<BleProtocolOperation.Write>(run[2]).characteristicUuid)
-        assertEquals("4602A64694D29F466676B6BF", assertIs<BleProtocolOperation.Write>(run[2]).bytes.hexUpper())
+        val runWrite = assertSingleKissToyBasicControlWrite(run, AE3A_WRITE_UUID)
+        assertKissToyBasicControlData(
+            runWrite.bytes,
+            content = listOf(153, 0, 102, 0, 0),
+        )
     }
 
     @Test
@@ -188,8 +211,7 @@ class KissToyProtocolTest {
         assertEquals(AE3A_NOTIFY_UUID, assertIs<BleProtocolOperation.SubscribeNotify>(init[0]).characteristicUuid)
 
         val run = protocol.commandsFor(ToyControlAction.DualMotor(mode = 1, internalIntensity = 50, externalIntensity = 25))
-        assertEquals(AE3A_WRITE_UUID, assertIs<BleProtocolOperation.Write>(run[0]).characteristicUuid)
-        assertEquals(AE3A_WRITE_UUID, assertIs<BleProtocolOperation.Write>(run[2]).characteristicUuid)
+        assertSingleKissToyBasicControlWrite(run, AE3A_WRITE_UUID)
     }
 
     @Test
@@ -217,8 +239,11 @@ class KissToyProtocolTest {
         assertEquals(listOf("震动", "第二震动"), protocol.status.channelNames)
 
         val run = protocol.commandsFor(ToyControlAction.DualMotor(mode = 1, internalIntensity = 50, externalIntensity = 25))
-        assertEquals("4602A64694D888666676B6D6", assertIs<BleProtocolOperation.Write>(run[0]).bytes.hexUpper())
-        assertEquals("4602A64458D29F466676B6C1", assertIs<BleProtocolOperation.Write>(run[2]).bytes.hexUpper())
+        val runWrite = assertSingleKissToyBasicControlWrite(run, DDDD_WRITE_UUID)
+        assertKissToyBasicControlData(
+            runWrite.bytes,
+            content = listOf(153, 0, 102, 0, 0),
+        )
     }
 
     @Test
@@ -461,6 +486,45 @@ class KissToyProtocolTest {
         ),
     )
 
+    private fun assertSingleKissToyBasicControlWrite(
+        operations: List<BleProtocolOperation>,
+        writeUuid: UUID,
+    ): BleProtocolOperation.Write {
+        assertEquals(1, operations.size)
+        val write = assertIs<BleProtocolOperation.Write>(operations.single())
+        assertEquals(writeUuid, write.characteristicUuid)
+        assertFalse(write.withResponse)
+        assertEquals(13, write.bytes.size)
+        assertEquals(0x58, write.bytes[0].toInt() and 0xff)
+        return write
+    }
+
+    private fun assertKissToyBasicControlData(packet: ByteArray, content: List<Int>) {
+        assertEquals(5, content.size)
+        assertEquals(0x58, packet[0].toInt() and 0xff)
+        val decrypted = decryptKissToyBleEncryption(packet.drop(1).toByteArray())
+        val expectedData = listOf(
+            0x02,
+            0x0a,
+            0x00,
+        ) + content + listOf((0x58 + 0x02 + 0x0a + content.sum()) and 0xff)
+        assertEquals(expectedData, decrypted.drop(1).take(expectedData.size))
+        assertEquals(listOf(0, 0), decrypted.takeLast(2))
+    }
+
+    private fun decryptKissToyBleEncryption(encryptedBytes: ByteArray): List<Int> {
+        assertEquals(12, encryptedBytes.size)
+        val encrypted = encryptedBytes.map { it.toInt() and 0xff }
+        val raw = MutableList(12) { 0 }
+        raw[0] = encrypted[0]
+        val seed = raw[0]
+        for (index in 1 until raw.size) {
+            val key = KISS_TOY_BLE_ENCRYPTION_KEY_TAB_FOR_TEST[encrypted[index - 1] and 0x03][index]
+            raw[index] = (((encrypted[index] - key) and 0xff) xor seed xor key) and 0xff
+        }
+        return raw
+    }
+
     private companion object {
         val KISSTOY_SERVICE_UUID: UUID = UUID.fromString("00001000-0000-1000-8000-00805f9b34fb")
         val KISSTOY_WRITE_UUID: UUID = UUID.fromString("00001001-0000-1000-8000-00805f9b34fb")
@@ -485,5 +549,12 @@ class KissToyProtocolTest {
         val AE00_SERVICE_UUID: UUID = UUID.fromString("0000ae00-0000-1000-8000-00805f9b34fb")
         val AE00_WRITE_UUID: UUID = UUID.fromString("0000ae01-0000-1000-8000-00805f9b34fb")
         val AE00_NOTIFY_UUID: UUID = UUID.fromString("0000ae02-0000-1000-8000-00805f9b34fb")
+
+        val KISS_TOY_BLE_ENCRYPTION_KEY_TAB_FOR_TEST = arrayOf(
+            intArrayOf(0x18, 0x5a, 0x64, 0x42, 0x10, 0xc6, 0xf6, 0x86, 0xb2, 0xd4, 0xfe, 0x92),
+            intArrayOf(0xec, 0xb0, 0xbc, 0x0e, 0xc8, 0x7a, 0x54, 0xee, 0x00, 0x9a, 0x5a, 0x7a),
+            intArrayOf(0x6e, 0x02, 0x06, 0xbc, 0xa6, 0x24, 0x4c, 0x2e, 0xca, 0xfc, 0x60, 0x72),
+            intArrayOf(0xfa, 0x84, 0x26, 0x50, 0x6c, 0x4a, 0xe8, 0xd2, 0x88, 0x3a, 0x98, 0x9e),
+        )
     }
 }
