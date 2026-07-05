@@ -2716,7 +2716,9 @@ private data class KissToyOfficialV2Profile(
     val intensityLabel: String = "强度",
     val bleHeader: Int = 0x58,
     val controlFrame: KissToyOfficialV2ControlFrame = KissToyOfficialV2ControlFrame.BasicControlMode58,
-    val requiresAuth: Boolean = false,
+    // QCTT 突突二代由独立 handler 承接（保留 kisstoy_tutu2 id、专属通道名与保活），
+    // 与通用官方 V2 handler 互斥；官方 App 对该设备并无 challenge-response 认证。
+    val usesDedicatedTutuRoute: Boolean = false,
 )
 
 private data class KissToyOfficialV2Route(
@@ -2739,12 +2741,12 @@ private object KissToyOfficialV2Protocol : BleDeviceProtocol {
 
     override fun matches(fingerprint: BleGattFingerprint): Boolean {
         val profile = fingerprint.kissToyOfficialV2Profile() ?: return false
-        return !profile.requiresAuth && fingerprint.kissToyOfficialV2Route() != null
+        return !profile.usesDedicatedTutuRoute && fingerprint.kissToyOfficialV2Route() != null
     }
 
     override fun createInstance(fingerprint: BleGattFingerprint): BleDeviceProtocol {
         val profile = fingerprint.kissToyOfficialV2Profile() ?: return this
-        if (profile.requiresAuth) return this
+        if (profile.usesDedicatedTutuRoute) return this
         val route = fingerprint.kissToyOfficialV2Route() ?: return this
         return Session(route, profile)
     }
@@ -2811,7 +2813,7 @@ private class KissToyTutuIIProtocolVariant(
 
     override fun matches(fingerprint: BleGattFingerprint): Boolean {
         val profile = fingerprint.kissToyOfficialV2Profile() ?: return false
-        return profile.requiresAuth && fingerprint.hasRoute(route)
+        return profile.usesDedicatedTutuRoute && fingerprint.hasRoute(route)
     }
 
     override fun createInstance(fingerprint: BleGattFingerprint): BleDeviceProtocol =
@@ -2823,28 +2825,14 @@ private class KissToyTutuIIProtocolVariant(
         private val route: KissToyTutuIIRoute,
         override val status: BleProtocolStatus,
     ) : BleDeviceProtocol {
-        private var authenticated = false
-
         override fun matches(fingerprint: BleGattFingerprint): Boolean =
-            fingerprint.kissToyOfficialV2Profile()?.requiresAuth == true && fingerprint.hasRoute(route)
+            fingerprint.kissToyOfficialV2Profile()?.usesDedicatedTutuRoute == true && fingerprint.hasRoute(route)
 
+        // 对齐官方 App onDeviceConnectSuccess：发现 AE3A 后订阅 AE3C 通知即可控制。
+        // 官方 AE3C 通知只用于回传状态/电量（onV2BleCharacteristicValue 仅解密读取，不回写），
+        // 不存在 challenge-response 认证，因此这里不设 ready gate、不发认证帧。
         override fun initialize(fingerprint: BleGattFingerprint): List<BleProtocolOperation> =
-            listOf(
-                BleProtocolOperation.SubscribeNotify(route.notifyUuid),
-                BleProtocolOperation.WaitForProtocolReady(KISS_TOY_TUTU_AUTH_TIMEOUT_MS),
-            )
-
-        override fun onNotify(characteristicUuid: UUID, bytes: ByteArray): List<BleProtocolOperation> {
-            if (characteristicUuid != route.notifyUuid || authenticated) return emptyList()
-            if (bytes.size < KISS_TOY_TUTU_AUTH_CHALLENGE_SIZE || bytes[0] != KISS_TOY_TUTU_PACKET_PREFIX) return emptyList()
-            authenticated = true
-            return listOf(
-                write(authPacket(bytes)),
-                BleProtocolOperation.Sleep(KISS_TOY_TUTU_AUTH_SETTLE_MS),
-            )
-        }
-
-        override fun isProtocolReady(): Boolean = authenticated
+            listOf(BleProtocolOperation.SubscribeNotify(route.notifyUuid))
 
         override fun keepaliveIntervalMs(): Long = KISS_TOY_TUTU_REPEAT_MS.toLong()
 
@@ -2855,10 +2843,6 @@ private class KissToyTutuIIProtocolVariant(
                 trailingRunSettle = true,
                 write = ::write,
             )
-
-        private fun authPacket(challenge: ByteArray): ByteArray =
-            byteArrayOf(KISS_TOY_TUTU_PACKET_PREFIX) +
-                challenge.copyOfRange(1, KISS_TOY_TUTU_AUTH_CHALLENGE_SIZE).xorKissToyTutuFixedKey()
 
         private fun write(bytes: ByteArray): BleProtocolOperation.Write =
             BleProtocolOperation.Write(
@@ -3044,11 +3028,6 @@ private fun kissToyBleEncryptionEncrypt(raw: IntArray): ByteArray {
     return encrypted.map { it.toByte() }.toByteArray()
 }
 
-private fun ByteArray.xorKissToyTutuFixedKey(): ByteArray =
-    ByteArray(size.coerceAtMost(KISS_TOY_TUTU_FIXED_KEY.size)) { index ->
-        (this[index].toInt() xor KISS_TOY_TUTU_FIXED_KEY[index].toInt()).toByte()
-    }
-
 private fun kissToyOfficialV2Command(command: Int, subType: Int = 0): ByteArray =
     bytes(
         0xb4,
@@ -3090,7 +3069,6 @@ private fun kissToyOfficialV2Encrypt(bytes: ByteArray): ByteArray {
     return encrypted
 }
 
-private val KISS_TOY_TUTU_FIXED_KEY = bytes(0xea, 0x30, 0xbb, 0xdb, 0xad, 0xb6, 0xc6, 0x2f, 0xcf, 0xe9, 0xe9, 0x96)
 private const val KISS_TOY_OFFICIAL_V2_PROTOCOL_ID = "kisstoy_official_v2"
 private val KISS_TOY_HISTORICAL_GATT_SERVICE_UUID = uuid("00001000-0000-1000-8000-00805f9b34fb")
 private val KISS_TOY_HISTORICAL_GATT_WRITE_UUID = uuid("00001001-0000-1000-8000-00805f9b34fb")
@@ -3115,10 +3093,6 @@ private val KISS_TOY_OFFICIAL_V2_DISCOVERY_ROUTES = listOf(
         notifyUuid = uuid("0000ffe2-0000-1000-8000-00805f9b34fb"),
     ),
 )
-private const val KISS_TOY_TUTU_PACKET_PREFIX: Byte = 0x58
-private const val KISS_TOY_TUTU_AUTH_CHALLENGE_SIZE = 13
-private const val KISS_TOY_TUTU_AUTH_TIMEOUT_MS = 4_000L
-private const val KISS_TOY_TUTU_AUTH_SETTLE_MS = 1_000L
 private const val KISS_TOY_TUTU_REPEAT_MS = 500
 private const val KISS_TOY_OFFICIAL_V2_WRITE_SETTLE_MS = 220L
 private const val KISS_TOY_OFFICIAL_V2_STOP_REPEAT_DELAY_MS = 300L
@@ -3155,7 +3129,7 @@ private val KISS_TOY_TUTU_OFFICIAL_V2_PROFILE = KissToyOfficialV2Profile(
     toyType = 8,
     channelNames = KISS_TOY_TUTU_CHANNEL_NAMES,
     controlFrame = KissToyOfficialV2ControlFrame.LegacyMotorPacket,
-    requiresAuth = true,
+    usesDedicatedTutuRoute = true,
 )
 private val KISS_TOY_OFFICIAL_V2_PROFILES = listOf(
     KissToyOfficialV2Profile("JY11", "太正鲸", listOf(KISS_TOY_OFFICIAL_V2_TYPE_1), toyType = 1),
@@ -3223,7 +3197,7 @@ private object KissToyProtocol : BleDeviceProtocol {
     )
 
     override fun matches(fingerprint: BleGattFingerprint): Boolean {
-        if (fingerprint.kissToyOfficialV2Profile()?.requiresAuth == true) return false
+        if (fingerprint.kissToyOfficialV2Profile()?.usesDedicatedTutuRoute == true) return false
         val hasKissToyGatt = fingerprint.serviceUuids.contains(serviceUuid) &&
                 fingerprint.characteristicUuids.contains(writeUuid)
         if (!hasKissToyGatt) return false

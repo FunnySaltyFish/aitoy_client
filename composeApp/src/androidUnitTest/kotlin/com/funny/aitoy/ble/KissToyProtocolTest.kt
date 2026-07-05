@@ -27,23 +27,21 @@ class KissToyProtocolTest {
     }
 
     @Test
-    fun tutuIIUsesChallengeAuthAndOfficialV2MotorPackets() {
+    fun tutuIISubscribesNotifyWithoutFakeAuthAndUsesOfficialV2MotorPackets() {
         val protocol = BleProtocolRegistry.resolveNative(tutuFingerprint()) ?: error("KissToy Tutu II protocol not resolved")
 
         assertEquals("kisstoy_tutu2", protocol.status.id)
         assertEquals(ToyControlStyle.DualIntensityOnly, protocol.status.controlStyle)
         assertEquals(listOf("底座伸缩", "头部伸缩"), protocol.status.channelNames)
 
+        // 对齐官方 App onDeviceConnectSuccess：只订阅 AE3C，不设 ready gate、不发认证帧，订阅即可控制。
         val init = protocol.initialize(tutuFingerprint())
-        assertIs<BleProtocolOperation.SubscribeNotify>(init[0])
-        assertIs<BleProtocolOperation.WaitForProtocolReady>(init[1])
+        assertEquals(1, init.size)
+        assertEquals(TUTU_NOTIFY_UUID, assertIs<BleProtocolOperation.SubscribeNotify>(init[0]).characteristicUuid)
+        assertTrue(protocol.isProtocolReady())
 
-        val challenge = "58000102030405060708090a0b".hexBytes()
-        val auth = protocol.onNotify(TUTU_NOTIFY_UUID, challenge).first()
-        val authWrite = assertIs<BleProtocolOperation.Write>(auth)
-        assertEquals(TUTU_WRITE_UUID, authWrite.characteristicUuid)
-        assertFalse(authWrite.withResponse)
-        assertEquals("58EA31B9D8A9B3C028C7E0E39D", authWrite.bytes.hexUpper())
+        // AE3C 通知只回传状态/电量，协议不应据此回写任何“认证”帧。
+        assertEquals(emptyList(), protocol.onNotify(TUTU_NOTIFY_UUID, "58000102030405060708090a0b".hexBytes()))
 
         val run = protocol.commandsFor(ToyControlAction.DualMotor(mode = 1, internalIntensity = 50, externalIntensity = 50))
         assertEquals(4, run.size)
@@ -257,10 +255,14 @@ class KissToyProtocolTest {
 
         val route = protocols.first()
         val init = route.initialize(qcttLiveAe3aFingerprint())
+        assertEquals(1, init.size)
         assertEquals(AE3A_NOTIFY_UUID, assertIs<BleProtocolOperation.SubscribeNotify>(init[0]).characteristicUuid)
+        assertTrue(route.isProtocolReady())
 
-        val auth = route.onNotify(AE3A_NOTIFY_UUID, "58000102030405060708090a0b".hexBytes()).first()
-        assertEquals(AE3A_WRITE_UUID, assertIs<BleProtocolOperation.Write>(auth).characteristicUuid)
+        // AE3C 通知不触发认证回写；控制帧直接写 AE3B。
+        assertEquals(emptyList(), route.onNotify(AE3A_NOTIFY_UUID, "58000102030405060708090a0b".hexBytes()))
+        val run = route.commandsFor(ToyControlAction.DualMotor(mode = 1, internalIntensity = 50, externalIntensity = 50))
+        assertEquals(AE3A_WRITE_UUID, assertIs<BleProtocolOperation.Write>(run[0]).characteristicUuid)
     }
 
     @Test
