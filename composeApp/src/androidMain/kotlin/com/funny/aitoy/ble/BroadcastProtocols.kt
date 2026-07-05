@@ -359,19 +359,15 @@ internal object CachitoShikong3BroadcastProtocol : BleBroadcastProtocol {
     )
 
     override fun matches(device: ScannedBleDevice): Boolean {
-        val text = buildString {
+        val compactText = buildString {
             append(device.name)
             append(' ')
             append(device.broadcastProtocolName)
-            append(' ')
-            append(device.serviceUuids.joinToString())
-            append(' ')
-            append(device.scanRecordHex)
-        }
-        val compactText = text.lowercase().replace(" ", "").replace(".", "")
-        return compactText.contains("失控3") ||
-            compactText.contains("shikong3") ||
-            text.contains("71000B", ignoreCase = true)
+        }.lowercase().replace(" ", "").replace(".", "")
+        val hasShikong3Name = compactText.contains("失控3") || compactText.contains("shikong3")
+        // 对齐官方 ScanFilter：company 0x0071 + 数据首字节 0x0B（TYPE_SHIKONG3=0x23 机型的广播类型位）。
+        val hasShikong3Manufacturer = device.manufacturerFirstByte(CACHITO_COMPANY_ID) == SHIKONG3_TYPE_BYTE
+        return hasShikong3Name || hasShikong3Manufacturer
     }
 
     override fun commandsFor(action: ToyControlAction): List<BleAdvertiseOperation> =
@@ -884,3 +880,29 @@ private object CachitoBroadcastCodec {
 
 private fun String.normalizedBroadcastDeviceName(): String =
     lowercase().filter { it.isLetterOrDigit() }
+
+/** Cachito 玩具广播使用的厂商 company id（官方 `getManufacturerSpecificData().get(0x71)`）。 */
+internal const val CACHITO_COMPANY_ID = 0x71
+
+/** 失控 3.0（`TYPE_SHIKONG3 = 0x23`）在厂商数据首字节上的广播类型位，对齐官方 ScanFilter 的 `71000B` 前缀。 */
+internal const val SHIKONG3_TYPE_BYTE = 0x0B
+
+/**
+ * 解析扫描记录里的厂商数据，返回指定 company id 的首字节。
+ *
+ * 对齐官方 Cachito `BleManufacturerDataScanner`：它用 `getManufacturerSpecificData().get(0x71)`
+ * 取出 company `0x0071` 的数据，再按数据首字节区分失控机型（失控 3.0 = `0x0B`、失控 4.0 = `0x17` 等）。
+ * `manufacturerData` 字符串格式为 `manufacturerDataText()` 输出的 `"0x71:0B 00 ...", "0x27:..."`。
+ */
+internal fun ScannedBleDevice.manufacturerFirstByte(companyId: Int): Int? =
+    manufacturerData.split(",").firstNotNullOfOrNull { entry ->
+        val idText = entry.substringBefore(':', missingDelimiterValue = "").trim()
+        val id = idText.removePrefix("0x").removePrefix("0X").toIntOrNull(16)
+        if (id != companyId) return@firstNotNullOfOrNull null
+        entry.substringAfter(':', missingDelimiterValue = "")
+            .trim()
+            .split(Regex("\\s+"))
+            .firstOrNull()
+            ?.takeIf { it.length in 1..2 && it.all { ch -> ch.isDigit() || ch.lowercaseChar() in 'a'..'f' } }
+            ?.toIntOrNull(16)
+    }
