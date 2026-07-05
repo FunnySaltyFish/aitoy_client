@@ -2586,11 +2586,18 @@ private object CachitoMbProGattProtocol : BleDeviceProtocol {
             is ToyControlAction.DualMotor ->
                 listOf(write(command(action.strongestIntensity(status.intensityMax))))
             ToyControlAction.Stop ->
-                listOf(write(command(0)))
+                listOf(write(stopCommand()))
         }
 
     private fun command(intensity: Int): ByteArray {
         val scaled = (intensity.coerceIn(0, status.intensityMax) * 0.75 + 25).toInt()
+        return commandPayload(scaled)
+    }
+
+    private fun stopCommand(): ByteArray =
+        commandPayload(0)
+
+    private fun commandPayload(level: Int): ByteArray {
         val commandId = Random.nextInt(0x64, 0x100)
         val bytes = bytes(
             0x71,
@@ -2603,7 +2610,7 @@ private object CachitoMbProGattProtocol : BleDeviceProtocol {
             0x31,
             0x03,
             0x02,
-            scaled,
+            level.coerceIn(0, 0xff),
             0x00,
             0x00,
             0x00,

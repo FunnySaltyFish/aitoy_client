@@ -252,6 +252,15 @@ class KissToyProtocolTest {
             write.bytes.last().toInt() and 0xff,
         )
 
+        val stop = protocol.commandsFor(ToyControlAction.Stop)
+        val stopWrite = assertIs<BleProtocolOperation.Write>(stop.single())
+        assertEquals(FFE0_WRITE_UUID, stopWrite.characteristicUuid)
+        assertEquals("0000043103020000000000", stopWrite.bytes.copyOfRange(4, 15).hexUpper())
+        assertEquals(
+            stopWrite.bytes.take(15).sumOf { it.toInt() and 0xff } and 0xff,
+            stopWrite.bytes.last().toInt() and 0xff,
+        )
+
         val broadcastMatches = BleBroadcastProtocolRegistry.resolveAll(
             ScannedBleDevice(
                 name = "MB08-V30-469C",
