@@ -841,6 +841,8 @@ private fun ControlRoom(vm: BridgeViewModel, toy: ManagedToy? = null) {
                     "选择节奏，也可以分别调节两个部位。"
                 status.controlStyle == ToyControlStyle.CombinedPatternAndIntensity ->
                     "选择节奏并调节强度。"
+                status.controlStyle == ToyControlStyle.SvakomPlus ->
+                    "按当前设备支持的功能分别控制。"
                 status.controlStyle == ToyControlStyle.PatternOnly ->
                     "选择一个预设节奏。"
                 else -> "调节强度，设备会保持当前状态。"
@@ -869,6 +871,7 @@ private fun ControlRoom(vm: BridgeViewModel, toy: ManagedToy? = null) {
                 Spacer(Modifier.height(14.dp))
                 DualIntensityControl(vm, address, status)
             }
+            ToyControlStyle.SvakomPlus -> SvakomPlusControl(vm, address, status)
             ToyControlStyle.PatternOnly -> PatternSelector(vm, address, status, targetMode)
             ToyControlStyle.IntensityOnly -> IntensityControl(vm, address, status, targetIntensity)
         }
@@ -1084,6 +1087,132 @@ private fun DualIntensityControl(
         }
     }
 }
+
+@Composable
+private fun SvakomPlusControl(
+    vm: BridgeViewModel,
+    address: String,
+    status: BleProtocolStatus,
+) {
+    val motionFeatures = status.features.filterNot { it.type == "heat" }
+    Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
+        motionFeatures.forEach { feature ->
+            SvakomPlusFeatureControl(
+                vm = vm,
+                address = address,
+                status = status,
+                title = feature.label.ifBlank { feature.type },
+                functionCode = svakomPlusFunctionCode(feature.type),
+                modeMax = svakomPlusModeMax(feature.type),
+            )
+        }
+        if (status.features.any { it.type == "heat" }) {
+            var enabled by remember(address, status.id) { mutableStateOf(false) }
+            Button(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("svakom_plus_heat"),
+                onClick = {
+                    enabled = !enabled
+                    vm.updateSvakomPlusFunction(
+                        address = address,
+                        functionCode = SvakomPlusHeatCode,
+                        mode = 1,
+                        intensity = if (enabled) 1 else 0,
+                    )
+                },
+                enabled = status.controllable,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (enabled) Honey else VelvetLight,
+                    contentColor = if (enabled) Ink else TextMain,
+                ),
+            ) {
+                Text(if (enabled) "关闭加热" else "开启加热")
+            }
+        }
+    }
+}
+
+@Composable
+private fun SvakomPlusFeatureControl(
+    vm: BridgeViewModel,
+    address: String,
+    status: BleProtocolStatus,
+    title: String,
+    functionCode: Int,
+    modeMax: Int,
+) {
+    var selectedMode by remember(address, status.id, functionCode) { mutableIntStateOf(1) }
+    var intensity by remember(address, status.id, functionCode) { mutableIntStateOf(0) }
+    val maxIntensity = status.intensityMax.coerceAtLeast(1)
+
+    Column {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(title, color = TextMain, fontWeight = FontWeight.SemiBold)
+            Text("$intensity/$maxIntensity", color = Rose, fontWeight = FontWeight.Bold)
+        }
+        Spacer(Modifier.height(10.dp))
+        (1..modeMax.coerceAtLeast(1)).chunked(5).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                row.forEach { index ->
+                    val selected = selectedMode == index
+                    Button(
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("svakom_plus_${functionCode}_mode_$index"),
+                        onClick = {
+                            selectedMode = index
+                            vm.updateSvakomPlusFunction(address, functionCode, selectedMode, intensity)
+                        },
+                        enabled = status.controllable,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (selected) RoseDeep else VelvetLight,
+                            contentColor = if (selected) Color.White else TextMain,
+                        ),
+                    ) {
+                        Text(index.toString())
+                    }
+                }
+                repeat(5 - row.size) { Spacer(Modifier.weight(1f)) }
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+        Slider(
+            value = intensity.toFloat(),
+            onValueChange = {
+                intensity = it.roundToInt()
+                vm.updateSvakomPlusFunction(address, functionCode, selectedMode, intensity)
+            },
+            modifier = Modifier.testTag("svakom_plus_${functionCode}_intensity"),
+            valueRange = 0f..maxIntensity.toFloat(),
+            steps = (maxIntensity - 1).coerceAtLeast(0),
+            enabled = status.controllable,
+        )
+    }
+}
+
+private const val SvakomPlusHeatCode = 5
+
+private fun svakomPlusFunctionCode(type: String): Int =
+    when (type) {
+        "oscillate" -> 1
+        "vibrate" -> 2
+        "constrict" -> 3
+        "flap" -> 4
+        "heat" -> SvakomPlusHeatCode
+        else -> 1
+    }
+
+private fun svakomPlusModeMax(type: String): Int =
+    when (type) {
+        "vibrate" -> 10
+        "constrict" -> 5
+        else -> 7
+    }
 
 @Composable
 private fun DeviceRemarkDialog(vm: BridgeViewModel) {

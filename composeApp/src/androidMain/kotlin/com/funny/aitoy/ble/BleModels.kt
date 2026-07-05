@@ -44,6 +44,7 @@ enum class ToyControlStyle {
     ExclusivePatternOrIntensity,
     CombinedPatternAndIntensity,
     PatternAndDualIntensity,
+    SvakomPlus,
 }
 
 sealed interface ToyControlAction {

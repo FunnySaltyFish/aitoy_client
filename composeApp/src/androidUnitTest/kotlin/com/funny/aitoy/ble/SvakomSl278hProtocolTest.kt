@@ -12,8 +12,8 @@ class SvakomSl278hProtocolTest {
         val protocol = BleProtocolRegistry.resolveNative(svakomFingerprint(productCode = 100))
             ?: error("SL278H vibration stick protocol not resolved")
 
-        assertEquals("svakom_sl278h_v", protocol.status.id)
-        assertEquals(ToyControlStyle.PatternAndDualIntensity, protocol.status.controlStyle)
+        assertEquals("svakom_sl278_plus_v", protocol.status.id)
+        assertEquals(ToyControlStyle.SvakomPlus, protocol.status.controlStyle)
         assertEquals(listOf("伸缩", "震动"), protocol.status.channelNames)
 
         val init = protocol.initialize(svakomFingerprint(productCode = 100))
@@ -22,6 +22,7 @@ class SvakomSl278hProtocolTest {
         val operations = protocol.commandsFor(ToyControlAction.DualMotor(mode = 3, internalIntensity = 6, externalIntensity = 4))
         assertEquals("55080000030600", assertIs<BleProtocolOperation.Write>(operations[0]).bytes.hexUpper())
         assertEquals("55030000010400", assertIs<BleProtocolOperation.Write>(operations[1]).bytes.hexUpper())
+        assertEquals("55050000000000", assertIs<BleProtocolOperation.Write>(operations[2]).bytes.hexUpper())
         operations.forEach { operation ->
             val write = assertIs<BleProtocolOperation.Write>(operation)
             assertEquals(WRITE_UUID, write.characteristicUuid)
@@ -30,28 +31,27 @@ class SvakomSl278hProtocolTest {
     }
 
     @Test
-    fun sl278hSuctionSideUsesOfficialFlapCommandShape() {
+    fun sl278hFlapSideUsesOfficialFlapCommandShape() {
         val protocol = BleProtocolRegistry.resolveNative(svakomFingerprint(productCode = 101))
-            ?: error("SL278H suction side protocol not resolved")
+            ?: error("SL278H flap side protocol not resolved")
 
-        assertEquals("svakom_sl278h_f", protocol.status.id)
-        assertEquals(ToyControlStyle.CombinedPatternAndIntensity, protocol.status.controlStyle)
-        assertEquals("吮吸强度", protocol.status.intensityLabel)
+        assertEquals("svakom_sl278_plus_f", protocol.status.id)
+        assertEquals(ToyControlStyle.SvakomPlus, protocol.status.controlStyle)
+        assertEquals(listOf("拍打"), protocol.status.channelNames)
 
-        val write = assertIs<BleProtocolOperation.Write>(
-            protocol.commandsFor(ToyControlAction.Combined(mode = 2, intensity = 7)).single(),
-        )
+        val operations = protocol.commandsFor(ToyControlAction.Combined(mode = 402, intensity = 7))
+        val write = assertIs<BleProtocolOperation.Write>(operations[0])
 
         assertEquals(WRITE_UUID, write.characteristicUuid)
         assertFalse(write.withResponse)
-        assertEquals("55090000020700", write.bytes.hexUpper())
+        assertEquals("55070000020700", write.bytes.hexUpper())
     }
 
     @Test
     fun sl278hMatcherStaysAheadOfSt419AndRequiresSvakomManufacturerData() {
         val protocols = BleProtocolRegistry.resolveNativeAll(svakomFingerprint(productCode = 100))
 
-        assertEquals("svakom_sl278h_v", protocols.first().status.id)
+        assertEquals("svakom_sl278_plus_v", protocols.first().status.id)
         assertEquals(null, BleProtocolRegistry.resolveNative(svakomFingerprint(productCode = 100, manufacturerData = "")))
     }
 
@@ -64,7 +64,7 @@ class SvakomSl278hProtocolTest {
             ),
         ) ?: error("SL278K live advertisement did not resolve")
 
-        assertEquals("svakom_sl278h_v", protocol.status.id)
+        assertEquals("svakom_sl278_plus_v", protocol.status.id)
     }
 
     @Test
@@ -72,7 +72,25 @@ class SvakomSl278hProtocolTest {
         val protocol = BleProtocolRegistry.resolveNative(svakomFingerprint(productCode = 0x81, name = "SL278K"))
             ?: error("SL278K suction product code did not resolve")
 
-        assertEquals("svakom_sl278h_f", protocol.status.id)
+        assertEquals("svakom_sl278_plus_s", protocol.status.id)
+        assertEquals(listOf("吮吸"), protocol.status.channelNames)
+        val operations = protocol.commandsFor(ToyControlAction.Combined(mode = 303, intensity = 8))
+        assertEquals("55090000030800", assertIs<BleProtocolOperation.Write>(operations[0]).bytes.hexUpper())
+    }
+
+    @Test
+    fun sl278kVibrationStickSupportsTenVibrateModesAndHeat() {
+        val protocol = BleProtocolRegistry.resolveNative(svakomFingerprint(productCode = 0x80, name = "SL278K"))
+            ?: error("SL278K vibration stick protocol not resolved")
+
+        assertEquals(10, protocol.status.modeMax)
+        val vibrate = protocol.commandsFor(ToyControlAction.Combined(mode = 210, intensity = 5))
+        assertEquals("55080000000000", assertIs<BleProtocolOperation.Write>(vibrate[0]).bytes.hexUpper())
+        assertEquals("550300000A0500", assertIs<BleProtocolOperation.Write>(vibrate[1]).bytes.hexUpper())
+        assertEquals("55050000000000", assertIs<BleProtocolOperation.Write>(vibrate[2]).bytes.hexUpper())
+
+        val heat = protocol.commandsFor(ToyControlAction.Combined(mode = 501, intensity = 1))
+        assertEquals("55050137010000", assertIs<BleProtocolOperation.Write>(heat[2]).bytes.hexUpper())
     }
 
     private fun svakomFingerprint(

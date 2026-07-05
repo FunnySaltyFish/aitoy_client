@@ -583,6 +583,19 @@ class BridgeViewModel : ViewModel() {
         scheduleControlTrial(dualIntensityAction(mode, intensity, secondaryIntensity, protocolStatus))
     }
 
+    fun updateSvakomPlusFunction(address: String, functionCode: Int, mode: Int, intensity: Int) {
+        if (address != selectedAddress) selectDevice(address)
+        val status = protocolStatus
+        val safeMode = mode.coerceIn(0, 99)
+        val safeIntensity = intensity.coerceIn(0, status.intensityMax.coerceAtLeast(1))
+        scheduleControlTrial(
+            ToyControlAction.Combined(
+                mode = functionCode.coerceIn(1, 9) * 100 + safeMode,
+                intensity = safeIntensity,
+            )
+        )
+    }
+
     fun stopDevice() = runAction {
         val address = selectedAddress
         if (address.isBlank()) return@runAction
@@ -1347,6 +1360,7 @@ class BridgeViewModel : ViewModel() {
             ToyControlStyle.CombinedPatternAndIntensity -> ToyControlAction.Combined(mappedMode, mappedIntensity)
             ToyControlStyle.PatternAndDualIntensity ->
                 ToyControlAction.DualMotor(mappedMode, mappedIntensity, mappedIntensity)
+            ToyControlStyle.SvakomPlus -> ToyControlAction.Combined(mappedMode, mappedIntensity)
         }
         sendToyAction(action, autoStopSec, address, scheduleAutoStop, keepAliveDurationSec)
         deviceModes[address] = mappedMode
@@ -1575,6 +1589,7 @@ class BridgeViewModel : ViewModel() {
             ToyControlStyle.CombinedPatternAndIntensity -> ToyControlAction.Combined(nextMode, currentIntensity)
             ToyControlStyle.PatternAndDualIntensity ->
                 dualIntensityAction(nextMode, currentIntensity, currentSecondaryIntensity, status)
+            ToyControlStyle.SvakomPlus -> ToyControlAction.Combined(nextMode, currentIntensity)
         }
 
     private fun intensityAction(nextIntensity: Int): ToyControlAction =
@@ -1598,6 +1613,7 @@ class BridgeViewModel : ViewModel() {
             ToyControlStyle.CombinedPatternAndIntensity -> ToyControlAction.Combined(currentMode, nextIntensity)
             ToyControlStyle.PatternAndDualIntensity ->
                 dualIntensityAction(currentMode, nextIntensity, nextSecondaryIntensity, status)
+            ToyControlStyle.SvakomPlus -> ToyControlAction.Combined(currentMode, nextIntensity)
             ToyControlStyle.IntensityOnly,
             ToyControlStyle.ExclusivePatternOrIntensity -> ToyControlAction.Intensity(nextIntensity)
         }
