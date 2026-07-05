@@ -125,6 +125,7 @@ internal object BleProtocolRegistry {
                     SistalkMonsterPubMultiMotorProtocol,
                     SistalkMonsterPubDualMotorProtocol,
                     SistalkMonsterPubSingleMotorProtocol,
+                    SvakomSl278hProtocol,
                     SvakomSt419Protocol,
                     SvakomQhSx045Protocol,
                     MizzzeeXhtkjProtocol,
@@ -2030,6 +2031,216 @@ private object SvakomQhSx045Protocol : BleDeviceProtocol {
     )
 }
 
+private object SvakomSl278hProtocol : BleDeviceProtocol {
+    private val serviceUuid = uuid("0000ffe0-0000-1000-8000-00805f9b34fb")
+    private val writeUuid = uuid("0000ffe1-0000-1000-8000-00805f9b34fb")
+    private val notifyUuid = uuid("0000ffe2-0000-1000-8000-00805f9b34fb")
+
+    override val status = SL278H_VIBRATION_STICK.status
+
+    override fun matches(fingerprint: BleGattFingerprint): Boolean {
+        val name = fingerprint.name.normalizedDeviceName()
+        val hasSvakomGatt = fingerprint.serviceUuids.contains(serviceUuid) &&
+                fingerprint.characteristicUuids.contains(writeUuid) &&
+                fingerprint.characteristicUuids.contains(notifyUuid)
+        val productCode = fingerprint.svakomProductCode()
+        val isSl278h = productCode == SL278H_V_CODE ||
+                productCode == SL278H_F_CODE ||
+                name.contains("sl278h")
+        return isSl278h && hasSvakomGatt && fingerprint.hasSvakomManufacturerData()
+    }
+
+    override fun createInstance(fingerprint: BleGattFingerprint): BleDeviceProtocol =
+        SvakomSl278hSession(fingerprint.svakomProductCode().sl278hProfile())
+
+    override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> = emptyList()
+
+    private const val SL278H_V_CODE = 100
+    private const val SL278H_F_CODE = 101
+}
+
+private class SvakomSl278hSession(
+    private val profile: SvakomSl278hProfile,
+) : BleDeviceProtocol {
+    private val writeUuid = uuid("0000ffe1-0000-1000-8000-00805f9b34fb")
+    private val notifyUuid = uuid("0000ffe2-0000-1000-8000-00805f9b34fb")
+    private var currentMode = 1
+    private var currentPrimaryIntensity = 0
+    private var currentSecondaryIntensity = 0
+
+    override val status: BleProtocolStatus = profile.status
+
+    override fun matches(fingerprint: BleGattFingerprint): Boolean = false
+
+    override fun initialize(fingerprint: BleGattFingerprint): List<BleProtocolOperation> {
+        currentMode = 1
+        currentPrimaryIntensity = 0
+        currentSecondaryIntensity = 0
+        return listOf(BleProtocolOperation.SubscribeNotify(notifyUuid))
+    }
+
+    override fun keepaliveIntervalMs(): Long = 1_500L
+
+    override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
+        when (action) {
+            is ToyControlAction.Pattern -> run(
+                mode = action.mode,
+                primaryIntensity = currentPrimaryIntensity,
+                secondaryIntensity = currentSecondaryIntensity,
+            )
+            is ToyControlAction.Intensity -> run(
+                mode = currentMode,
+                primaryIntensity = action.value,
+                secondaryIntensity = if (profile.dualChannel) action.value else 0,
+            )
+            is ToyControlAction.Combined -> run(
+                mode = action.mode,
+                primaryIntensity = action.intensity,
+                secondaryIntensity = if (profile.dualChannel) action.intensity else 0,
+            )
+            is ToyControlAction.DualMotor -> run(
+                mode = action.mode,
+                primaryIntensity = action.internalIntensity,
+                secondaryIntensity = action.externalIntensity,
+            )
+            ToyControlAction.Stop -> stopAll()
+        }
+
+    private fun run(mode: Int, primaryIntensity: Int, secondaryIntensity: Int): List<BleProtocolOperation> {
+        currentMode = mode.coerceIn(1, status.modeMax.coerceAtLeast(1))
+        currentPrimaryIntensity = primaryIntensity.coerceIn(0, status.intensityMax)
+        currentSecondaryIntensity = secondaryIntensity.coerceIn(0, status.intensityMax)
+        return profile.commands(
+            write = ::write,
+            mode = currentMode,
+            primaryIntensity = currentPrimaryIntensity,
+            secondaryIntensity = currentSecondaryIntensity,
+        )
+    }
+
+    private fun stopAll(): List<BleProtocolOperation> {
+        currentPrimaryIntensity = 0
+        currentSecondaryIntensity = 0
+        return profile.stopCommands(::write) + write(bytes(0x55, 0x04, 0x00, 0x00, 0x00, 0x00, 0xaa))
+    }
+
+    private fun write(bytes: ByteArray): BleProtocolOperation.Write =
+        BleProtocolOperation.Write(
+            characteristicUuid = writeUuid,
+            bytes = bytes,
+            withResponse = false,
+        )
+}
+
+private sealed class SvakomSl278hProfile(
+    val status: BleProtocolStatus,
+    val dualChannel: Boolean,
+) {
+    abstract fun commands(
+        write: (ByteArray) -> BleProtocolOperation.Write,
+        mode: Int,
+        primaryIntensity: Int,
+        secondaryIntensity: Int,
+    ): List<BleProtocolOperation>
+
+    abstract fun stopCommands(write: (ByteArray) -> BleProtocolOperation.Write): List<BleProtocolOperation>
+
+    protected fun modeCommand(command: Int, mode: Int, level: Int): ByteArray =
+        bytes(
+            0x55,
+            command,
+            0x00,
+            0x00,
+            mode.coerceIn(0, 0xff),
+            level.coerceIn(0, 0xff),
+            0x00,
+        )
+
+    protected fun activeMode(mode: Int, intensity: Int): Int =
+        if (intensity > 0) mode.coerceAtLeast(1) else 0
+
+    protected fun activeLevel(intensity: Int): Int =
+        if (intensity > 0) intensity else 0
+}
+
+private object SL278H_VIBRATION_STICK : SvakomSl278hProfile(
+    status = BleProtocolStatus(
+        id = "svakom_sl278h_v",
+        displayName = "SVAKOM SL278H / 分欣",
+        controllable = true,
+        intensityMax = 10,
+        supportsMode = true,
+        modeMax = 7,
+        controlStyle = ToyControlStyle.PatternAndDualIntensity,
+        modeLabel = "伸缩模式",
+        intensityLabel = "强度",
+        channelNames = listOf("伸缩", "震动"),
+        features = listOf(
+            BleProtocolFeature(type = "oscillate", min = 0, max = 10, index = 0, label = "伸缩"),
+            BleProtocolFeature(type = "vibrate", min = 0, max = 10, index = 1, label = "震动"),
+        ),
+        automatic = true,
+    ),
+    dualChannel = true,
+) {
+    override fun commands(
+        write: (ByteArray) -> BleProtocolOperation.Write,
+        mode: Int,
+        primaryIntensity: Int,
+        secondaryIntensity: Int,
+    ): List<BleProtocolOperation> =
+        listOf(
+            write(modeCommand(0x08, activeMode(mode, primaryIntensity), if (primaryIntensity > 0) 0xff else 0x00)),
+            write(modeCommand(0x03, activeMode(1, secondaryIntensity), activeLevel(secondaryIntensity))),
+        )
+
+    override fun stopCommands(write: (ByteArray) -> BleProtocolOperation.Write): List<BleProtocolOperation> =
+        listOf(
+            write(modeCommand(0x08, 0, 0)),
+            write(modeCommand(0x03, 0, 0)),
+            write(modeCommand(0x05, 0, 0)),
+        )
+}
+
+private object SL278H_SUCTION : SvakomSl278hProfile(
+    status = BleProtocolStatus(
+        id = "svakom_sl278h_f",
+        displayName = "SVAKOM SL278H / 分欣",
+        controllable = true,
+        intensityMax = 10,
+        supportsMode = true,
+        modeMax = 7,
+        controlStyle = ToyControlStyle.CombinedPatternAndIntensity,
+        modeLabel = "吮吸模式",
+        intensityLabel = "吮吸强度",
+        features = listOf(
+            BleProtocolFeature(type = "constrict", min = 0, max = 10, index = 0, label = "吮吸"),
+        ),
+        automatic = true,
+    ),
+    dualChannel = false,
+) {
+    override fun commands(
+        write: (ByteArray) -> BleProtocolOperation.Write,
+        mode: Int,
+        primaryIntensity: Int,
+        secondaryIntensity: Int,
+    ): List<BleProtocolOperation> =
+        listOf(write(modeCommand(0x07, activeMode(mode, primaryIntensity), activeLevel(primaryIntensity))))
+
+    override fun stopCommands(write: (ByteArray) -> BleProtocolOperation.Write): List<BleProtocolOperation> =
+        listOf(
+            write(modeCommand(0x07, 0, 0)),
+            write(modeCommand(0x05, 0, 0)),
+        )
+}
+
+private fun Int?.sl278hProfile(): SvakomSl278hProfile =
+    when (this) {
+        101 -> SL278H_SUCTION
+        else -> SL278H_VIBRATION_STICK
+    }
+
 private object SvakomSt419Protocol : BleDeviceProtocol {
     private val serviceUuid = uuid("0000ffe0-0000-1000-8000-00805f9b34fb")
     private val writeUuid = uuid("0000ffe1-0000-1000-8000-00805f9b34fb")
@@ -3747,10 +3958,38 @@ private fun BleGattFingerprint.hasAnkniQd1Name(): Boolean {
 }
 
 private fun BleGattFingerprint.hasSvakomManufacturerData(): Boolean =
-    manufacturerData.substringAfter(':', missingDelimiterValue = manufacturerData)
+    svakomManufacturerPayload() != null
+
+private fun BleGattFingerprint.svakomProductCode(): Int? {
+    val payload = svakomManufacturerPayload() ?: return null
+    return when {
+        payload.size >= 16 && payload[3].unsignedByte() == 0x02 ->
+            (payload[13].unsignedByte() shl 16) or
+                    (payload[14].unsignedByte() shl 8) or
+                    payload[15].unsignedByte()
+        payload.size >= 5 -> payload[4].unsignedByte()
+        else -> null
+    }
+}
+
+private fun BleGattFingerprint.svakomManufacturerPayload(): ByteArray? {
+    val mappedPayload = manufacturerData.toManufacturerDataMap()
+        .values
+        .firstOrNull { it.startsWithSvakomPrefix() }
+    if (mappedPayload != null) return mappedPayload
+    return manufacturerData.substringAfter(':', missingDelimiterValue = manufacturerData)
         .trim()
-        .uppercase()
-        .startsWith("53 56 41")
+        .hexByteArray()
+        .takeIf { it.startsWithSvakomPrefix() }
+}
+
+private fun ByteArray.startsWithSvakomPrefix(): Boolean =
+    size >= 3 &&
+            this[0].unsignedByte() == 0x53 &&
+            this[1].unsignedByte() == 0x56 &&
+            this[2].unsignedByte() == 0x41
+
+private fun Byte.unsignedByte(): Int = toInt() and 0xff
 
 private fun BleGattFingerprint.hasAnkniDdddGatt(): Boolean =
     serviceUuids.contains(uuid("0000dddd-0000-1000-8000-00805f9b34fb")) &&

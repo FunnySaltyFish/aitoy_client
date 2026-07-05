@@ -281,6 +281,38 @@ class KissToyProtocolTest {
         assertFalse(matches.first().preferGattWhenConnectable)
     }
 
+    @Test
+    fun unnamedManufacturerOnlyBroadcastDoesNotMatchShikong3() {
+        val matches = BleBroadcastProtocolRegistry.resolveAll(
+            ScannedBleDevice(
+                name = "",
+                address = "09:66:F7:99:E6:D8",
+                rssi = -55,
+                manufacturerData = "0x6:01 09 20 22 9C 99 BA B2 D3 9B 8C 44 9D A4 FA 2D 3B 73 2C 83 48 9A E5 93 55 94 1A",
+                connectable = false,
+            ),
+        )
+
+        assertEquals(emptyList(), matches.map { it.status.id })
+    }
+
+    @Test
+    fun shikong3ExplicitNameStillMatchesBroadcastRoute() {
+        val matches = BleBroadcastProtocolRegistry.resolveAll(
+            ScannedBleDevice(
+                name = "Cachito 失控 3.0",
+                address = "09:66:F7:99:E6:D8",
+                rssi = -55,
+                connectable = false,
+            ),
+        )
+
+        assertEquals("cachito_shikong3_advertise", matches.first().status.id)
+        assertTrue(matches.any { it.status.id == "cachito_shikong2_advertise" })
+        assertTrue(matches.any { it.status.id == "cachito_shikong25_advertise" })
+        assertTrue(matches.any { it.status.id == "cachito_shikong4_advertise" })
+    }
+
     private fun ByteArray.hexUpper(): String =
         joinToString("") { byte -> "%02X".format(byte.toInt() and 0xff) }
 

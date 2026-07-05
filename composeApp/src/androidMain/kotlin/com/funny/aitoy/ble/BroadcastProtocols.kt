@@ -366,18 +366,12 @@ internal object CachitoShikong3BroadcastProtocol : BleBroadcastProtocol {
             append(' ')
             append(device.serviceUuids.joinToString())
             append(' ')
-            append(device.manufacturerData)
-            append(' ')
             append(device.scanRecordHex)
         }
         val compactText = text.lowercase().replace(" ", "").replace(".", "")
-        val knownHint = compactText.contains("失控3") ||
+        return compactText.contains("失控3") ||
             compactText.contains("shikong3") ||
             text.contains("71000B", ignoreCase = true)
-        val shikong3TraceHint = !device.connectable &&
-            device.serviceUuids.isEmpty() &&
-            device.manufacturerData.contains("0x6:01 09 20 22", ignoreCase = true)
-        return knownHint || shikong3TraceHint
     }
 
     override fun commandsFor(action: ToyControlAction): List<BleAdvertiseOperation> =
