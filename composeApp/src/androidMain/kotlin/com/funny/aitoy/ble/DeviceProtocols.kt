@@ -2195,7 +2195,7 @@ private object SL278H_VIBRATION_STICK : SvakomSl278hProfile(
         secondaryIntensity: Int,
     ): List<BleProtocolOperation> =
         listOf(
-            write(modeCommand(0x08, activeMode(mode, primaryIntensity), if (primaryIntensity > 0) 0xff else 0x00)),
+            write(modeCommand(0x08, activeMode(mode, primaryIntensity), activeLevel(primaryIntensity))),
             write(modeCommand(0x03, activeMode(1, secondaryIntensity), activeLevel(secondaryIntensity))),
         )
 
@@ -2231,11 +2231,11 @@ private object SL278H_SUCTION : SvakomSl278hProfile(
         primaryIntensity: Int,
         secondaryIntensity: Int,
     ): List<BleProtocolOperation> =
-        listOf(write(modeCommand(0x07, activeMode(mode, primaryIntensity), activeLevel(primaryIntensity))))
+        listOf(write(modeCommand(0x09, activeMode(mode, primaryIntensity), activeLevel(primaryIntensity))))
 
     override fun stopCommands(write: (ByteArray) -> BleProtocolOperation.Write): List<BleProtocolOperation> =
         listOf(
-            write(modeCommand(0x07, 0, 0)),
+            write(modeCommand(0x09, 0, 0)),
             write(modeCommand(0x05, 0, 0)),
         )
 }

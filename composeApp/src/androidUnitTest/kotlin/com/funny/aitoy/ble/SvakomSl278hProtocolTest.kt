@@ -20,7 +20,7 @@ class SvakomSl278hProtocolTest {
         assertEquals(NOTIFY_UUID, assertIs<BleProtocolOperation.SubscribeNotify>(init.single()).characteristicUuid)
 
         val operations = protocol.commandsFor(ToyControlAction.DualMotor(mode = 3, internalIntensity = 6, externalIntensity = 4))
-        assertEquals("5508000003FF00", assertIs<BleProtocolOperation.Write>(operations[0]).bytes.hexUpper())
+        assertEquals("55080000030600", assertIs<BleProtocolOperation.Write>(operations[0]).bytes.hexUpper())
         assertEquals("55030000010400", assertIs<BleProtocolOperation.Write>(operations[1]).bytes.hexUpper())
         operations.forEach { operation ->
             val write = assertIs<BleProtocolOperation.Write>(operation)
@@ -44,7 +44,7 @@ class SvakomSl278hProtocolTest {
 
         assertEquals(WRITE_UUID, write.characteristicUuid)
         assertFalse(write.withResponse)
-        assertEquals("55070000020700", write.bytes.hexUpper())
+        assertEquals("55090000020700", write.bytes.hexUpper())
     }
 
     @Test
