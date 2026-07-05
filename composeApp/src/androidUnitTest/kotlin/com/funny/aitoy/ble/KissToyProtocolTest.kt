@@ -174,6 +174,25 @@ class KissToyProtocolTest {
     }
 
     @Test
+    fun qcpwAe3aRouteWinsOverAe00PreferredTemplate() {
+        val fingerprint = qcpwLiveAe3aFingerprint().copy(
+            preferredServiceUuid = AE00_SERVICE_UUID,
+            preferredWriteUuid = AE00_WRITE_UUID,
+            preferredNotifyUuid = AE00_NOTIFY_UUID,
+        )
+        val protocol = BleProtocolRegistry.resolveNative(fingerprint) ?: error("QCPW AE3A protocol not resolved")
+
+        assertEquals("kisstoy_official_v2", protocol.status.id)
+
+        val init = protocol.initialize(fingerprint)
+        assertEquals(AE3A_NOTIFY_UUID, assertIs<BleProtocolOperation.SubscribeNotify>(init[0]).characteristicUuid)
+
+        val run = protocol.commandsFor(ToyControlAction.DualMotor(mode = 1, internalIntensity = 50, externalIntensity = 25))
+        assertEquals(AE3A_WRITE_UUID, assertIs<BleProtocolOperation.Write>(run[0]).characteristicUuid)
+        assertEquals(AE3A_WRITE_UUID, assertIs<BleProtocolOperation.Write>(run[2]).characteristicUuid)
+    }
+
+    @Test
     fun qcpwHistoricalKissToyRouteDoesNotUseOfficialV2() {
         val protocols = BleProtocolRegistry.resolveNativeAll(
             officialV2Fingerprint(
