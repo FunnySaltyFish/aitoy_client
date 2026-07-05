@@ -20,8 +20,8 @@ class SvakomSl278hProtocolTest {
         assertEquals(NOTIFY_UUID, assertIs<BleProtocolOperation.SubscribeNotify>(init.single()).characteristicUuid)
 
         val operations = protocol.commandsFor(ToyControlAction.DualMotor(mode = 3, internalIntensity = 6, externalIntensity = 4))
-        // 伸缩没有强度滑杆：激活时强度字节固定 0xFF，只按模式驱动。
-        assertEquals("5508000003FF00", assertIs<BleProtocolOperation.Write>(operations[0]).bytes.hexUpper())
+        // 伸缩没有强度滑杆：官方 level 恒为 0，激活由模式驱动，帧形 55 08 00 00 <mode> 00 00。
+        assertEquals("55080000030000", assertIs<BleProtocolOperation.Write>(operations[0]).bytes.hexUpper())
         assertEquals("55030000010400", assertIs<BleProtocolOperation.Write>(operations[1]).bytes.hexUpper())
         assertEquals("55050000000000", assertIs<BleProtocolOperation.Write>(operations[2]).bytes.hexUpper())
         operations.forEach { operation ->
@@ -45,8 +45,8 @@ class SvakomSl278hProtocolTest {
 
         assertEquals(WRITE_UUID, write.characteristicUuid)
         assertFalse(write.withResponse)
-        // 拍打同样没有强度滑杆：激活时强度字节固定 0xFF。
-        assertEquals("5507000002FF00", write.bytes.hexUpper())
+        // 拍打同样没有强度滑杆：官方 level 恒为 0，激活由模式驱动。
+        assertEquals("55070000020000", write.bytes.hexUpper())
     }
 
     @Test
@@ -114,6 +114,22 @@ class SvakomSl278hProtocolTest {
         val vibrateOnly = protocol.commandsFor(ToyControlAction.Combined(mode = 2 * 100 + 4, intensity = 6))
         assertEquals("55080000000000", assertIs<BleProtocolOperation.Write>(vibrateOnly[0]).bytes.hexUpper())
         assertEquals("55030000040600", assertIs<BleProtocolOperation.Write>(vibrateOnly[1]).bytes.hexUpper())
+    }
+
+    @Test
+    fun stretchActivatesByModeAloneWithZeroLevel() {
+        // 伸缩没有强度滑杆：官方 level 恒为 0，激活由“模式>0”决定，模式=0 即停。
+        // 回归：0.6.9 曾误发 0xFF、更早误发 0..10 强度，实机都不动；真值是 level=0。
+        val protocol = BleProtocolRegistry.resolveNative(svakomFingerprint(productCode = 0x80, name = "SL278K"))
+            ?: error("SL278K vibration stick protocol not resolved")
+
+        // 只驱动伸缩（功能码 1，模式 5），强度参数应被忽略、level 恒为 0。
+        val stretch = protocol.commandsFor(ToyControlAction.Combined(mode = 1 * 100 + 5, intensity = 0))
+        assertEquals("55080000050000", assertIs<BleProtocolOperation.Write>(stretch[0]).bytes.hexUpper())
+
+        // 模式=0 停止伸缩。
+        val stop = protocol.commandsFor(ToyControlAction.Combined(mode = 1 * 100 + 0, intensity = 0))
+        assertEquals("55080000000000", assertIs<BleProtocolOperation.Write>(stop[0]).bytes.hexUpper())
     }
 
     private fun svakomFingerprint(

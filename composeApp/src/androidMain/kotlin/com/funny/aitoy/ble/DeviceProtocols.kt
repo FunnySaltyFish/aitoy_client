@@ -2143,13 +2143,10 @@ private class SvakomV2Session(
                 bytes(0x55, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00)
             }
         }
-        val active = state.intensity > 0
-        // 官方规则：震动/吮吸走 0..10 滑杆强度；伸缩/拍打没有滑杆，激活时强度字节固定 0xFF。
-        val level = when {
-            !active -> 0
-            strengthDriven -> state.intensity
-            else -> fixedActiveLevel
-        }
+        // 强度型(震动/吮吸)：强度>0 才算激活，level 走 0..10 滑杆值。
+        // 模式型(伸缩/拍打)：官方 level 恒为 0，激活与否由“模式>0”决定，强度字节不参与。
+        val active = if (strengthDriven) state.intensity > 0 else state.mode > 0
+        val level = if (strengthDriven && active) state.intensity else 0
         return bytes(
             0x55,
             command,
@@ -2192,19 +2189,19 @@ private data class SvakomV2Function(
     val intensityMax: Int = 10,
     /**
      * 该功能是否由连续强度驱动。
-     * 官方 App(AutoV2ModeViewTools）里伸缩(STRETCH)、拍打(FLAP）没有强度滑杆，
-     * setDefaultStrong(255)，强度字节固定发 0xFF，只靠模式区分动作；
+     * 官方 SL278K 走 isSubProduct → OrderingViewTools → AutoV2ModeView 路径：
+     * 伸缩(STRETCH)、拍打(FLAP）的 FunctionBean 没有 stretch/flap_strong_max，
+     * 因此 isShowStrongSlider()=false，且该路径不 setDefaultStrong，defaultStrong 保持 0，
+     * getModeBytes() 里强度字节 = defaultStrong = 0，帧形为 `55 CMD 00 00 <mode> 00 00`，只靠模式驱动、模式=0 即停止；
      * 震动(VIBRATE)、吮吸(SUCK）才 setShowStrongSlider(true)，强度走 0..10 滑杆值。
-     * 之前把伸缩强度当成 0..10 下发，实机在 ~6/255(约 2%）时电机根本推不动，表现为“伸缩无反应”。
+     * 注意：level 字节始终为 0，激活与否由“模式是否 > 0”决定，而不是强度。
      */
     val strengthDriven: Boolean = true,
-) {
-    /** 官方无强度滑杆的功能，激活时强度字节固定为 0xFF。 */
-    val fixedActiveLevel: Int = 0xFF
-}
+)
 
 private data class SvakomV2FunctionState(
-    val mode: Int = 1,
+    // 初始 mode=0 表示未启动：强度型看 intensity>0，模式型看 mode>0，两种模型下空闲都判定为停止。
+    val mode: Int = 0,
     val intensity: Int = 0,
 )
 
