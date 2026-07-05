@@ -22,6 +22,8 @@ import com.funny.aitoy.ble.ProtocolTemplate
 import com.funny.aitoy.ble.ScannedBleDevice
 import com.funny.aitoy.ble.ToyControlAction
 import com.funny.aitoy.ble.ToyControlStyle
+import com.funny.aitoy.ble.svakomV2FunctionCode
+import com.funny.aitoy.ble.svakomV2FunctionModeMax
 import com.funny.aitoy.chat.ToyTool
 import com.funny.aitoy.chat.ToyToolResult
 import com.funny.aitoy.core.kmp.ToastType
@@ -114,6 +116,13 @@ private sealed interface RelaySequenceStep {
     data class Pattern(val mode: Int, val durationSec: Int?) : RelaySequenceStep
 
     data class Intensity(val value: Int, val durationSec: Int?) : RelaySequenceStep
+
+    data class Scalar(
+        val featureIndex: Int,
+        val mode: Int,
+        val value: Int,
+        val durationSec: Int?,
+    ) : RelaySequenceStep
 
     data class Sleep(val durationSec: Int) : RelaySequenceStep
 
@@ -583,7 +592,7 @@ class BridgeViewModel : ViewModel() {
         scheduleControlTrial(dualIntensityAction(mode, intensity, secondaryIntensity, protocolStatus))
     }
 
-    fun updateSvakomPlusFunction(address: String, functionCode: Int, mode: Int, intensity: Int) {
+    fun updateIndependentFunction(address: String, functionCode: Int, mode: Int, intensity: Int) {
         if (address != selectedAddress) selectDevice(address)
         val status = protocolStatus
         val safeMode = mode.coerceIn(0, 99)
@@ -1250,6 +1259,28 @@ class BridgeViewModel : ViewModel() {
                         }
                         delay(actionDurationSec * 1_000L)
                     }
+                    is RelaySequenceStep.Scalar -> {
+                        val durationSec = step.durationSec ?: safeDefaultDuration
+                        val unlimited = durationSec == UnlimitedSequenceDurationSec
+                        val actionDurationSec = if (unlimited) safeDefaultDuration else durationSec
+                        val status = protocolStatusFor(address)
+                        val action = scalarFeatureAction(step, address, status)
+                        delayControlWarmup(address)
+                        sendToyAction(
+                            action,
+                            actionDurationSec,
+                            address,
+                            scheduleAutoStop = false,
+                            keepAliveDurationSec = if (unlimited) null else actionDurationSec,
+                        )
+                        syncRelayDevice()
+                        running = actionKeepsDeviceRunning(action)
+                        if (unlimited) {
+                            shouldStopRunning = false
+                            return
+                        }
+                        delay(actionDurationSec * 1_000L)
+                    }
                     is RelaySequenceStep.Sleep -> delay(step.durationSec.coerceIn(0, 300) * 1_000L)
                     RelaySequenceStep.Stop -> {
                         sendToyStop(address)
@@ -1313,6 +1344,17 @@ class BridgeViewModel : ViewModel() {
                         durationSec = parseSequenceDuration(args),
                     )
                 }
+                part.startsWith("scalar(") && part.endsWith(")") -> {
+                    val args = parseSequenceArguments(part.removePrefix("scalar(").removeSuffix(")"))
+                    RelaySequenceStep.Scalar(
+                        featureIndex = (args["feature"] ?: 0).coerceAtLeast(0),
+                        mode = (args["mode"] ?: 1).coerceAtLeast(0),
+                        value = args["value"]?.coerceIn(0, 100)
+                            ?: args["intensity"]?.coerceIn(0, 100)
+                            ?: throw SequenceScriptFormatException(),
+                        durationSec = parseSequenceDuration(args),
+                    )
+                }
                 else -> throw SequenceScriptFormatException()
             }
         }
@@ -1360,7 +1402,7 @@ class BridgeViewModel : ViewModel() {
             ToyControlStyle.CombinedPatternAndIntensity -> ToyControlAction.Combined(mappedMode, mappedIntensity)
             ToyControlStyle.PatternAndDualIntensity ->
                 ToyControlAction.DualMotor(mappedMode, mappedIntensity, mappedIntensity)
-            ToyControlStyle.SvakomPlus -> ToyControlAction.Combined(mappedMode, mappedIntensity)
+            ToyControlStyle.IndependentFunctions -> ToyControlAction.Combined(mappedMode, mappedIntensity)
         }
         sendToyAction(action, autoStopSec, address, scheduleAutoStop, keepAliveDurationSec)
         deviceModes[address] = mappedMode
@@ -1589,7 +1631,7 @@ class BridgeViewModel : ViewModel() {
             ToyControlStyle.CombinedPatternAndIntensity -> ToyControlAction.Combined(nextMode, currentIntensity)
             ToyControlStyle.PatternAndDualIntensity ->
                 dualIntensityAction(nextMode, currentIntensity, currentSecondaryIntensity, status)
-            ToyControlStyle.SvakomPlus -> ToyControlAction.Combined(nextMode, currentIntensity)
+            ToyControlStyle.IndependentFunctions -> ToyControlAction.Combined(nextMode, currentIntensity)
         }
 
     private fun intensityAction(nextIntensity: Int): ToyControlAction =
@@ -1613,10 +1655,40 @@ class BridgeViewModel : ViewModel() {
             ToyControlStyle.CombinedPatternAndIntensity -> ToyControlAction.Combined(currentMode, nextIntensity)
             ToyControlStyle.PatternAndDualIntensity ->
                 dualIntensityAction(currentMode, nextIntensity, nextSecondaryIntensity, status)
-            ToyControlStyle.SvakomPlus -> ToyControlAction.Combined(currentMode, nextIntensity)
+            ToyControlStyle.IndependentFunctions -> ToyControlAction.Combined(currentMode, nextIntensity)
             ToyControlStyle.IntensityOnly,
             ToyControlStyle.ExclusivePatternOrIntensity -> ToyControlAction.Intensity(nextIntensity)
         }
+
+    /**
+     * 把 MCP 的 scalar(feature=N,...) 步骤映射为具体动作。
+     * 多功能设备按 feature 下标定位功能区，独立控制伸缩/震动/吮吸/拍打/加热等；
+     * 其它协议按下标退化为通用强度或组合控制，保持脚本兼容。
+     */
+    private fun scalarFeatureAction(
+        step: RelaySequenceStep.Scalar,
+        address: String,
+        status: BleProtocolStatus,
+    ): ToyControlAction {
+        val mappedIntensity = mapIntensityPercent(step.value, address)
+        if (status.controlStyle != ToyControlStyle.IndependentFunctions) {
+            return intensityAction(
+                currentMode = step.mode.coerceIn(1, status.modeMax.coerceAtLeast(1)),
+                nextIntensity = mappedIntensity,
+                nextSecondaryIntensity = mappedIntensity,
+                status = status,
+            )
+        }
+        val feature = status.features.getOrNull(step.featureIndex)
+            ?: status.features.firstOrNull()
+            ?: return ToyControlAction.Intensity(mappedIntensity)
+        val functionCode = svakomV2FunctionCode(feature.type).coerceIn(1, 9)
+        val safeMode = step.mode.coerceIn(0, svakomV2FunctionModeMax(feature.type).coerceAtLeast(1))
+        return ToyControlAction.Combined(
+            mode = functionCode * 100 + safeMode,
+            intensity = mappedIntensity,
+        )
+    }
 
     private fun dualIntensityAction(
         currentMode: Int,

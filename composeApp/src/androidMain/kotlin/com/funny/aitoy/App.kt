@@ -84,6 +84,9 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.funny.aitoy.ble.BleConnectionState
 import com.funny.aitoy.ble.BleProtocolStatus
 import com.funny.aitoy.ble.ProtocolAttemptStatus
+import com.funny.aitoy.ble.SvakomV2HeatFunctionCode
+import com.funny.aitoy.ble.svakomV2FunctionCode
+import com.funny.aitoy.ble.svakomV2FunctionModeMax
 import com.funny.aitoy.ble.ScannedBleDevice
 import com.funny.aitoy.ble.ToyControlStyle
 import com.funny.aitoy.chat.ChatScreen
@@ -841,7 +844,7 @@ private fun ControlRoom(vm: BridgeViewModel, toy: ManagedToy? = null) {
                     "选择节奏，也可以分别调节两个部位。"
                 status.controlStyle == ToyControlStyle.CombinedPatternAndIntensity ->
                     "选择节奏并调节强度。"
-                status.controlStyle == ToyControlStyle.SvakomPlus ->
+                status.controlStyle == ToyControlStyle.IndependentFunctions ->
                     "按当前设备支持的功能分别控制。"
                 status.controlStyle == ToyControlStyle.PatternOnly ->
                     "选择一个预设节奏。"
@@ -871,7 +874,7 @@ private fun ControlRoom(vm: BridgeViewModel, toy: ManagedToy? = null) {
                 Spacer(Modifier.height(14.dp))
                 DualIntensityControl(vm, address, status)
             }
-            ToyControlStyle.SvakomPlus -> SvakomPlusControl(vm, address, status)
+            ToyControlStyle.IndependentFunctions -> MultiFunctionControl(vm, address, status)
             ToyControlStyle.PatternOnly -> PatternSelector(vm, address, status, targetMode)
             ToyControlStyle.IntensityOnly -> IntensityControl(vm, address, status, targetIntensity)
         }
@@ -1089,7 +1092,7 @@ private fun DualIntensityControl(
 }
 
 @Composable
-private fun SvakomPlusControl(
+private fun MultiFunctionControl(
     vm: BridgeViewModel,
     address: String,
     status: BleProtocolStatus,
@@ -1097,13 +1100,13 @@ private fun SvakomPlusControl(
     val motionFeatures = status.features.filterNot { it.type == "heat" }
     Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
         motionFeatures.forEach { feature ->
-            SvakomPlusFeatureControl(
+            MultiFunctionFeatureControl(
                 vm = vm,
                 address = address,
                 status = status,
                 title = feature.label.ifBlank { feature.type },
-                functionCode = svakomPlusFunctionCode(feature.type),
-                modeMax = svakomPlusModeMax(feature.type),
+                functionCode = svakomV2FunctionCode(feature.type),
+                modeMax = svakomV2FunctionModeMax(feature.type),
             )
         }
         if (status.features.any { it.type == "heat" }) {
@@ -1114,9 +1117,9 @@ private fun SvakomPlusControl(
                     .testTag("svakom_plus_heat"),
                 onClick = {
                     enabled = !enabled
-                    vm.updateSvakomPlusFunction(
+                    vm.updateIndependentFunction(
                         address = address,
-                        functionCode = SvakomPlusHeatCode,
+                        functionCode = SvakomV2HeatFunctionCode,
                         mode = 1,
                         intensity = if (enabled) 1 else 0,
                     )
@@ -1134,7 +1137,7 @@ private fun SvakomPlusControl(
 }
 
 @Composable
-private fun SvakomPlusFeatureControl(
+private fun MultiFunctionFeatureControl(
     vm: BridgeViewModel,
     address: String,
     status: BleProtocolStatus,
@@ -1166,7 +1169,7 @@ private fun SvakomPlusFeatureControl(
                             .testTag("svakom_plus_${functionCode}_mode_$index"),
                         onClick = {
                             selectedMode = index
-                            vm.updateSvakomPlusFunction(address, functionCode, selectedMode, intensity)
+                            vm.updateIndependentFunction(address, functionCode, selectedMode, intensity)
                         },
                         enabled = status.controllable,
                         colors = ButtonDefaults.buttonColors(
@@ -1185,7 +1188,7 @@ private fun SvakomPlusFeatureControl(
             value = intensity.toFloat(),
             onValueChange = {
                 intensity = it.roundToInt()
-                vm.updateSvakomPlusFunction(address, functionCode, selectedMode, intensity)
+                vm.updateIndependentFunction(address, functionCode, selectedMode, intensity)
             },
             modifier = Modifier.testTag("svakom_plus_${functionCode}_intensity"),
             valueRange = 0f..maxIntensity.toFloat(),
@@ -1194,25 +1197,6 @@ private fun SvakomPlusFeatureControl(
         )
     }
 }
-
-private const val SvakomPlusHeatCode = 5
-
-private fun svakomPlusFunctionCode(type: String): Int =
-    when (type) {
-        "oscillate" -> 1
-        "vibrate" -> 2
-        "constrict" -> 3
-        "flap" -> 4
-        "heat" -> SvakomPlusHeatCode
-        else -> 1
-    }
-
-private fun svakomPlusModeMax(type: String): Int =
-    when (type) {
-        "vibrate" -> 10
-        "constrict" -> 5
-        else -> 7
-    }
 
 @Composable
 private fun DeviceRemarkDialog(vm: BridgeViewModel) {

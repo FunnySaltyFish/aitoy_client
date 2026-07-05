@@ -13,7 +13,7 @@ class SvakomSl278hProtocolTest {
             ?: error("SL278H vibration stick protocol not resolved")
 
         assertEquals("svakom_sl278_plus_v", protocol.status.id)
-        assertEquals(ToyControlStyle.SvakomPlus, protocol.status.controlStyle)
+        assertEquals(ToyControlStyle.IndependentFunctions, protocol.status.controlStyle)
         assertEquals(listOf("伸缩", "震动"), protocol.status.channelNames)
 
         val init = protocol.initialize(svakomFingerprint(productCode = 100))
@@ -36,7 +36,7 @@ class SvakomSl278hProtocolTest {
             ?: error("SL278H flap side protocol not resolved")
 
         assertEquals("svakom_sl278_plus_f", protocol.status.id)
-        assertEquals(ToyControlStyle.SvakomPlus, protocol.status.controlStyle)
+        assertEquals(ToyControlStyle.IndependentFunctions, protocol.status.controlStyle)
         assertEquals(listOf("拍打"), protocol.status.channelNames)
 
         val operations = protocol.commandsFor(ToyControlAction.Combined(mode = 402, intensity = 7))
@@ -91,6 +91,27 @@ class SvakomSl278hProtocolTest {
 
         val heat = protocol.commandsFor(ToyControlAction.Combined(mode = 501, intensity = 1))
         assertEquals("55050137010000", assertIs<BleProtocolOperation.Write>(heat[2]).bytes.hexUpper())
+    }
+
+    @Test
+    fun featureCodesExposeIndependentAddressingForScalarControl() {
+        // scalar(feature=N,...) 在 ViewModel 里按功能类型解析成 functionCode*100+mode，
+        // 这里验证类型到功能码/模式上限的映射稳定，且各功能区互相独立。
+        assertEquals(1, svakomV2FunctionCode("oscillate"))
+        assertEquals(2, svakomV2FunctionCode("vibrate"))
+        assertEquals(3, svakomV2FunctionCode("constrict"))
+        assertEquals(4, svakomV2FunctionCode("flap"))
+        assertEquals(SvakomV2HeatFunctionCode, svakomV2FunctionCode("heat"))
+        assertEquals(10, svakomV2FunctionModeMax("vibrate"))
+        assertEquals(5, svakomV2FunctionModeMax("constrict"))
+
+        val protocol = BleProtocolRegistry.resolveNative(svakomFingerprint(productCode = 0x80, name = "SL278K"))
+            ?: error("SL278K vibration stick protocol not resolved")
+
+        // 只驱动震动通道（功能码 2），伸缩通道应保持停止帧。
+        val vibrateOnly = protocol.commandsFor(ToyControlAction.Combined(mode = 2 * 100 + 4, intensity = 6))
+        assertEquals("55080000000000", assertIs<BleProtocolOperation.Write>(vibrateOnly[0]).bytes.hexUpper())
+        assertEquals("55030000040600", assertIs<BleProtocolOperation.Write>(vibrateOnly[1]).bytes.hexUpper())
     }
 
     private fun svakomFingerprint(

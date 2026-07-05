@@ -125,7 +125,7 @@ internal object BleProtocolRegistry {
                     SistalkMonsterPubMultiMotorProtocol,
                     SistalkMonsterPubDualMotorProtocol,
                     SistalkMonsterPubSingleMotorProtocol,
-                    SvakomSl278hProtocol,
+                    SvakomV2MultiFunctionProtocol,
                     SvakomSt419Protocol,
                     SvakomQhSx045Protocol,
                     MizzzeeXhtkjProtocol,
@@ -2031,12 +2031,12 @@ private object SvakomQhSx045Protocol : BleDeviceProtocol {
     )
 }
 
-private object SvakomSl278hProtocol : BleDeviceProtocol {
+private object SvakomV2MultiFunctionProtocol : BleDeviceProtocol {
     private val serviceUuid = uuid("0000ffe0-0000-1000-8000-00805f9b34fb")
     private val writeUuid = uuid("0000ffe1-0000-1000-8000-00805f9b34fb")
     private val notifyUuid = uuid("0000ffe2-0000-1000-8000-00805f9b34fb")
 
-    override val status = SL278_PLUS_STRETCH_VIBRATE.status
+    override val status = SVAKOM_V2_STRETCH_VIBRATE.status
 
     override fun matches(fingerprint: BleGattFingerprint): Boolean {
         val name = fingerprint.name.normalizedDeviceName()
@@ -2050,7 +2050,7 @@ private object SvakomSl278hProtocol : BleDeviceProtocol {
     }
 
     override fun createInstance(fingerprint: BleGattFingerprint): BleDeviceProtocol =
-        SvakomSl278hSession(fingerprint.svakomProductCode().sl278hProfile())
+        SvakomV2Session(fingerprint.svakomProductCode().svakomV2Profile())
 
     override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> = emptyList()
 
@@ -2058,19 +2058,19 @@ private object SvakomSl278hProtocol : BleDeviceProtocol {
     private val SL278_PLUS_NAMES = listOf("sl278b", "sl278f", "sl278h", "sl278i", "sl278j", "sl278k", "sl278u")
 }
 
-private class SvakomSl278hSession(
-    private val profile: SvakomSl278hProfile,
+private class SvakomV2Session(
+    private val profile: SvakomV2Profile,
 ) : BleDeviceProtocol {
     private val writeUuid = uuid("0000ffe1-0000-1000-8000-00805f9b34fb")
     private val notifyUuid = uuid("0000ffe2-0000-1000-8000-00805f9b34fb")
-    private val states = profile.functions.associate { it.code to SvakomPlusFunctionState() }.toMutableMap()
+    private val states = profile.functions.associate { it.code to SvakomV2FunctionState() }.toMutableMap()
 
     override val status: BleProtocolStatus = profile.status
 
     override fun matches(fingerprint: BleGattFingerprint): Boolean = false
 
     override fun initialize(fingerprint: BleGattFingerprint): List<BleProtocolOperation> {
-        states.keys.forEach { states[it] = SvakomPlusFunctionState() }
+        states.keys.forEach { states[it] = SvakomV2FunctionState() }
         return listOf(BleProtocolOperation.SubscribeNotify(notifyUuid))
     }
 
@@ -2117,8 +2117,8 @@ private class SvakomSl278hSession(
         return writeCurrentState()
     }
 
-    private fun updateState(function: SvakomPlusFunction, mode: Int, intensity: Int) {
-        states[function.code] = SvakomPlusFunctionState(
+    private fun updateState(function: SvakomV2Function, mode: Int, intensity: Int) {
+        states[function.code] = SvakomV2FunctionState(
             mode = mode.coerceIn(0, function.modeMax.coerceAtLeast(1)),
             intensity = intensity.coerceIn(0, function.intensityMax.coerceAtLeast(1)),
         )
@@ -2126,7 +2126,7 @@ private class SvakomSl278hSession(
 
     private fun writeCurrentState(): List<BleProtocolOperation> =
         profile.functions.map { function ->
-            write(function.commandBytes(states[function.code] ?: SvakomPlusFunctionState()))
+            write(function.commandBytes(states[function.code] ?: SvakomV2FunctionState()))
         }
 
     private fun currentMode(functionCode: Int): Int =
@@ -2135,7 +2135,7 @@ private class SvakomSl278hSession(
     private fun currentIntensity(functionCode: Int): Int =
         states[functionCode]?.intensity ?: 0
 
-    private fun SvakomPlusFunction.commandBytes(state: SvakomPlusFunctionState): ByteArray {
+    private fun SvakomV2Function.commandBytes(state: SvakomV2FunctionState): ByteArray {
         if (type == "heat") {
             return if (state.intensity > 0) {
                 bytes(0x55, 0x05, 0x01, 0x37, 0x01, 0x00, 0x00)
@@ -2156,7 +2156,7 @@ private class SvakomSl278hSession(
     }
 
     private fun stopAll(): List<BleProtocolOperation> {
-        states.keys.forEach { states[it] = SvakomPlusFunctionState(mode = 0, intensity = 0) }
+        states.keys.forEach { states[it] = SvakomV2FunctionState(mode = 0, intensity = 0) }
         return writeCurrentState() + write(bytes(0x55, 0x04, 0x00, 0x00, 0x00, 0x00, 0xaa))
     }
 
@@ -2168,16 +2168,16 @@ private class SvakomSl278hSession(
         )
 }
 
-private sealed class SvakomSl278hProfile(
+private sealed class SvakomV2Profile(
     val status: BleProtocolStatus,
-    val functions: List<SvakomPlusFunction>,
-    val defaultFunction: SvakomPlusFunction = functions.first(),
+    val functions: List<SvakomV2Function>,
+    val defaultFunction: SvakomV2Function = functions.first(),
 ) {
-    fun functionByType(type: String): SvakomPlusFunction? =
+    fun functionByType(type: String): SvakomV2Function? =
         functions.firstOrNull { it.type == type }
 }
 
-private data class SvakomPlusFunction(
+private data class SvakomV2Function(
     val code: Int,
     val type: String,
     val label: String,
@@ -2186,21 +2186,36 @@ private data class SvakomPlusFunction(
     val intensityMax: Int = 10,
 )
 
-private data class SvakomPlusFunctionState(
+private data class SvakomV2FunctionState(
     val mode: Int = 1,
     val intensity: Int = 0,
 )
 
-private val SvakomPlusStretch = SvakomPlusFunction(1, "oscillate", "伸缩", 0x08, modeMax = 7)
-private val SvakomPlusVibrate = SvakomPlusFunction(2, "vibrate", "震动", 0x03, modeMax = 10)
-private val SvakomPlusSuck = SvakomPlusFunction(3, "constrict", "吮吸", 0x09, modeMax = 5)
-private val SvakomPlusFlap = SvakomPlusFunction(4, "flap", "拍打", 0x07, modeMax = 7)
-private val SvakomPlusHeat = SvakomPlusFunction(5, "heat", "加热", 0x05, modeMax = 1, intensityMax = 1)
+private val SvakomV2Stretch = SvakomV2Function(1, "oscillate", "伸缩", 0x08, modeMax = 7)
+private val SvakomV2Vibrate = SvakomV2Function(2, "vibrate", "震动", 0x03, modeMax = 10)
+private val SvakomV2Suck = SvakomV2Function(3, "constrict", "吮吸", 0x09, modeMax = 5)
+private val SvakomV2Flap = SvakomV2Function(4, "flap", "拍打", 0x07, modeMax = 7)
+private val SvakomV2Heat = SvakomV2Function(5, "heat", "加热", 0x05, modeMax = 1, intensityMax = 1)
 
-private fun svakomPlusStatus(
+/** 多功能协议里加热功能的固定功能码。 */
+const val SvakomV2HeatFunctionCode: Int = 5
+
+private val svakomV2FunctionsByType: Map<String, SvakomV2Function> =
+    listOf(SvakomV2Stretch, SvakomV2Vibrate, SvakomV2Suck, SvakomV2Flap, SvakomV2Heat)
+        .associateBy { it.type }
+
+/** 按功能类型返回多功能协议的功能码；未知类型回退到伸缩。 */
+fun svakomV2FunctionCode(type: String): Int =
+    svakomV2FunctionsByType[type]?.code ?: SvakomV2Stretch.code
+
+/** 按功能类型返回多功能协议的模式上限；未知类型回退到伸缩。 */
+fun svakomV2FunctionModeMax(type: String): Int =
+    svakomV2FunctionsByType[type]?.modeMax ?: SvakomV2Stretch.modeMax
+
+private fun svakomV2Status(
     id: String,
     displayName: String,
-    functions: List<SvakomPlusFunction>,
+    functions: List<SvakomV2Function>,
 ): BleProtocolStatus =
     BleProtocolStatus(
         id = id,
@@ -2209,7 +2224,7 @@ private fun svakomPlusStatus(
         intensityMax = 10,
         supportsMode = true,
         modeMax = functions.filter { it.type != "heat" }.maxOfOrNull { it.modeMax } ?: 1,
-        controlStyle = ToyControlStyle.SvakomPlus,
+        controlStyle = ToyControlStyle.IndependentFunctions,
         modeLabel = "模式",
         intensityLabel = "强度",
         channelNames = functions.filter { it.type != "heat" }.map { it.label },
@@ -2225,38 +2240,38 @@ private fun svakomPlusStatus(
         automatic = true,
     )
 
-private object SL278_PLUS_STRETCH_VIBRATE : SvakomSl278hProfile(
-    status = svakomPlusStatus(
+private object SVAKOM_V2_STRETCH_VIBRATE : SvakomV2Profile(
+    status = svakomV2Status(
         id = "svakom_sl278_plus_v",
         displayName = "SVAKOM 分欣 Plus",
-        functions = listOf(SvakomPlusStretch, SvakomPlusVibrate, SvakomPlusHeat),
+        functions = listOf(SvakomV2Stretch, SvakomV2Vibrate, SvakomV2Heat),
     ),
-    functions = listOf(SvakomPlusStretch, SvakomPlusVibrate, SvakomPlusHeat),
+    functions = listOf(SvakomV2Stretch, SvakomV2Vibrate, SvakomV2Heat),
 )
 
-private object SL278_PLUS_SUCK : SvakomSl278hProfile(
-    status = svakomPlusStatus(
+private object SVAKOM_V2_SUCK : SvakomV2Profile(
+    status = svakomV2Status(
         id = "svakom_sl278_plus_s",
         displayName = "SVAKOM 分欣 Plus",
-        functions = listOf(SvakomPlusSuck, SvakomPlusHeat),
+        functions = listOf(SvakomV2Suck, SvakomV2Heat),
     ),
-    functions = listOf(SvakomPlusSuck, SvakomPlusHeat),
+    functions = listOf(SvakomV2Suck, SvakomV2Heat),
 )
 
-private object SL278_PLUS_FLAP : SvakomSl278hProfile(
-    status = svakomPlusStatus(
+private object SVAKOM_V2_FLAP : SvakomV2Profile(
+    status = svakomV2Status(
         id = "svakom_sl278_plus_f",
         displayName = "SVAKOM 分欣 Plus",
-        functions = listOf(SvakomPlusFlap, SvakomPlusHeat),
+        functions = listOf(SvakomV2Flap, SvakomV2Heat),
     ),
-    functions = listOf(SvakomPlusFlap, SvakomPlusHeat),
+    functions = listOf(SvakomV2Flap, SvakomV2Heat),
 )
 
-private fun Int?.sl278hProfile(): SvakomSl278hProfile =
+private fun Int?.svakomV2Profile(): SvakomV2Profile =
     when (this) {
-        101, 111, 145, 328 -> SL278_PLUS_FLAP
-        107, 121, 129 -> SL278_PLUS_SUCK
-        else -> SL278_PLUS_STRETCH_VIBRATE
+        101, 111, 145, 328 -> SVAKOM_V2_FLAP
+        107, 121, 129 -> SVAKOM_V2_SUCK
+        else -> SVAKOM_V2_STRETCH_VIBRATE
     }
 
 private object SvakomSt419Protocol : BleDeviceProtocol {
