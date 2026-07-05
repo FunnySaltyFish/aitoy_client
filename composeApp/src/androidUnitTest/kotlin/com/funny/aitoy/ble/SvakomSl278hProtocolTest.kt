@@ -67,6 +67,14 @@ class SvakomSl278hProtocolTest {
         assertEquals("svakom_sl278h_v", protocol.status.id)
     }
 
+    @Test
+    fun sl278kSuctionProductCodeMatchesSuctionProfile() {
+        val protocol = BleProtocolRegistry.resolveNative(svakomFingerprint(productCode = 0x81, name = "SL278K"))
+            ?: error("SL278K suction product code did not resolve")
+
+        assertEquals("svakom_sl278h_f", protocol.status.id)
+    }
+
     private fun svakomFingerprint(
         productCode: Int = 100,
         name: String = "SL278H",
