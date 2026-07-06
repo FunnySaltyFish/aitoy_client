@@ -84,7 +84,6 @@ internal object BleProtocolRegistry {
                     CachitoMbProGattProtocol,
                     KissToyTutuIIProtocol,
                     KissToyOfficialV2Protocol,
-                    KissToyBoboHistoricalProtocol,
                     AnkniYwtdProtocol,
                     KissToyProtocol,
                     WeVibeSyncLiteProtocol,

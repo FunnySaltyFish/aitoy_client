@@ -406,7 +406,6 @@ private const val KISS_TOY_TUTU_PACKET_PREFIX: Byte = 0x58
 private const val KISS_TOY_TUTU_PACKET_SIZE = 13
 private const val KISS_TOY_TUTU_AUTH_TIMEOUT_MS = 4_000L
 private const val KISS_TOY_TUTU_AUTH_SETTLE_MS = 1_000L
-private const val KISS_TOY_BOBO_PRODUCT_CODE = "QCKH"
 internal val KISS_TOY_HISTORICAL_GATT_SERVICE_UUID = Uuid.parse("00001000-0000-1000-8000-00805f9b34fb")
 internal val KISS_TOY_HISTORICAL_GATT_WRITE_UUID = Uuid.parse("00001001-0000-1000-8000-00805f9b34fb")
 internal val KISS_TOY_HISTORICAL_GATT_NOTIFY_UUID = Uuid.parse("00001002-0000-1000-8000-00805f9b34fb")
@@ -489,47 +488,6 @@ internal val KISS_TOY_OFFICIAL_V2_PROFILES = listOf(
     KissToyOfficialV2Profile("PLY5", "Polly 5", listOf(KISS_TOY_OFFICIAL_V2_TYPE_1, KISS_TOY_OFFICIAL_V2_TYPE_3), toyType = 12),
 ).associateBy { it.code.normalizedDeviceName() }
 
-internal object KissToyBoboHistoricalProtocol : BleDeviceProtocol {
-    override val status = BleProtocolStatus(
-        id = "kisstoy_bobo_historical",
-        displayName = "KissToy BOBO",
-        controllable = true,
-        intensityMax = 100,
-        supportsMode = false,
-        controlStyle = ToyControlStyle.IntensityOnly,
-        intensityLabel = "强度",
-        channelNames = listOf("吮吸"),
-        automatic = true,
-    )
-
-    override fun matches(fingerprint: BleGattFingerprint): Boolean =
-        fingerprint.kissToyOfficialV2Profile()?.code == KISS_TOY_BOBO_PRODUCT_CODE &&
-            fingerprint.hasKissToyHistoricalGattRoute()
-
-    override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
-        when (action) {
-            is ToyControlAction.Intensity -> run(action.value)
-            is ToyControlAction.Combined -> run(action.intensity)
-            is ToyControlAction.DualMotor -> run(action.strongestIntensity(status.intensityMax))
-            is ToyControlAction.Pattern -> run(50)
-            ToyControlAction.Stop -> stop()
-        }
-
-    private fun run(intensity: Int): List<BleProtocolOperation> =
-        listOf(
-            kissToyHistoricalCommand(0x31, 0),
-            kissToyHistoricalCommand(0x71, 0),
-            kissToyHistoricalCommand(0x32, intensity.coerceIn(0, status.intensityMax)),
-        )
-
-    private fun stop(): List<BleProtocolOperation> =
-        listOf(
-            kissToyHistoricalCommand(0x31, 0),
-            kissToyHistoricalCommand(0x32, 0),
-            kissToyHistoricalCommand(0x71, 0),
-        )
-}
-
 internal object KissToyProtocol : BleDeviceProtocol {
     private val knownNames = setOf(
         "JY11",
@@ -562,7 +520,6 @@ internal object KissToyProtocol : BleDeviceProtocol {
 
     override fun matches(fingerprint: BleGattFingerprint): Boolean {
         if (fingerprint.kissToyOfficialV2Profile()?.usesDedicatedTutuRoute == true) return false
-        if (fingerprint.kissToyOfficialV2Profile()?.code == KISS_TOY_BOBO_PRODUCT_CODE) return false
         if (!fingerprint.hasKissToyHistoricalGattRoute()) return false
         val knownName = knownNames.any { it.equals(fingerprint.name, ignoreCase = true) }
         val hasNotify = fingerprint.characteristicUuids.contains(KISS_TOY_HISTORICAL_GATT_NOTIFY_UUID)
