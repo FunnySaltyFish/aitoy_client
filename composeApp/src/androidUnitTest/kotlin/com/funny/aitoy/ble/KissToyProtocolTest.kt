@@ -1,12 +1,14 @@
 package com.funny.aitoy.ble
 
-import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
 
+@OptIn(ExperimentalUuidApi::class)
 class KissToyProtocolTest {
     @Test
     fun existingKissToyProtocolKeepsHistoricalControlShape() {
@@ -454,9 +456,9 @@ class KissToyProtocolTest {
 
     private fun officialV2Fingerprint(
         name: String,
-        serviceUuid: UUID = DDDD_SERVICE_UUID,
-        writeUuid: UUID = DDDD_WRITE_UUID,
-        notifyUuid: UUID = DDDD_NOTIFY_UUID,
+        serviceUuid: Uuid = DDDD_SERVICE_UUID,
+        writeUuid: Uuid = DDDD_WRITE_UUID,
+        notifyUuid: Uuid = DDDD_NOTIFY_UUID,
     ) = BleGattFingerprint(
         name = name,
         manufacturerData = "",
@@ -521,7 +523,7 @@ class KissToyProtocolTest {
 
     private fun assertSingleKissToyBasicControlWrite(
         operations: List<BleProtocolOperation>,
-        writeUuid: UUID,
+        writeUuid: Uuid,
     ): BleProtocolOperation.Write {
         assertEquals(1, operations.size)
         val write = assertIs<BleProtocolOperation.Write>(operations.single())
@@ -572,29 +574,29 @@ class KissToyProtocolTest {
     }
 
     private companion object {
-        val KISSTOY_SERVICE_UUID: UUID = UUID.fromString("00001000-0000-1000-8000-00805f9b34fb")
-        val KISSTOY_WRITE_UUID: UUID = UUID.fromString("00001001-0000-1000-8000-00805f9b34fb")
-        val KISSTOY_NOTIFY_UUID: UUID = UUID.fromString("00001002-0000-1000-8000-00805f9b34fb")
+        val KISSTOY_SERVICE_UUID: Uuid = Uuid.parse("00001000-0000-1000-8000-00805f9b34fb")
+        val KISSTOY_WRITE_UUID: Uuid = Uuid.parse("00001001-0000-1000-8000-00805f9b34fb")
+        val KISSTOY_NOTIFY_UUID: Uuid = Uuid.parse("00001002-0000-1000-8000-00805f9b34fb")
 
-        val DDDD_SERVICE_UUID: UUID = UUID.fromString("0000dddd-0000-1000-8000-00805f9b34fb")
-        val DDDD_WRITE_UUID: UUID = UUID.fromString("0000ddd1-0000-1000-8000-00805f9b34fb")
-        val DDDD_NOTIFY_UUID: UUID = UUID.fromString("0000ddd2-0000-1000-8000-00805f9b34fb")
+        val DDDD_SERVICE_UUID: Uuid = Uuid.parse("0000dddd-0000-1000-8000-00805f9b34fb")
+        val DDDD_WRITE_UUID: Uuid = Uuid.parse("0000ddd1-0000-1000-8000-00805f9b34fb")
+        val DDDD_NOTIFY_UUID: Uuid = Uuid.parse("0000ddd2-0000-1000-8000-00805f9b34fb")
 
-        val TUTU_SERVICE_UUID: UUID = UUID.fromString("0000ae3a-0000-1000-8000-00805f9b34fb")
-        val TUTU_WRITE_UUID: UUID = UUID.fromString("0000ae3b-0000-1000-8000-00805f9b34fb")
-        val TUTU_NOTIFY_UUID: UUID = UUID.fromString("0000ae3c-0000-1000-8000-00805f9b34fb")
+        val TUTU_SERVICE_UUID: Uuid = Uuid.parse("0000ae3a-0000-1000-8000-00805f9b34fb")
+        val TUTU_WRITE_UUID: Uuid = Uuid.parse("0000ae3b-0000-1000-8000-00805f9b34fb")
+        val TUTU_NOTIFY_UUID: Uuid = Uuid.parse("0000ae3c-0000-1000-8000-00805f9b34fb")
 
-        val FFE0_SERVICE_UUID: UUID = UUID.fromString("0000ffe0-0000-1000-8000-00805f9b34fb")
-        val FFE0_WRITE_UUID: UUID = UUID.fromString("0000ffe1-0000-1000-8000-00805f9b34fb")
-        val FFE0_NOTIFY_UUID: UUID = UUID.fromString("0000ffe2-0000-1000-8000-00805f9b34fb")
+        val FFE0_SERVICE_UUID: Uuid = Uuid.parse("0000ffe0-0000-1000-8000-00805f9b34fb")
+        val FFE0_WRITE_UUID: Uuid = Uuid.parse("0000ffe1-0000-1000-8000-00805f9b34fb")
+        val FFE0_NOTIFY_UUID: Uuid = Uuid.parse("0000ffe2-0000-1000-8000-00805f9b34fb")
 
-        val AE3A_SERVICE_UUID: UUID = UUID.fromString("0000ae3a-0000-1000-8000-00805f9b34fb")
-        val AE3A_WRITE_UUID: UUID = UUID.fromString("0000ae3b-0000-1000-8000-00805f9b34fb")
-        val AE3A_NOTIFY_UUID: UUID = UUID.fromString("0000ae3c-0000-1000-8000-00805f9b34fb")
+        val AE3A_SERVICE_UUID: Uuid = Uuid.parse("0000ae3a-0000-1000-8000-00805f9b34fb")
+        val AE3A_WRITE_UUID: Uuid = Uuid.parse("0000ae3b-0000-1000-8000-00805f9b34fb")
+        val AE3A_NOTIFY_UUID: Uuid = Uuid.parse("0000ae3c-0000-1000-8000-00805f9b34fb")
 
-        val AE00_SERVICE_UUID: UUID = UUID.fromString("0000ae00-0000-1000-8000-00805f9b34fb")
-        val AE00_WRITE_UUID: UUID = UUID.fromString("0000ae01-0000-1000-8000-00805f9b34fb")
-        val AE00_NOTIFY_UUID: UUID = UUID.fromString("0000ae02-0000-1000-8000-00805f9b34fb")
+        val AE00_SERVICE_UUID: Uuid = Uuid.parse("0000ae00-0000-1000-8000-00805f9b34fb")
+        val AE00_WRITE_UUID: Uuid = Uuid.parse("0000ae01-0000-1000-8000-00805f9b34fb")
+        val AE00_NOTIFY_UUID: Uuid = Uuid.parse("0000ae02-0000-1000-8000-00805f9b34fb")
 
         val KISS_TOY_BLE_ENCRYPTION_KEY_TAB_FOR_TEST = arrayOf(
             intArrayOf(0x18, 0x5a, 0x64, 0x42, 0x10, 0xc6, 0xf6, 0x86, 0xb2, 0xd4, 0xfe, 0x92),

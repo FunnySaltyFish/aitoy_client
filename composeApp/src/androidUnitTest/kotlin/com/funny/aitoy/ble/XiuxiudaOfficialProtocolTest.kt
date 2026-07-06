@@ -1,11 +1,13 @@
 package com.funny.aitoy.ble
 
-import java.util.UUID
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
 
+@OptIn(ExperimentalUuidApi::class)
 class XiuxiudaOfficialProtocolTest {
     @Test
     fun smallWhaleUsesOfficialAddressPrefixAndChecksum() {
@@ -64,8 +66,8 @@ class XiuxiudaOfficialProtocolTest {
         joinToString("") { byte -> "%02X".format(byte.toInt() and 0xff) }
 
     private companion object {
-        val SERVICE_UUID: UUID = UUID.fromString("53300001-0023-4bd4-bbd5-a6920e4c5653")
-        val NOTIFY_UUID: UUID = UUID.fromString("53300002-0023-4bd4-bbd5-a6920e4c5653")
-        val WRITE_UUID: UUID = UUID.fromString("53300003-0023-4bd4-bbd5-a6920e4c5653")
+        val SERVICE_UUID: Uuid = Uuid.parse("53300001-0023-4bd4-bbd5-a6920e4c5653")
+        val NOTIFY_UUID: Uuid = Uuid.parse("53300002-0023-4bd4-bbd5-a6920e4c5653")
+        val WRITE_UUID: Uuid = Uuid.parse("53300003-0023-4bd4-bbd5-a6920e4c5653")
     }
 }
