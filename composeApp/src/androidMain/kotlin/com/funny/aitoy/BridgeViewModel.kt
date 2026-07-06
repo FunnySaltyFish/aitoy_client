@@ -22,6 +22,7 @@ import com.funny.aitoy.ble.ProtocolTemplate
 import com.funny.aitoy.ble.ScannedBleDevice
 import com.funny.aitoy.ble.ToyControlAction
 import com.funny.aitoy.ble.ToyControlStyle
+import com.funny.aitoy.ble.svakomStableIdentity
 import com.funny.aitoy.ble.svakomV2FunctionCode
 import com.funny.aitoy.ble.svakomV2FunctionModeMax
 import com.funny.aitoy.chat.ToyTool
@@ -495,8 +496,16 @@ class BridgeViewModel : ViewModel() {
             return
         }
         val broadcastProtocolName = toy.protocolName.takeIf { it.startsWith("Cachito ") }.orEmpty()
+        // 司康沃等设备每次开机换 MAC，记忆的旧地址已失效。若当前扫描到同一实体（司康沃稳定身份匹配），
+        // 改连扫描到的新地址和新 manufacturer 数据，避免连到死 MAC 导致连不上/无法识别产品码。
+        val refreshed = resolveRememberedScanTarget(toy)
+        if (refreshed != null && refreshed.address != toy.address) {
+            appendLog("记忆设备 ${toy.name} 地址已更新：${toy.address} → ${refreshed.address}，改连扫描到的新地址")
+            connect(refreshed)
+            return
+        }
         connect(
-            ScannedBleDevice(
+            refreshed ?: ScannedBleDevice(
                 name = toy.name,
                 address = toy.address,
                 rssi = 0,
@@ -506,6 +515,20 @@ class BridgeViewModel : ViewModel() {
                 broadcastProtocolName = broadcastProtocolName,
             )
         )
+    }
+
+    /**
+     * 记忆设备重连时，优先在当前扫描结果里找同一实体：
+     * 1) 地址仍能扫到 → 用扫描到的最新数据（manufacturer 可能刷新）；
+     * 2) 地址失效但司康沃稳定身份（产品码）匹配到某个扫描结果 → 用那个新地址。
+     * 找不到则返回 null，调用方回退到记忆的旧地址。
+     */
+    private fun resolveRememberedScanTarget(toy: RememberedToy): ScannedBleDevice? {
+        devices.firstOrNull { it.address == toy.address }?.let { return it }
+        val savedIdentity = svakomStableIdentity(toy.manufacturerData) ?: return null
+        return devices.firstOrNull { scanned ->
+            scanned.connectable && svakomStableIdentity(scanned.manufacturerData) == savedIdentity
+        }
     }
 
     fun selectDevice(address: String) {

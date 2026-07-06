@@ -119,19 +119,15 @@ class AndroidBleController(
 
     private val gattCallback = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
+            val isConnected = status == BluetoothGatt.GATT_SUCCESS && newState == BluetoothProfile.STATE_CONNECTED
             trace(
                 "连接状态回调 status=$status newState=$newState address=${gatt.device.address}",
-                type = if (status == BluetoothGatt.GATT_SUCCESS && newState == BluetoothProfile.STATE_CONNECTED) {
-                    "ble_gatt_connected"
-                } else {
-                    ""
-                },
-                uploadPolicy = if (status == BluetoothGatt.GATT_SUCCESS && newState == BluetoothProfile.STATE_CONNECTED) {
-                    AiToyTraceUploadPolicy.Always
-                } else {
-                    AiToyTraceUploadPolicy.Drop
-                },
-                key = "ble_gatt_connected:$operationId",
+                // 非正常连接（含 status=133/19/8 等错误码、以及被动断开）也必须上传，
+                // 否则排查“连一个后连第二个失败/掉线”时看不到真实 status 码。
+                error = !isConnected && newState == BluetoothProfile.STATE_DISCONNECTED && status != BluetoothGatt.GATT_SUCCESS,
+                type = if (isConnected) "ble_gatt_connected" else "ble_gatt_state",
+                uploadPolicy = AiToyTraceUploadPolicy.Always,
+                key = "ble_gatt_state:$operationId:$status:$newState",
             )
             when (newState) {
                 BluetoothProfile.STATE_CONNECTED -> {
@@ -140,7 +136,16 @@ class AndroidBleController(
                     trace("开始发现 GATT 服务 result=$started")
                 }
                 BluetoothProfile.STATE_DISCONNECTED -> {
-                    trace("设备已断开 status=$status")
+                    trace(
+                        "设备已断开 status=$status address=${gatt.device.address} " +
+                            "afterProtocolFailure=$disconnectingAfterProtocolFailure",
+                        // 断开事件必须上传：区分主动断开(GATT_SUCCESS)与被动掉线/错误(133/19/8)，
+                        // 是排查多设备“连一个掉一个”的关键证据。
+                        error = status != BluetoothGatt.GATT_SUCCESS,
+                        type = "ble_gatt_disconnected",
+                        uploadPolicy = AiToyTraceUploadPolicy.Always,
+                        key = "ble_gatt_disconnected:$operationId:$status",
+                    )
                     closeGatt(gatt)
                     val finalState = if (disconnectingAfterProtocolFailure) {
                         BleConnectionState.Error

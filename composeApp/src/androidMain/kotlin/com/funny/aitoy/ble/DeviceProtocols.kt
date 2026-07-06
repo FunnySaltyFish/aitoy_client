@@ -4107,6 +4107,25 @@ private fun BleGattFingerprint.hasAnkniQd1Name(): Boolean {
 private fun BleGattFingerprint.hasSvakomManufacturerData(): Boolean =
     svakomManufacturerPayload() != null
 
+/**
+ * 司康沃设备每次开机会更换 MAC，但设备名 + 产品码在同一实体上稳定。
+ * 记忆设备按 MAC 重连会连到已失效的旧地址（表现为 manufacturer=<none>、连不上或连上后无法识别）。
+ * 该函数给出跨 MAC 稳定的重连身份：`svakom:<产品码>`；非司康沃或无产品码时返回 null，调用方回退到 MAC。
+ * 产品码本身已能区分同名的伸缩/吮吸/拍打各侧（V=0x80、S=0x81 等），无需再带设备名。
+ */
+fun svakomStableIdentity(manufacturerData: String): String? {
+    val fingerprint = BleGattFingerprint(
+        name = "",
+        address = "",
+        manufacturerData = manufacturerData,
+        scanRecordHex = "",
+        serviceUuids = emptySet(),
+        characteristicUuids = emptySet(),
+    )
+    val code = fingerprint.svakomProductCode() ?: return null
+    return "svakom:$code"
+}
+
 private fun BleGattFingerprint.svakomProductCode(): Int? {
     val payload = svakomManufacturerPayload() ?: return null
     return when {
