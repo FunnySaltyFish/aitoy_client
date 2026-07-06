@@ -1,34 +1,6 @@
 package com.funny.aitoy.ble
 
 import com.funny.aitoy.buttplug.ButtplugConfigRepository
-import com.funny.aitoy.buttplug.ButtplugDeviceFingerprint
-import com.funny.aitoy.buttplug.ButtplugDeviceMatch
-import com.funny.aitoy.buttplug.ButtplugLocalHandlerRegistry
-import com.funny.aitoy.buttplug.FlufferProtocolPlans
-import com.funny.aitoy.buttplug.HandyProtocolPlans
-import com.funny.aitoy.buttplug.HoneyPlayBoxFrameCollector
-import com.funny.aitoy.buttplug.HoneyPlayBoxProtocolPlans
-import com.funny.aitoy.buttplug.LegacyStpihkalProtocolPlans
-import com.funny.aitoy.buttplug.LeloProtocolPlans
-import com.funny.aitoy.buttplug.LinearProtocolPlan
-import com.funny.aitoy.buttplug.LinearProtocolPlans
-import com.funny.aitoy.buttplug.LovenseProtocolPlans
-import com.funny.aitoy.buttplug.MixedOutputProtocolPlan
-import com.funny.aitoy.buttplug.MixedOutputProtocolPlans
-import com.funny.aitoy.buttplug.ScalarProtocolPlan
-import com.funny.aitoy.buttplug.ScalarProtocolPlans
-import com.funny.aitoy.buttplug.ScalarProtocolWrite
-import com.funny.aitoy.buttplug.SimpleVibrateProtocolPlan
-import com.funny.aitoy.buttplug.SimpleVibrateProtocolPlans
-import com.funny.aitoy.buttplug.SpecializedProtocolPlans
-import com.funny.aitoy.buttplug.StatefulVibrateProtocolPlan
-import com.funny.aitoy.buttplug.StatefulVibrateProtocolPlans
-import com.funny.aitoy.buttplug.ToyOutputKind
-import com.funny.aitoy.buttplug.VibCrafterProtocolPlans
-import com.funny.aitoy.buttplug.WeVibeProtocolPlans
-import com.funny.aitoy.buttplug.normalizedUuidText
-import com.funny.aitoy.buttplug.toToyOutputKind
-import kotlin.random.Random
 import kotlin.uuid.Uuid
 
 internal sealed interface BleProtocolOperation {
@@ -77,10 +49,7 @@ internal data class BleGattFingerprint(
     val preferredServiceUuid: Uuid? = null,
     val preferredWriteUuid: Uuid? = null,
     val preferredNotifyUuid: Uuid? = null,
-) {
-    val sistalkProtocolVersion: Int
-        get() = manufacturerData.firstManufacturerByte() ?: 0
-}
+)
 
 internal interface BleDeviceProtocol {
     val status: BleProtocolStatus
