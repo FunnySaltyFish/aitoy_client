@@ -62,6 +62,11 @@ class AndroidBleController(
     private var waitingForProtocolReady = false
     private var protocolReadyTimeoutRunnable: Runnable? = null
     private var operationId = 0L
+    // 连接是否曾真正建立(到达 STATE_CONNECTED)。未建立的 pending 连接必须 close() 而不是 disconnect()，
+    // 否则 Android 会以 status=22 本地终止并泄漏 GATT client 槽，导致后续 connectGatt 静默挂起。
+    private var gattEverConnected = false
+    // 连接看门狗：connectGatt 后若在超时内未建立，强制 close() 回收 client 槽并报错，避免 11s+ 静默挂起。
+    private var connectWatchdogRunnable: Runnable? = null
     private var keepaliveRunnable: Runnable? = null
     private var keepaliveProtocol: BleDeviceProtocol? = null
     private var keepaliveOperations: List<BleProtocolOperation> = emptyList()
@@ -131,6 +136,8 @@ class AndroidBleController(
             )
             when (newState) {
                 BluetoothProfile.STATE_CONNECTED -> {
+                    gattEverConnected = true
+                    cancelConnectWatchdog()
                     updateState(BleConnectionState.Discovering)
                     val started = gatt.discoverServices()
                     trace("开始发现 GATT 服务 result=$started")
@@ -146,6 +153,7 @@ class AndroidBleController(
                         uploadPolicy = AiToyTraceUploadPolicy.Always,
                         key = "ble_gatt_disconnected:$operationId:$status",
                     )
+                    cancelConnectWatchdog()
                     closeGatt(gatt)
                     val finalState = if (disconnectingAfterProtocolFailure) {
                         BleConnectionState.Error
@@ -313,7 +321,12 @@ class AndroidBleController(
 
     fun connect(device: ScannedBleDevice, protocolTemplate: ProtocolTemplate) {
         stopScan()
-        disconnect()
+        // 关键：发起新连接前，把本控制器上一条 GATT 彻底 close()（而非 disconnect()）。
+        // pending 连接只 disconnect() 会被 Android 以 status=22 本地终止并泄漏 client 槽，
+        // 后续 connectGatt 会静默挂起，表现为“连一个后连第二个连不上、必须关掉前一个电源”。
+        cancelConnectWatchdog()
+        releaseActiveConnection()
+        gattEverConnected = false
         connectedName = device.name
         connectedAddress = device.address
         connectedManufacturerData = device.manufacturerData
@@ -389,6 +402,8 @@ class AndroidBleController(
         if (gatt == null) {
             trace("无法创建 GATT 连接", error = true)
             updateState(BleConnectionState.Error)
+        } else {
+            armConnectWatchdog()
         }
     }
 
@@ -612,23 +627,70 @@ class AndroidBleController(
         advertiser.stop()
         cancelProtocolKeepalive()
         cancelProtocolReadyWait()
-        gatt?.let {
-            updateState(BleConnectionState.Disconnecting)
-            trace("主动断开 address=${it.device.address}")
-            it.disconnect()
-        } ?: run {
-            if (activeBroadcastProtocol != null) {
-                activeBroadcastProtocol = null
+        cancelConnectWatchdog()
+        val current = gatt
+        if (current != null) {
+            if (gattEverConnected) {
+                // 已建立的连接走正常异步断开，靠 STATE_DISCONNECTED 回调 closeGatt。
+                updateState(BleConnectionState.Disconnecting)
+                trace("主动断开 address=${current.device.address}")
+                current.disconnect()
+            } else {
+                // 尚未建立(pending)的连接必须直接 close()：disconnect() 会触发 status=22 并泄漏 client 槽。
+                trace("释放未建立的连接 address=${current.device.address}")
+                closeGatt(current)
                 updateState(BleConnectionState.Idle)
-                trace("已停止广播控制")
+            }
+        } else if (activeBroadcastProtocol != null) {
+            activeBroadcastProtocol = null
+            updateState(BleConnectionState.Idle)
+            trace("已停止广播控制")
+        }
+    }
+
+    /**
+     * 无条件释放当前 GATT：pending 连接直接 close() 回收 client 槽，已建立的也 close()（此处用于重连前清场，
+     * 不需要走异步 disconnect 的优雅关闭）。用于 connect() 开头确保不把旧连接泄漏或误发 status=22。
+     */
+    private fun releaseActiveConnection() {
+        val current = gatt ?: run {
+            activeBroadcastProtocol = null
+            return
+        }
+        trace("重连前释放旧连接 address=${current.device.address} everConnected=$gattEverConnected")
+        closeGatt(current)
+    }
+
+    private fun armConnectWatchdog() {
+        cancelConnectWatchdog()
+        val armedOperationId = operationId
+        val runnable = Runnable {
+            if (operationId == armedOperationId && !gattEverConnected) {
+                trace(
+                    "连接超时未建立，强制释放并报错 op=$operationId address=$connectedAddress",
+                    error = true,
+                    type = "ble_connect_timeout",
+                    uploadPolicy = AiToyTraceUploadPolicy.Always,
+                    key = "ble_connect_timeout:$operationId",
+                )
+                gatt?.let(::closeGatt)
+                updateState(BleConnectionState.Error)
             }
         }
+        connectWatchdogRunnable = runnable
+        mainHandler.postDelayed(runnable, CONNECT_TIMEOUT_MS)
+    }
+
+    private fun cancelConnectWatchdog() {
+        connectWatchdogRunnable?.let(mainHandler::removeCallbacks)
+        connectWatchdogRunnable = null
     }
 
     fun close() {
         stopScan()
         advertiser.stop()
         cancelProtocolKeepalive()
+        cancelConnectWatchdog()
         gatt?.let(::closeGatt)
         scope.cancel()
     }
@@ -1402,6 +1464,8 @@ class AndroidBleController(
     companion object {
         const val TAG = "AiToyBle"
         private const val GATT_CONTROL_WARMUP_MS = 1_200L
+        // 直连(autoConnect=false)通常几秒内建立；10s 未建立即判定挂起，强制回收 client 槽。
+        private const val CONNECT_TIMEOUT_MS = 10_000L
         private val CLIENT_CHARACTERISTIC_CONFIG_UUID =
             UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
         private val BATTERY_SERVICE_UUID =

@@ -467,6 +467,14 @@ class BridgeViewModel : ViewModel() {
             busyHint = "已切换到 ${device.name}"
             return@runAction
         }
+        // 防抖：连接进行中(Connecting/Discovering)再次点击会触发第二次 connect()，
+        // 其内部 disconnect 会掐掉仍在 pending 的首次连接(status=22)，并泄漏 GATT client 槽。
+        val inFlightState = deviceConnectionStates[device.address]
+        if (inFlightState == BleConnectionState.Connecting || inFlightState == BleConnectionState.Discovering) {
+            appendLog("忽略重复连接请求：${device.name} 正在连接中 state=$inFlightState")
+            busyHint = "正在连接 ${device.name}，请稍候"
+            return@runAction
+        }
         selectedAddress = device.address
         selectedName = device.name
         deviceDisplayNames[device.address] = device.name
