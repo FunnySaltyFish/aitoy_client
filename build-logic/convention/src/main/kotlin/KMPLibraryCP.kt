@@ -54,7 +54,11 @@ fun Project.setupCommonKMP(
         targets.configureEach {
             compilations.configureEach {
                 compileTaskProvider.get().compilerOptions {
-                    freeCompilerArgs.addAll("-Xmulti-platform", "-Xexpect-actual-classes")
+                    freeCompilerArgs.addAll(
+                        "-Xmulti-platform",
+                        "-Xexpect-actual-classes",
+                        "-opt-in=kotlin.uuid.ExperimentalUuidApi",
+                    )
                 }
             }
         }

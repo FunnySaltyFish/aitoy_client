@@ -202,14 +202,14 @@ class AndroidBleController(
                 address = connectedAddress,
                 manufacturerData = connectedManufacturerData,
                 scanRecordHex = connectedScanRecordHex,
-                serviceUuids = gatt.services.map { it.uuid }.toSet(),
+                serviceUuids = gatt.services.map { it.uuid.toKotlinUuid() }.toSet(),
                 characteristicUuids = gatt.services
                     .flatMap { it.characteristics }
-                    .map { it.uuid }
+                    .map { it.uuid.toKotlinUuid() }
                     .toSet(),
-                preferredServiceUuid = config.serviceUuid.toUuidOrNull(),
-                preferredWriteUuid = config.writeUuid.toUuidOrNull(),
-                preferredNotifyUuid = config.notifyUuid.toUuidOrNull(),
+                preferredServiceUuid = config.serviceUuid.toKotlinUuidOrNull(),
+                preferredWriteUuid = config.writeUuid.toKotlinUuidOrNull(),
+                preferredNotifyUuid = config.notifyUuid.toKotlinUuidOrNull(),
             )
             val discoveryOperationId = operationId
             val discoveredGatt = gatt
@@ -517,14 +517,14 @@ class AndroidBleController(
             address = connectedAddress,
             manufacturerData = connectedManufacturerData,
             scanRecordHex = connectedScanRecordHex,
-            serviceUuids = currentGatt.services.map { it.uuid }.toSet(),
+            serviceUuids = currentGatt.services.map { it.uuid.toKotlinUuid() }.toSet(),
             characteristicUuids = currentGatt.services
                 .flatMap { it.characteristics }
-                .map { it.uuid }
+                .map { it.uuid.toKotlinUuid() }
                 .toSet(),
-            preferredServiceUuid = currentTemplate.serviceUuid.toUuidOrNull(),
-            preferredWriteUuid = currentTemplate.writeUuid.toUuidOrNull(),
-            preferredNotifyUuid = currentTemplate.notifyUuid.toUuidOrNull(),
+            preferredServiceUuid = currentTemplate.serviceUuid.toKotlinUuidOrNull(),
+            preferredWriteUuid = currentTemplate.writeUuid.toKotlinUuidOrNull(),
+            preferredNotifyUuid = currentTemplate.notifyUuid.toKotlinUuidOrNull(),
         )
         tryNextProtocol(
             fingerprint = fingerprint,
@@ -541,7 +541,7 @@ class AndroidBleController(
             handleProtocolOperationFailed("设备尚未连接")
             return
         }
-        val characteristic = findCharacteristic(operation.characteristicUuid)
+        val characteristic = findCharacteristic(operation.characteristicUuid.toAndroidUuid())
             ?: run {
                 handleProtocolOperationFailed("找不到写入通道：${operation.characteristicUuid}")
                 return
@@ -831,7 +831,7 @@ class AndroidBleController(
         }
         subscribeNotify(gatt, config)
         if (config.manualControlEnabled) {
-            activeProtocol = ManualBleProtocol(resolvedWriteCharacteristic!!.uuid, config)
+            activeProtocol = ManualBleProtocol(resolvedWriteCharacteristic!!.uuid.toKotlinUuid(), config)
             protocolReady = true
             gattReadyAtMs = System.currentTimeMillis()
             onProtocol(activeProtocol!!.status)
@@ -1022,7 +1022,7 @@ class AndroidBleController(
         operationInProgress = true
         when (operation) {
             is BleProtocolOperation.Read -> {
-                val characteristic = findCharacteristic(operation.characteristicUuid)
+                val characteristic = findCharacteristic(operation.characteristicUuid.toAndroidUuid())
                     ?: run {
                         operationInProgress = false
                         handleProtocolOperationFailed("找不到读取通道：${operation.characteristicUuid}")
@@ -1037,7 +1037,7 @@ class AndroidBleController(
                 }
             }
             is BleProtocolOperation.SubscribeNotify -> {
-                val characteristic = findCharacteristic(operation.characteristicUuid)
+                val characteristic = findCharacteristic(operation.characteristicUuid.toAndroidUuid())
                     ?: run {
                         operationInProgress = false
                         handleProtocolOperationFailed("找不到通知通道：${operation.characteristicUuid}")
@@ -1072,7 +1072,7 @@ class AndroidBleController(
                 }
             }
             is BleProtocolOperation.UnsubscribeNotify -> {
-                val characteristic = findCharacteristic(operation.characteristicUuid)
+                val characteristic = findCharacteristic(operation.characteristicUuid.toAndroidUuid())
                     ?: run {
                         operationInProgress = false
                         handleProtocolOperationFailed("找不到通知通道：${operation.characteristicUuid}")
@@ -1144,7 +1144,7 @@ class AndroidBleController(
             handleBatteryLevel(bytes)
         }
         runCatching {
-            activeProtocol?.onRead(uuid, bytes)?.let(operationQueue::addAll)
+            activeProtocol?.onRead(uuid.toKotlinUuid(), bytes)?.let(operationQueue::addAll)
         }.onFailure {
             handleProtocolOperationFailed(it.message ?: "协议确认失败")
             return
@@ -1158,7 +1158,7 @@ class AndroidBleController(
         }
         runCatching {
             val protocol = activeProtocol
-            val operations = protocol?.onNotify(uuid, bytes).orEmpty()
+            val operations = protocol?.onNotify(uuid.toKotlinUuid(), bytes).orEmpty()
             if (waitingForProtocolReady) {
                 when {
                     protocol?.isProtocolReady() == true -> {
@@ -1223,14 +1223,14 @@ class AndroidBleController(
                     address = connectedAddress,
                     manufacturerData = connectedManufacturerData,
                     scanRecordHex = connectedScanRecordHex,
-                    serviceUuids = currentGatt.services.map { it.uuid }.toSet(),
+                    serviceUuids = currentGatt.services.map { it.uuid.toKotlinUuid() }.toSet(),
                     characteristicUuids = currentGatt.services
                         .flatMap { it.characteristics }
-                        .map { it.uuid }
+                        .map { it.uuid.toKotlinUuid() }
                         .toSet(),
-                    preferredServiceUuid = currentTemplate.serviceUuid.toUuidOrNull(),
-                    preferredWriteUuid = currentTemplate.writeUuid.toUuidOrNull(),
-                    preferredNotifyUuid = currentTemplate.notifyUuid.toUuidOrNull(),
+                    preferredServiceUuid = currentTemplate.serviceUuid.toKotlinUuidOrNull(),
+                    preferredWriteUuid = currentTemplate.writeUuid.toKotlinUuidOrNull(),
+                    preferredNotifyUuid = currentTemplate.notifyUuid.toKotlinUuidOrNull(),
                 )
                 tryNextProtocol(fingerprint, currentGatt, currentTemplate, reason)
                 return
@@ -1271,10 +1271,10 @@ class AndroidBleController(
         batteryReadRequested = true
         if (canRead) {
             trace("准备读取标准电量")
-            operationQueue.add(BleProtocolOperation.Read(batteryLevel.uuid))
+            operationQueue.add(BleProtocolOperation.Read(batteryLevel.uuid.toKotlinUuid()))
         } else {
             trace("准备订阅标准电量")
-            operationQueue.add(BleProtocolOperation.SubscribeNotify(batteryLevel.uuid))
+            operationQueue.add(BleProtocolOperation.SubscribeNotify(batteryLevel.uuid.toKotlinUuid()))
         }
         executeNextOperation()
     }
@@ -1383,6 +1383,12 @@ class AndroidBleController(
     private fun String.toUuidOrNull(): UUID? = trim().takeIf { it.isNotEmpty() }?.let {
         runCatching { UUID.fromString(it) }.getOrNull()
     }
+
+    private fun String.toKotlinUuidOrNull(): kotlin.uuid.Uuid? = toUuidOrNull()?.toKotlinUuid()
+
+    private fun UUID.toKotlinUuid(): kotlin.uuid.Uuid = kotlin.uuid.Uuid.parse(toString())
+
+    private fun kotlin.uuid.Uuid.toAndroidUuid(): UUID = UUID.fromString(toString())
 
     private fun ScanRecord?.manufacturerDataText(): String {
         val manufacturerData = this?.manufacturerSpecificData
