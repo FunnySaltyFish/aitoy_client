@@ -117,6 +117,7 @@ internal object BleProtocolRegistry {
                     CachitoMbProGattProtocol,
                     KissToyTutuIIProtocol,
                     KissToyOfficialV2Protocol,
+                    KissToyBoboHistoricalProtocol,
                     AnkniYwtdProtocol,
                     KissToyProtocol,
                     WeVibeSyncLiteProtocol,
@@ -3047,8 +3048,10 @@ private const val KISS_TOY_TUTU_PACKET_PREFIX: Byte = 0x58
 private const val KISS_TOY_TUTU_PACKET_SIZE = 13
 private const val KISS_TOY_TUTU_AUTH_TIMEOUT_MS = 4_000L
 private const val KISS_TOY_TUTU_AUTH_SETTLE_MS = 1_000L
+private const val KISS_TOY_BOBO_PRODUCT_CODE = "QCKH"
 private val KISS_TOY_HISTORICAL_GATT_SERVICE_UUID = uuid("00001000-0000-1000-8000-00805f9b34fb")
 private val KISS_TOY_HISTORICAL_GATT_WRITE_UUID = uuid("00001001-0000-1000-8000-00805f9b34fb")
+private val KISS_TOY_HISTORICAL_GATT_NOTIFY_UUID = uuid("00001002-0000-1000-8000-00805f9b34fb")
 private val KISS_TOY_OFFICIAL_V2_AE3A_SERVICE_UUID = uuid("0000ae3a-0000-1000-8000-00805f9b34fb")
 private val KISS_TOY_OFFICIAL_V2_AE3A_WRITE_UUID = uuid("0000ae3b-0000-1000-8000-00805f9b34fb")
 private val KISS_TOY_OFFICIAL_V2_AE3A_NOTIFY_UUID = uuid("0000ae3c-0000-1000-8000-00805f9b34fb")
@@ -3115,8 +3118,6 @@ private val KISS_TOY_OFFICIAL_V2_PROFILES = listOf(
         "BOBO",
         listOf(KISS_TOY_OFFICIAL_V2_TYPE_3),
         toyType = 6,
-        intensityMax = 3,
-        intensityLabel = "档位",
     ),
     KissToyOfficialV2Profile("PLMX", "Polly max", listOf(KISS_TOY_OFFICIAL_V2_TYPE_1, KISS_TOY_OFFICIAL_V2_TYPE_3.copy(startUp = 0.4)), toyType = 7),
     KissToyOfficialV2Profile("QCPJ", "TUTU", listOf(KISS_TOY_OFFICIAL_V2_TYPE_1, KISS_TOY_OFFICIAL_V2_TYPE_4), toyType = 8),
@@ -3130,10 +3131,48 @@ private val KISS_TOY_OFFICIAL_V2_PROFILES = listOf(
     KissToyOfficialV2Profile("PLY5", "Polly 5", listOf(KISS_TOY_OFFICIAL_V2_TYPE_1, KISS_TOY_OFFICIAL_V2_TYPE_3), toyType = 12),
 ).associateBy { it.code.normalizedDeviceName() }
 
+private object KissToyBoboHistoricalProtocol : BleDeviceProtocol {
+    override val status = BleProtocolStatus(
+        id = "kisstoy_bobo_historical",
+        displayName = "KissToy BOBO",
+        controllable = true,
+        intensityMax = 100,
+        supportsMode = false,
+        controlStyle = ToyControlStyle.IntensityOnly,
+        intensityLabel = "强度",
+        channelNames = listOf("吮吸"),
+        automatic = true,
+    )
+
+    override fun matches(fingerprint: BleGattFingerprint): Boolean =
+        fingerprint.kissToyOfficialV2Profile()?.code == KISS_TOY_BOBO_PRODUCT_CODE &&
+            fingerprint.hasKissToyHistoricalGattRoute()
+
+    override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
+        when (action) {
+            is ToyControlAction.Intensity -> run(action.value)
+            is ToyControlAction.Combined -> run(action.intensity)
+            is ToyControlAction.DualMotor -> run(action.strongestIntensity(status.intensityMax))
+            is ToyControlAction.Pattern -> run(50)
+            ToyControlAction.Stop -> stop()
+        }
+
+    private fun run(intensity: Int): List<BleProtocolOperation> =
+        listOf(
+            kissToyHistoricalCommand(0x31, 0),
+            kissToyHistoricalCommand(0x71, 0),
+            kissToyHistoricalCommand(0x32, intensity.coerceIn(0, status.intensityMax)),
+        )
+
+    private fun stop(): List<BleProtocolOperation> =
+        listOf(
+            kissToyHistoricalCommand(0x31, 0),
+            kissToyHistoricalCommand(0x32, 0),
+            kissToyHistoricalCommand(0x71, 0),
+        )
+}
+
 private object KissToyProtocol : BleDeviceProtocol {
-    private val serviceUuid = uuid("00001000-0000-1000-8000-00805f9b34fb")
-    private val writeUuid = uuid("00001001-0000-1000-8000-00805f9b34fb")
-    private val notifyUuid = uuid("00001002-0000-1000-8000-00805f9b34fb")
     private val knownNames = setOf(
         "JY11",
         "SYQ1",
@@ -3165,11 +3204,10 @@ private object KissToyProtocol : BleDeviceProtocol {
 
     override fun matches(fingerprint: BleGattFingerprint): Boolean {
         if (fingerprint.kissToyOfficialV2Profile()?.usesDedicatedTutuRoute == true) return false
-        val hasKissToyGatt = fingerprint.serviceUuids.contains(serviceUuid) &&
-                fingerprint.characteristicUuids.contains(writeUuid)
-        if (!hasKissToyGatt) return false
+        if (fingerprint.kissToyOfficialV2Profile()?.code == KISS_TOY_BOBO_PRODUCT_CODE) return false
+        if (!fingerprint.hasKissToyHistoricalGattRoute()) return false
         val knownName = knownNames.any { it.equals(fingerprint.name, ignoreCase = true) }
-        val hasNotify = fingerprint.characteristicUuids.contains(notifyUuid)
+        val hasNotify = fingerprint.characteristicUuids.contains(KISS_TOY_HISTORICAL_GATT_NOTIFY_UUID)
         return knownName || hasNotify
     }
 
@@ -3186,89 +3224,97 @@ private object KissToyProtocol : BleDeviceProtocol {
         val normalizedMode = mode.coerceIn(1, status.modeMax)
         val normalizedIntensity = intensity.coerceIn(0, 100)
         val clearCommands = when (normalizedMode) {
-            1 -> listOf(command(kissToyPayload(0x32, 0)), command(kissToyPayload(0x71, 0)))
-            2 -> listOf(command(kissToyPayload(0x31, 0)), command(kissToyPayload(0x71, 0)))
-            3 -> listOf(command(kissToyPayload(0x31, 0)), command(kissToyPayload(0x32, 0)))
-            else -> listOf(command(kissToyPayload(0x71, 0)))
+            1 -> listOf(command(0x32, 0), command(0x71, 0))
+            2 -> listOf(command(0x31, 0), command(0x71, 0))
+            3 -> listOf(command(0x31, 0), command(0x32, 0))
+            else -> listOf(command(0x71, 0))
         }
         val runCommands = if (normalizedMode == 4) {
             listOf(
-                command(kissToyPayload(0x32, normalizedIntensity)),
-                command(kissToyPayload(0x31, normalizedIntensity)),
+                command(0x32, normalizedIntensity),
+                command(0x31, normalizedIntensity),
             )
         } else {
-            listOf(command(commandForMode(normalizedMode, normalizedIntensity)))
+            listOf(commandForMode(normalizedMode, normalizedIntensity))
         }
         return clearCommands + runCommands
     }
 
     private fun stop(): List<BleProtocolOperation> =
         listOf(
-            command(kissToyPayload(0x40, 0, 0)),
-            command(kissToyPayload(0x31, 0)),
-            command(kissToyPayload(0x32, 0)),
-            command(kissToyPayload(0x71, 0)),
+            command(0x40, 0, 0),
+            command(0x31, 0),
+            command(0x32, 0),
+            command(0x71, 0),
         )
 
-    private fun command(payload: ByteArray) = BleProtocolOperation.Write(
-        characteristicUuid = writeUuid,
-        bytes = kissToyEncrypt(payload),
+    private fun command(command: Int, first: Int, second: Int = 0): BleProtocolOperation.Write =
+        kissToyHistoricalCommand(command, first, second)
+
+    private fun commandForMode(mode: Int, intensity: Int): BleProtocolOperation.Write =
+        when (mode) {
+            1 -> command(0x31, intensity)
+            2 -> command(0x32, intensity)
+            3 -> command(0x71, intensity)
+            else -> command(0x31, intensity)
+        }
+}
+
+private fun BleGattFingerprint.hasKissToyHistoricalGattRoute(): Boolean =
+    serviceUuids.contains(KISS_TOY_HISTORICAL_GATT_SERVICE_UUID) &&
+        characteristicUuids.contains(KISS_TOY_HISTORICAL_GATT_WRITE_UUID)
+
+private fun kissToyHistoricalCommand(command: Int, first: Int, second: Int = 0): BleProtocolOperation.Write =
+    BleProtocolOperation.Write(
+        characteristicUuid = KISS_TOY_HISTORICAL_GATT_WRITE_UUID,
+        bytes = kissToyHistoricalEncrypt(kissToyHistoricalPayload(command, first, second)),
         withResponse = true,
     )
 
-    private fun commandForMode(mode: Int, intensity: Int): ByteArray =
-        when (mode) {
-            1 -> kissToyPayload(0x31, intensity)
-            2 -> kissToyPayload(0x32, intensity)
-            3 -> kissToyPayload(0x71, intensity)
-            else -> kissToyPayload(0x31, intensity)
-        }
-
-    private fun kissToyPayload(command: Int, first: Int, second: Int = 0): ByteArray =
-        byteArrayOf(
-            0x5A,
-            0x00,
-            0x00,
-            0x01,
-            command.toByte(),
-            if (command == 0x40) 0x03 else first.toByte(),
-            if (command == 0x40) first.toByte() else second.toByte(),
-            if (command == 0x40) second.toByte() else 0x00,
-            0x00,
-            0x00,
-        )
-
-    private fun kissToyEncrypt(payload: ByteArray): ByteArray {
-        val plain = ByteArray(12)
-        plain[0] = 0x23
-        payload.copyInto(
-            plain,
-            destinationOffset = 1,
-            startIndex = 0,
-            endIndex = payload.size.coerceAtMost(10)
-        )
-        plain[11] = plain.take(11).sumOf { it.toInt() }.toByte()
-        val encrypted = ByteArray(12)
-        val seed = plain[0]
-        encrypted[0] = seed
-        for (index in 1 until encrypted.size) {
-            val key = kissToyKey(encrypted[index - 1], index)
-            encrypted[index] =
-                (((key.toInt() xor seed.toInt()) xor plain[index].toInt()) + key).toByte()
-        }
-        return encrypted
-    }
-
-    private fun kissToyKey(previous: Byte, index: Int): Byte =
-        keyTab[previous.toInt() and 0x03][index]
-
-    private val keyTab = arrayOf(
-        byteArrayOf(0, 24, -104, -9, -91, 61, 13, 41, 37, 80, 68, 70),
-        byteArrayOf(0, 69, 110, 106, 111, 120, 32, 83, 45, 49, 46, 55),
-        byteArrayOf(0, 101, 120, 32, 84, 111, 121, 115, 10, -114, -99, -93),
-        byteArrayOf(0, -59, -42, -25, -8, 10, 50, 32, 111, 98, 13, 10),
+private fun kissToyHistoricalPayload(command: Int, first: Int, second: Int = 0): ByteArray =
+    byteArrayOf(
+        0x5A,
+        0x00,
+        0x00,
+        0x01,
+        command.toByte(),
+        if (command == 0x40) 0x03 else first.toByte(),
+        if (command == 0x40) first.toByte() else second.toByte(),
+        if (command == 0x40) second.toByte() else 0x00,
+        0x00,
+        0x00,
     )
+
+private fun kissToyHistoricalEncrypt(payload: ByteArray): ByteArray {
+    val plain = ByteArray(12)
+    plain[0] = 0x23
+    payload.copyInto(
+        plain,
+        destinationOffset = 1,
+        startIndex = 0,
+        endIndex = payload.size.coerceAtMost(10)
+    )
+    plain[11] = plain.take(11).sumOf { it.toInt() }.toByte()
+    val encrypted = ByteArray(12)
+    val seed = plain[0]
+    encrypted[0] = seed
+    for (index in 1 until encrypted.size) {
+        val key = kissToyHistoricalKey(encrypted[index - 1], index)
+        encrypted[index] =
+            (((key.toInt() xor seed.toInt()) xor plain[index].toInt()) + key).toByte()
+    }
+    return encrypted
 }
+
+private fun kissToyHistoricalKey(previous: Byte, index: Int): Byte =
+    KISS_TOY_HISTORICAL_KEY_TAB[previous.toInt() and 0x03][index]
+
+private val KISS_TOY_HISTORICAL_KEY_TAB = arrayOf(
+    byteArrayOf(0, 24, -104, -9, -91, 61, 13, 41, 37, 80, 68, 70),
+    byteArrayOf(0, 69, 110, 106, 111, 120, 32, 83, 45, 49, 46, 55),
+    byteArrayOf(0, 101, 120, 32, 84, 111, 121, 115, 10, -114, -99, -93),
+    byteArrayOf(0, -59, -42, -25, -8, 10, 50, 32, 111, 98, 13, 10),
+)
 
 internal class ManualBleProtocol(
     private val writeUuid: UUID,

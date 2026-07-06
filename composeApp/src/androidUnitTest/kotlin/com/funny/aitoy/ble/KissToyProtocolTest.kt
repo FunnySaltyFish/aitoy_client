@@ -135,31 +135,60 @@ class KissToyProtocolTest {
     }
 
     @Test
-    fun qckhBoboUsesSingleSuckingMotorWithThreeGears() {
+    fun qckhBoboUsesSingleSuckingMotorSlider() {
         val protocol = BleProtocolRegistry.resolveNative(officialV2Fingerprint("QCKH")) ?: error("QCKH protocol not resolved")
 
         assertEquals("kisstoy_official_v2", protocol.status.id)
         assertEquals("KissToy BOBO", protocol.status.displayName)
         assertEquals(ToyControlStyle.IntensityOnly, protocol.status.controlStyle)
-        assertEquals(3, protocol.status.intensityMax)
-        assertEquals("档位", protocol.status.intensityLabel)
+        assertEquals(100, protocol.status.intensityMax)
+        assertEquals("强度", protocol.status.intensityLabel)
         assertEquals(listOf("吮吸"), protocol.status.channelNames)
         assertFalse(protocol.status.supportsMode)
 
-        val gear1 = protocol.commandsFor(ToyControlAction.Intensity(1)).single()
+        val low = protocol.commandsFor(ToyControlAction.Intensity(25)).single()
         assertKissToyBasicControlData(
-            assertIs<BleProtocolOperation.Write>(gear1).bytes,
-            content = listOf(0, 0, 119, 0, 0),
+            assertIs<BleProtocolOperation.Write>(low).bytes,
+            content = listOf(0, 0, 102, 0, 0),
         )
-        val gear2 = protocol.commandsFor(ToyControlAction.Intensity(2)).single()
+        val medium = protocol.commandsFor(ToyControlAction.Intensity(50)).single()
         assertKissToyBasicControlData(
-            assertIs<BleProtocolOperation.Write>(gear2).bytes,
-            content = listOf(0, 0, 187, 0, 0),
+            assertIs<BleProtocolOperation.Write>(medium).bytes,
+            content = listOf(0, 0, 153, 0, 0),
         )
-        val gear3 = protocol.commandsFor(ToyControlAction.Intensity(3)).single()
+        val high = protocol.commandsFor(ToyControlAction.Intensity(100)).single()
         assertKissToyBasicControlData(
-            assertIs<BleProtocolOperation.Write>(gear3).bytes,
+            assertIs<BleProtocolOperation.Write>(high).bytes,
             content = listOf(0, 0, 255, 0, 0),
+        )
+    }
+
+    @Test
+    fun qckhHistoricalGattUsesSingleSuckingSlider() {
+        val protocols = BleProtocolRegistry.resolveNativeAll(qckhHistoricalKissToyFingerprint())
+
+        assertEquals(
+            listOf("kisstoy_bobo_historical"),
+            protocols.map { it.status.id },
+        )
+        val protocol = protocols.single()
+        assertEquals("KissToy BOBO", protocol.status.displayName)
+        assertEquals(ToyControlStyle.IntensityOnly, protocol.status.controlStyle)
+        assertEquals(100, protocol.status.intensityMax)
+        assertEquals("强度", protocol.status.intensityLabel)
+        assertEquals(listOf("吮吸"), protocol.status.channelNames)
+        assertFalse(protocol.status.supportsMode)
+
+        val run = protocol.commandsFor(ToyControlAction.Intensity(73))
+        assertEquals(3, run.size)
+        run.forEach { operation ->
+            val write = assertIs<BleProtocolOperation.Write>(operation)
+            assertEquals(KISSTOY_WRITE_UUID, write.characteristicUuid)
+            assertTrue(write.withResponse)
+        }
+        assertEquals(
+            listOf(0x23, 0x5A, 0x00, 0x00, 0x01, 0x32, 73, 0x00, 0x00, 0x00, 0x00),
+            decryptHistoricalKissToy(run.last().let { assertIs<BleProtocolOperation.Write>(it).bytes }).take(11),
         )
     }
 
@@ -407,6 +436,14 @@ class KissToyProtocolTest {
         characteristicUuids = setOf(KISSTOY_WRITE_UUID, KISSTOY_NOTIFY_UUID),
     )
 
+    private fun qckhHistoricalKissToyFingerprint() = BleGattFingerprint(
+        name = "QCKH",
+        manufacturerData = "0x1be8:36 C9 F2 92 00",
+        scanRecordHex = "",
+        serviceUuids = setOf(KISSTOY_SERVICE_UUID),
+        characteristicUuids = setOf(KISSTOY_WRITE_UUID, KISSTOY_NOTIFY_UUID),
+    )
+
     private fun lostHistoricalKissToyFingerprint() = BleGattFingerprint(
         name = "迷路",
         manufacturerData = "",
@@ -521,6 +558,19 @@ class KissToyProtocolTest {
         return raw
     }
 
+    private fun decryptHistoricalKissToy(encryptedBytes: ByteArray): List<Int> {
+        assertEquals(12, encryptedBytes.size)
+        val encrypted = encryptedBytes.map { it.toInt() and 0xff }
+        val raw = MutableList(12) { 0 }
+        raw[0] = encrypted[0]
+        val seed = raw[0]
+        for (index in 1 until raw.size) {
+            val key = KISS_TOY_HISTORICAL_KEY_TAB_FOR_TEST[encrypted[index - 1] and 0x03][index]
+            raw[index] = (((encrypted[index] - key) and 0xff) xor seed xor key) and 0xff
+        }
+        return raw
+    }
+
     private companion object {
         val KISSTOY_SERVICE_UUID: UUID = UUID.fromString("00001000-0000-1000-8000-00805f9b34fb")
         val KISSTOY_WRITE_UUID: UUID = UUID.fromString("00001001-0000-1000-8000-00805f9b34fb")
@@ -551,6 +601,13 @@ class KissToyProtocolTest {
             intArrayOf(0xec, 0xb0, 0xbc, 0x0e, 0xc8, 0x7a, 0x54, 0xee, 0x00, 0x9a, 0x5a, 0x7a),
             intArrayOf(0x6e, 0x02, 0x06, 0xbc, 0xa6, 0x24, 0x4c, 0x2e, 0xca, 0xfc, 0x60, 0x72),
             intArrayOf(0xfa, 0x84, 0x26, 0x50, 0x6c, 0x4a, 0xe8, 0xd2, 0x88, 0x3a, 0x98, 0x9e),
+        )
+
+        val KISS_TOY_HISTORICAL_KEY_TAB_FOR_TEST = arrayOf(
+            intArrayOf(0, 24, -104, -9, -91, 61, 13, 41, 37, 80, 68, 70),
+            intArrayOf(0, 69, 110, 106, 111, 120, 32, 83, 45, 49, 46, 55),
+            intArrayOf(0, 101, 120, 32, 84, 111, 121, 115, 10, -114, -99, -93),
+            intArrayOf(0, -59, -42, -25, -8, 10, 50, 32, 111, 98, 13, 10),
         )
     }
 }
