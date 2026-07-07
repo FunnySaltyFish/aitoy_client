@@ -171,6 +171,94 @@ internal object SistalkMonsterPartyProtocol : BleDeviceProtocol {
         functionCommand(COMMAND_POWER_OFF)
 }
 
+internal object SistalkWeightless808Protocol : BleDeviceProtocol {
+    private val serviceUuid = Uuid.parse("00009000-0000-1000-8000-00805f9b34fb")
+    private val opUuid = Uuid.parse("00009001-0000-1000-8000-00805f9b34fb")
+    private val functionUuid = Uuid.parse("00009002-0000-1000-8000-00805f9b34fb")
+
+    private const val COMMAND_MOTOR = 0xA0
+    private val currentPwm = IntArray(2)
+
+    override val status = BleProtocolStatus(
+        id = "sistalk_weightless_808",
+        displayName = "失重808",
+        controllable = true,
+        intensityMax = 100,
+        supportsMode = false,
+        controlStyle = ToyControlStyle.DualIntensityOnly,
+        intensityLabel = "强度",
+        channelNames = listOf("头震", "尾震"),
+        features = listOf(
+            BleProtocolFeature(type = "vibrate", min = 0, max = 100, index = 0, label = "头震"),
+            BleProtocolFeature(type = "vibrate", min = 0, max = 100, index = 1, label = "尾震"),
+        ),
+        automatic = true,
+    )
+
+    override fun matches(fingerprint: BleGattFingerprint): Boolean =
+        fingerprint.hasWeightless808Name() &&
+                fingerprint.sistalkProtocolVersion != 1 &&
+                fingerprint.serviceUuids.contains(serviceUuid) &&
+                fingerprint.characteristicUuids.contains(opUuid) &&
+                fingerprint.characteristicUuids.contains(functionUuid)
+
+    override fun initialize(fingerprint: BleGattFingerprint): List<BleProtocolOperation> =
+        listOf(
+            BleProtocolOperation.SubscribeNotify(opUuid),
+            BleProtocolOperation.SubscribeNotify(functionUuid),
+        ).also {
+            currentPwm.fill(0)
+        }
+
+    override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
+        when (action) {
+            is ToyControlAction.Intensity -> listOf(updateAllChannels(action.value))
+            is ToyControlAction.Combined -> listOf(updateChannel(action.mode, action.intensity))
+            is ToyControlAction.DualMotor -> listOf(updateDualChannels(action.internalIntensity, action.externalIntensity))
+            is ToyControlAction.Pattern -> listOf(updateAllChannels(status.intensityMax.coerceAtLeast(1)))
+            ToyControlAction.Stop -> stop()?.let(::listOf).orEmpty()
+        }
+
+    private fun updateAllChannels(intensity: Int): BleProtocolOperation.Write {
+        currentPwm.fill(intensity.coerceIn(0, status.intensityMax))
+        return motorCommand(currentPwm[0], currentPwm[1])
+    }
+
+    private fun updateDualChannels(headVibration: Int, tailVibration: Int): BleProtocolOperation.Write {
+        currentPwm[0] = headVibration.coerceIn(0, status.intensityMax)
+        currentPwm[1] = tailVibration.coerceIn(0, status.intensityMax)
+        return motorCommand(currentPwm[0], currentPwm[1])
+    }
+
+    private fun updateChannel(channel: Int, intensity: Int): BleProtocolOperation.Write {
+        val index = channel.coerceIn(1, 2) - 1
+        currentPwm[index] = intensity.coerceIn(0, status.intensityMax)
+        return motorCommand(currentPwm[0], currentPwm[1])
+    }
+
+    private fun stop(): BleProtocolOperation.Write? {
+        if (currentPwm.all { it == 0 }) return null
+        currentPwm.fill(0)
+        return motorCommand(0, 0)
+    }
+
+    private fun motorCommand(headVibration: Int, tailVibration: Int): BleProtocolOperation.Write =
+        BleProtocolOperation.Write(
+            characteristicUuid = functionUuid,
+            bytes = bytes(
+                COMMAND_MOTOR,
+                (3 shl 3) or 0x80,
+                0x02,
+                headVibration.coerceIn(0, status.intensityMax),
+                tailVibration.coerceIn(0, status.intensityMax),
+            ),
+            withResponse = false,
+        )
+
+    private fun BleGattFingerprint.hasWeightless808Name(): Boolean =
+        name.normalizedDeviceName().contains("失重808")
+}
+
 internal object SistalkMonsterPubMultiMotorProtocol : SistalkMonsterPubProtocolBase(
     id = "sistalk_monsterpub_multi",
     displayName = "SISTALK MonsterPub",

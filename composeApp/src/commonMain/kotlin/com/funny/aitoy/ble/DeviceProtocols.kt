@@ -87,6 +87,7 @@ internal object BleProtocolRegistry {
                     AnkniYwtdProtocol,
                     KissToyProtocol,
                     WeVibeSyncLiteProtocol,
+                    SistalkWeightless808Protocol,
                     SistalkMonsterPartyProtocol,
                     SistalkMixPwmProtocol,
                     SistalkMonsterPubMultiMotorProtocol,
