@@ -104,6 +104,33 @@ internal object SvakomV2MultiFunctionProtocol : BleDeviceProtocol {
     private val SL278_PLUS_NAMES = listOf("sl278b", "sl278f", "sl278h", "sl278i", "sl278j", "sl278k", "sl278u")
 }
 
+// 司康沃「震动 + 吮吸」双功能区设备，按设备名识别（产品码为 OEM 变体，官方 APK 未收录）。
+// QH-SX007E / Svakom Alberta：十档震动（强度可调）+ 五档吮吸，走通用 SVAKOM V2 GATT。
+internal object SvakomVibrateSuckProtocol : BleDeviceProtocol {
+    private val serviceUuid = Uuid.parse("0000ffe0-0000-1000-8000-00805f9b34fb")
+    private val writeUuid = Uuid.parse("0000ffe1-0000-1000-8000-00805f9b34fb")
+    private val notifyUuid = Uuid.parse("0000ffe2-0000-1000-8000-00805f9b34fb")
+
+    override val status = SVAKOM_V2_VIBRATE_SUCK.status
+
+    override fun matches(fingerprint: BleGattFingerprint): Boolean {
+        val name = fingerprint.name.normalizedDeviceName()
+        val hasSvakomGatt = fingerprint.serviceUuids.contains(serviceUuid) &&
+                fingerprint.characteristicUuids.contains(writeUuid) &&
+                fingerprint.characteristicUuids.contains(notifyUuid)
+        val isKnownModel = VIBRATE_SUCK_NAMES.any { name.contains(it) }
+        return isKnownModel && hasSvakomGatt && fingerprint.hasSvakomManufacturerData()
+    }
+
+    override fun createInstance(fingerprint: BleGattFingerprint): BleDeviceProtocol =
+        SvakomV2Session(SVAKOM_V2_VIBRATE_SUCK)
+
+    override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> = emptyList()
+
+    // 未来其它「震动+吮吸」司康沃设备只需把归一化型号名加进这里即可复用整套面板与帧逻辑。
+    private val VIBRATE_SUCK_NAMES = listOf("qhsx007e")
+}
+
 internal class SvakomV2Session(
     private val profile: SvakomV2Profile,
 ) : BleDeviceProtocol {
@@ -335,6 +362,17 @@ internal object SVAKOM_V2_FLAP : SvakomV2Profile(
         functions = listOf(SvakomV2Flap, SvakomV2Heat),
     ),
     functions = listOf(SvakomV2Flap, SvakomV2Heat),
+)
+
+// 震动 + 吮吸双功能区通用 profile：震动 10 档、吮吸 5 档，各自独立命名和强度滑杆，不绑定单一型号。
+// QH-SX007E（Svakom Alberta）首个接入，后续同类司康沃设备可复用此 profile。
+internal object SVAKOM_V2_VIBRATE_SUCK : SvakomV2Profile(
+    status = svakomV2Status(
+        id = "svakom_vibrate_suck",
+        displayName = "SVAKOM 震动吮吸",
+        functions = listOf(SvakomV2Vibrate, SvakomV2Suck),
+    ),
+    functions = listOf(SvakomV2Vibrate, SvakomV2Suck),
 )
 
 internal fun Int?.svakomV2Profile(): SvakomV2Profile =
