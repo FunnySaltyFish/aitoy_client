@@ -240,6 +240,38 @@ class KissToyProtocolTest {
     }
 
     @Test
+    fun qckhHistoricalKissToyRouteKeepsOldFourModeProtocol() {
+        val protocol = BleProtocolRegistry.resolveNative(
+            officialV2Fingerprint(
+                name = "QCKH",
+                serviceUuid = KISSTOY_SERVICE_UUID,
+                writeUuid = KISSTOY_WRITE_UUID,
+                notifyUuid = KISSTOY_NOTIFY_UUID,
+            )
+        ) ?: error("QCKH historical protocol not resolved")
+
+        assertEquals("kisstoy_gatt", protocol.status.id)
+        assertEquals(ToyControlStyle.CombinedPatternAndIntensity, protocol.status.controlStyle)
+        assertEquals(listOf("主电机", "第二电机", "抽插", "双通道"), protocol.status.modeNames)
+
+        val suction = protocol.commandsFor(ToyControlAction.Combined(mode = 2, intensity = 50))
+        assertEquals(3, suction.size)
+        suction.forEach { operation ->
+            val write = assertIs<BleProtocolOperation.Write>(operation)
+            assertEquals(KISSTOY_WRITE_UUID, write.characteristicUuid)
+            assertTrue(write.withResponse)
+        }
+
+        val stop = protocol.commandsFor(ToyControlAction.Stop)
+        assertEquals(4, stop.size)
+        stop.forEach { operation ->
+            val write = assertIs<BleProtocolOperation.Write>(operation)
+            assertEquals(KISSTOY_WRITE_UUID, write.characteristicUuid)
+            assertTrue(write.withResponse)
+        }
+    }
+
+    @Test
     fun qcvwDdddRouteUsesSecondVibrateCommand() {
         val protocol = BleProtocolRegistry.resolveNative(officialV2Fingerprint("QCVW")) ?: error("QCVW protocol not resolved")
 
