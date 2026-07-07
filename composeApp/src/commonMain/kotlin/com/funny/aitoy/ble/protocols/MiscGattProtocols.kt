@@ -40,8 +40,12 @@ internal object MizzzeeXhtkjProtocol : BleDeviceProtocol {
         displayName = "Mizzzee XHTKJ",
         controllable = true,
         intensityMax = 100,
-        supportsMode = false,
-        controlStyle = ToyControlStyle.IntensityOnly,
+        supportsMode = true,
+        modeMax = 10,
+        controlStyle = ToyControlStyle.ExclusivePatternOrIntensity,
+        modeLabel = "预设节奏",
+        modeNames = List(10) { index -> "模式 ${index + 1}" },
+        intensityLabel = "滑动强度",
         automatic = true,
         repeatIntervalMs = 200,
     )
@@ -51,22 +55,24 @@ internal object MizzzeeXhtkjProtocol : BleDeviceProtocol {
                 fingerprint.characteristicUuids.contains(writeUuid)
     }
 
+    override fun initialize(fingerprint: BleGattFingerprint): List<BleProtocolOperation> =
+        listOf(write(byteArrayOf(0x03, 0x12, 0xf6.toByte(), 0x00)))
+
     override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
         when (action) {
-            is ToyControlAction.Intensity -> listOf(command(action.value.coerceIn(0, status.intensityMax)))
-            is ToyControlAction.Combined -> listOf(command(action.intensity.coerceIn(0, status.intensityMax)))
-            is ToyControlAction.DualMotor -> listOf(command(action.strongestIntensity(status.intensityMax)))
-            is ToyControlAction.Pattern -> emptyList()
-            ToyControlAction.Stop -> listOf(command(0))
+            is ToyControlAction.Intensity -> listOf(strengthCommand(action.value.coerceIn(0, status.intensityMax)))
+            is ToyControlAction.Combined -> listOf(modelCommand(action.mode))
+            is ToyControlAction.DualMotor -> listOf(modelCommand(action.mode))
+            is ToyControlAction.Pattern -> listOf(modelCommand(action.mode))
+            ToyControlAction.Stop -> listOf(clearCommand(), modelCommand(0))
         }
 
-    private fun command(intensity: Int): BleProtocolOperation.Write {
+    private fun strengthCommand(intensity: Int): BleProtocolOperation.Write {
         val encoded = encodeStrength(intensity)
         val low = (encoded and 0xff).toByte()
         val high = ((encoded ushr 8) and 0xff).toByte()
-        return BleProtocolOperation.Write(
-            characteristicUuid = writeUuid,
-            bytes = byteArrayOf(
+        return write(
+            byteArrayOf(
                 0x03,
                 0x12,
                 0xf3.toByte(),
@@ -88,9 +94,31 @@ internal object MizzzeeXhtkjProtocol : BleDeviceProtocol {
                 high,
                 0x00,
             ),
-            withResponse = false,
         )
     }
+
+    private fun modelCommand(mode: Int): BleProtocolOperation.Write =
+        write(ByteArray(20).also {
+            it[0] = 0x03
+            it[1] = 0x12
+            it[2] = 0xf4.toByte()
+            it[3] = mode.coerceIn(0, status.modeMax).toByte()
+        })
+
+    private fun clearCommand(): BleProtocolOperation.Write =
+        write(ByteArray(20).also {
+            it[0] = 0x03
+            it[1] = 0x12
+            it[2] = 0xf0.toByte()
+            it[3] = 0x07
+        })
+
+    private fun write(bytes: ByteArray): BleProtocolOperation.Write =
+        BleProtocolOperation.Write(
+            characteristicUuid = writeUuid,
+            bytes = bytes,
+            withResponse = false,
+        )
 
     private fun encodeStrength(intensity: Int): Int {
         if (intensity <= 0) return 0x003c
