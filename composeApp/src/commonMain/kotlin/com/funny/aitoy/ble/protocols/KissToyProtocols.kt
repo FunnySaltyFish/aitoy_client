@@ -106,6 +106,8 @@ internal object KissToyOfficialV2Protocol : BleDeviceProtocol {
         private val route: KissToyOfficialV2Route,
         private val profile: KissToyOfficialV2Profile,
     ) : BleDeviceProtocol {
+        private val controlState = KissToyOfficialV2BasicControlState(profile)
+
         override val status = BleProtocolStatus(
             id = KISS_TOY_OFFICIAL_V2_PROTOCOL_ID,
             displayName = "KissToy ${profile.displayName}",
@@ -132,6 +134,7 @@ internal object KissToyOfficialV2Protocol : BleDeviceProtocol {
             profile.commandsForOfficialV2(
                 action = action,
                 intensityMax = status.intensityMax,
+                controlState = controlState,
                 write = ::write,
             )
 
@@ -313,27 +316,30 @@ internal fun BleGattFingerprint.kissToyOfficialV2Profile(): KissToyOfficialV2Pro
 internal fun KissToyOfficialV2Profile.commandsForOfficialV2(
     action: ToyControlAction,
     intensityMax: Int,
+    controlState: KissToyOfficialV2BasicControlState = KissToyOfficialV2BasicControlState(this),
     write: (ByteArray) -> BleProtocolOperation.Write,
 ): List<BleProtocolOperation> =
     when (action) {
-        is ToyControlAction.DualMotor -> runOfficialV2(dualIntensities(action.internalIntensity, action.externalIntensity), intensityMax, write)
-        is ToyControlAction.Intensity -> runOfficialV2(sameIntensities(action.value), intensityMax, write)
-        is ToyControlAction.Combined -> runOfficialV2(sameIntensities(action.intensity), intensityMax, write)
-        is ToyControlAction.Pattern -> runOfficialV2(sameIntensities(50), intensityMax, write)
-        ToyControlAction.Stop -> stopOfficialV2(write)
+        is ToyControlAction.DualMotor -> runOfficialV2(dualIntensities(action.internalIntensity, action.externalIntensity), intensityMax, controlState, write)
+        is ToyControlAction.Intensity -> runOfficialV2(sameIntensities(action.value), intensityMax, controlState, write)
+        is ToyControlAction.Combined -> runOfficialV2(sameIntensities(action.intensity), intensityMax, controlState, write)
+        is ToyControlAction.Pattern -> runOfficialV2(sameIntensities(50), intensityMax, controlState, write)
+        ToyControlAction.Stop -> stopOfficialV2(controlState, write)
     }
 
 internal fun KissToyOfficialV2Profile.runOfficialV2(
     intensities: List<Int>,
     intensityMax: Int,
+    controlState: KissToyOfficialV2BasicControlState,
     write: (ByteArray) -> BleProtocolOperation.Write,
 ): List<BleProtocolOperation> =
-    listOf(write(kissToyOfficialV2BasicControlPacket(intensities, intensityMax)))
+    controlState.update(intensities, intensityMax).map(write)
 
 internal fun KissToyOfficialV2Profile.stopOfficialV2(
+    controlState: KissToyOfficialV2BasicControlState,
     write: (ByteArray) -> BleProtocolOperation.Write,
 ): List<BleProtocolOperation> =
-    listOf(write(kissToyOfficialV2BasicControlPacket(List(motors.size) { 0 }, intensityMax = 100)))
+    controlState.stop().map(write)
 
 internal fun KissToyOfficialV2Profile.sameIntensities(value: Int): List<Int> =
     List(motors.size) { value }
@@ -347,21 +353,45 @@ internal fun KissToyOfficialV2Profile.dualIntensities(first: Int, second: Int): 
         }
     }
 
-internal fun KissToyOfficialV2Profile.kissToyOfficialV2BasicControlPacket(
-    intensities: List<Int>,
-    intensityMax: Int,
-): ByteArray {
-    val content = IntArray(KISS_TOY_BASIC_CONTROL_CONTENT_SIZE)
-    motors.zip(intensities).forEach { (motor, intensity) ->
+internal class KissToyOfficialV2BasicControlState(
+    private val profile: KissToyOfficialV2Profile,
+) {
+    private val content = IntArray(KISS_TOY_BASIC_CONTROL_CONTENT_SIZE)
+
+    fun update(
+        intensities: List<Int>,
+        intensityMax: Int,
+    ): List<ByteArray> =
+        profile.motors.zip(intensities).map { (motor, intensity) ->
+            setMotor(motor, intensity, intensityMax)
+            profile.kissToyOfficialV2BasicControlPacket(content)
+        }
+
+    fun stop(): List<ByteArray> =
+        profile.motors.map { motor ->
+            setMotor(motor, 0, 100)
+            profile.kissToyOfficialV2BasicControlPacket(content)
+        }
+
+    private fun setMotor(
+        motor: KissToyOfficialV2Motor,
+        intensity: Int,
+        intensityMax: Int,
+    ) {
         val value = intensity.scaleKissToyOfficialV2BasicControlValue(intensityMax, motor.startUp)
         when (motor.type) {
             1 -> content[0] = value
-            2 -> if (code == "QCVW") content[2] = value else content[1] = value
+            2 -> if (profile.code == "QCVW") content[2] = value else content[1] = value
             3, 6 -> content[2] = value
             4 -> content[3] = value
             5 -> content[4] = value
         }
     }
+}
+
+internal fun KissToyOfficialV2Profile.kissToyOfficialV2BasicControlPacket(
+    content: IntArray,
+): ByteArray {
     val data = IntArray(KISS_TOY_BASIC_CONTROL_PACKET_DATA_SIZE)
     data[0] = bleHeader and 0xff
     data[1] = KISS_TOY_BASIC_CONTROL_CMD
