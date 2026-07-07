@@ -272,6 +272,48 @@ class KissToyProtocolTest {
     }
 
     @Test
+    fun jiuaiJellyfishUsesWxMiniProgramAe3aPlainCommands() {
+        val fingerprint = jiuaiJellyfishFingerprint()
+        val protocol = BleProtocolRegistry.resolveNative(fingerprint) ?: error("Jiuai jellyfish protocol not resolved")
+
+        assertEquals("jiuai_jellyfish_stroker", protocol.status.id)
+        assertEquals("久爱水母跳蛋", protocol.status.displayName)
+        assertEquals(ToyControlStyle.ExclusivePatternOrIntensity, protocol.status.controlStyle)
+        assertEquals("伸缩模式", protocol.status.modeLabel)
+        assertEquals("伸缩速度", protocol.status.intensityLabel)
+        assertEquals(listOf("微风", "心跳", "冲击", "拍打", "深度", "宇宙", "海啸", "瀑布", "火山", "神风"), protocol.status.modeNames)
+
+        val init = protocol.initialize(fingerprint)
+        assertEquals(AE3A_NOTIFY_UUID, assertIs<BleProtocolOperation.SubscribeNotify>(init[0]).characteristicUuid)
+        assertEquals("AAAAAAAAAA", assertIs<BleProtocolOperation.Write>(init[1]).bytes.hexUpper())
+
+        val mode1 = assertIs<BleProtocolOperation.Write>(protocol.commandsFor(ToyControlAction.Pattern(1)).single())
+        assertEquals(AE3A_WRITE_UUID, mode1.characteristicUuid)
+        assertFalse(mode1.withResponse)
+        assertEquals("AA0102AD", mode1.bytes.hexUpper())
+
+        val mode10 = assertIs<BleProtocolOperation.Write>(protocol.commandsFor(ToyControlAction.Pattern(10)).single())
+        assertEquals("AA0111BC", mode10.bytes.hexUpper())
+
+        val speedMin = assertIs<BleProtocolOperation.Write>(protocol.commandsFor(ToyControlAction.Intensity(1)).single())
+        assertEquals("AA021223E1", speedMin.bytes.hexUpper())
+        val speedMax = assertIs<BleProtocolOperation.Write>(protocol.commandsFor(ToyControlAction.Intensity(100)).single())
+        assertEquals("AA02126422", speedMax.bytes.hexUpper())
+
+        val stop = assertIs<BleProtocolOperation.Write>(protocol.commandsFor(ToyControlAction.Stop).single())
+        assertEquals("AA0100AB", stop.bytes.hexUpper())
+    }
+
+    @Test
+    fun jiuaiJellyfishDoesNotMatchNameAloneOrOtherAe3aDevices() {
+        assertEquals(null, BleProtocolRegistry.resolveNative(jiuaiJellyfishFingerprint().copy(serviceUuids = emptySet())))
+
+        val qcpwProtocols = BleProtocolRegistry.resolveNativeAll(qcpwLiveAe3aFingerprint())
+        assertEquals("kisstoy_official_v2", qcpwProtocols.first().status.id)
+        assertTrue(qcpwProtocols.none { it.status.id == "jiuai_jellyfish_stroker" })
+    }
+
+    @Test
     fun qcvwDdddRouteUsesSecondVibrateCommand() {
         val protocol = BleProtocolRegistry.resolveNative(officialV2Fingerprint("QCVW")) ?: error("QCVW protocol not resolved")
 
@@ -519,6 +561,14 @@ class KissToyProtocolTest {
             AE00_WRITE_UUID,
             AE00_NOTIFY_UUID,
         ),
+    )
+
+    private fun jiuaiJellyfishFingerprint() = BleGattFingerprint(
+        name = "YCM-BL001",
+        manufacturerData = "",
+        scanRecordHex = "",
+        serviceUuids = setOf(AE3A_SERVICE_UUID),
+        characteristicUuids = setOf(AE3A_WRITE_UUID, AE3A_NOTIFY_UUID),
     )
 
     private fun cachitoMb08Fingerprint() = BleGattFingerprint(

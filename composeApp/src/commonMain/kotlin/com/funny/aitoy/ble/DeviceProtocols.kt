@@ -82,6 +82,7 @@ internal object BleProtocolRegistry {
                     AnkniQd1GattProtocol,
                     Ankni0010Protocol,
                     CachitoMbProGattProtocol,
+                    JiuaiJellyfishProtocol,
                     KissToyTutuIIProtocol,
                     KissToyOfficialV2Protocol,
                     AnkniYwtdProtocol,
