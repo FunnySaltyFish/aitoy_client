@@ -29,15 +29,15 @@ class MizzzeeXhtkjProtocolTest {
         val mode = protocol.commandsFor(ToyControlAction.Pattern(4)).single()
         val modeWrite = assertIs<BleProtocolOperation.Write>(mode)
         assertEquals(WRITE_UUID, modeWrite.characteristicUuid)
-        assertEquals("0312F4040000000000000000000000000000000000", modeWrite.bytes.hexUpper())
+        assertEquals("0312F404" + "00".repeat(16), modeWrite.bytes.hexUpper())
 
         val strength = protocol.commandsFor(ToyControlAction.Intensity(50)).single()
         val strengthWrite = assertIs<BleProtocolOperation.Write>(strength)
-        assertEquals("0312F300FC00FE40013DB000FC00FE40013DB000", strengthWrite.bytes.hexUpper())
+        assertEquals("0312F300FC00FE40013CA600FC00FE40013CA600", strengthWrite.bytes.hexUpper())
 
         val stop = protocol.commandsFor(ToyControlAction.Stop)
-        assertEquals("0312F0070000000000000000000000000000000000", assertIs<BleProtocolOperation.Write>(stop[0]).bytes.hexUpper())
-        assertEquals("0312F4000000000000000000000000000000000000", assertIs<BleProtocolOperation.Write>(stop[1]).bytes.hexUpper())
+        assertEquals("0312F007" + "00".repeat(16), assertIs<BleProtocolOperation.Write>(stop[0]).bytes.hexUpper())
+        assertEquals("0312F400" + "00".repeat(16), assertIs<BleProtocolOperation.Write>(stop[1]).bytes.hexUpper())
     }
 
     private fun mizzzeeXhtkjFingerprint(name: String): BleGattFingerprint =
