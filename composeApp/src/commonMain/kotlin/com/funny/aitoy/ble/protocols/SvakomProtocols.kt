@@ -319,6 +319,15 @@ internal object SVAKOM_V2_SUCK : SvakomV2Profile(
     functions = listOf(SvakomV2Suck, SvakomV2Heat),
 )
 
+internal object SVAKOM_V2_SL278K_PAIR : SvakomV2Profile(
+    status = svakomV2Status(
+        id = "svakom_sl278_plus_pair",
+        displayName = "SVAKOM 分欣 Plus",
+        functions = listOf(SvakomV2Stretch, SvakomV2Vibrate, SvakomV2Suck, SvakomV2Heat),
+    ),
+    functions = listOf(SvakomV2Stretch, SvakomV2Vibrate, SvakomV2Suck, SvakomV2Heat),
+)
+
 internal object SVAKOM_V2_FLAP : SvakomV2Profile(
     status = svakomV2Status(
         id = "svakom_sl278_plus_f",
@@ -330,8 +339,9 @@ internal object SVAKOM_V2_FLAP : SvakomV2Profile(
 
 internal fun Int?.svakomV2Profile(): SvakomV2Profile =
     when (this) {
+        128, 129 -> SVAKOM_V2_SL278K_PAIR
         101, 111, 145, 328 -> SVAKOM_V2_FLAP
-        107, 121, 129 -> SVAKOM_V2_SUCK
+        107, 121 -> SVAKOM_V2_SUCK
         else -> SVAKOM_V2_STRETCH_VIBRATE
     }
 

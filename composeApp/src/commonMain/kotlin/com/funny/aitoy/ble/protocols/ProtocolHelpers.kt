@@ -119,6 +119,21 @@ fun svakomStableIdentity(manufacturerData: String): String? {
     return "svakom:$code"
 }
 
+fun svakomSl278PairIdentity(manufacturerData: String): String? {
+    val fingerprint = BleGattFingerprint(
+        name = "",
+        address = "",
+        manufacturerData = manufacturerData,
+        scanRecordHex = "",
+        serviceUuids = emptySet(),
+        characteristicUuids = emptySet(),
+    )
+    return when (fingerprint.svakomProductCode()) {
+        128, 129 -> "svakom_sl278_pair:sl278k"
+        else -> null
+    }
+}
+
 internal fun BleGattFingerprint.svakomProductCode(): Int? {
     val payload = svakomManufacturerPayload() ?: return null
     return when {

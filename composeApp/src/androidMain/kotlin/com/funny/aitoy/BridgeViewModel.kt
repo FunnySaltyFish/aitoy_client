@@ -22,6 +22,7 @@ import com.funny.aitoy.ble.ProtocolTemplate
 import com.funny.aitoy.ble.ScannedBleDevice
 import com.funny.aitoy.ble.ToyControlAction
 import com.funny.aitoy.ble.ToyControlStyle
+import com.funny.aitoy.ble.svakomSl278PairIdentity
 import com.funny.aitoy.ble.svakomStableIdentity
 import com.funny.aitoy.ble.svakomV2FunctionCode
 import com.funny.aitoy.ble.svakomV2FunctionModeMax
@@ -462,22 +463,31 @@ class BridgeViewModel : ViewModel() {
             appendLog("跳过不可连接且未识别的广播设备：name=${device.name} address=${device.address}")
             return@runAction
         }
+        connectedSvakomSl278PairAddressFor(device.manufacturerData)
+            ?.takeIf { it != device.address }
+            ?.let { connectedAddress ->
+                selectDevice(connectedAddress)
+                busyHint = "这套设备已连接，可以直接控制两个部位"
+                return@runAction
+            }
         if (toyRuntimeStates[device.address] == ToyRuntimeState.Connected) {
             selectDevice(device.address)
-            busyHint = "已切换到 ${device.name}"
+            busyHint = "已切换到 ${displayNameForAddress(device.address, device.name)}"
             return@runAction
         }
         // 防抖：连接进行中(Connecting/Discovering)再次点击会触发第二次 connect()，
         // 其内部 disconnect 会掐掉仍在 pending 的首次连接(status=22)，并泄漏 GATT client 槽。
         val inFlightState = deviceConnectionStates[device.address]
         if (inFlightState == BleConnectionState.Connecting || inFlightState == BleConnectionState.Discovering) {
-            appendLog("忽略重复连接请求：${device.name} 正在连接中 state=$inFlightState")
-            busyHint = "正在连接 ${device.name}，请稍候"
+            val displayName = displayNameForAddress(device.address, device.name)
+            appendLog("忽略重复连接请求：$displayName 正在连接中 state=$inFlightState")
+            busyHint = "正在连接 $displayName，请稍候"
             return@runAction
         }
+        val displayName = displayNameForAddress(device.address, device.name)
         selectedAddress = device.address
-        selectedName = device.name
-        deviceDisplayNames[device.address] = device.name
+        selectedName = displayName
+        deviceDisplayNames[device.address] = displayName
         toyRuntimeStates[device.address] = ToyRuntimeState.Connecting
         deviceConnectionStates[device.address] = BleConnectionState.Connecting
         deviceBatteryPercents.remove(device.address)
@@ -492,7 +502,7 @@ class BridgeViewModel : ViewModel() {
         deviceRemarkDraft =
             rememberedDevices.firstOrNull { it.address == device.address }?.name.orEmpty()
         scanning = false
-        busyHint = "正在为你连接 ${device.name}"
+        busyHint = "正在为你连接 $displayName"
         scanController.stopScan()
         controllerFor(device.address).connect(device, currentTemplate())
     }
@@ -542,8 +552,8 @@ class BridgeViewModel : ViewModel() {
     fun selectDevice(address: String) {
         if (address.isBlank()) return
         selectedAddress = address
-        selectedName = deviceDisplayNames[address]
-            ?: rememberedDevices.firstOrNull { it.address == address }?.name
+        selectedName = rememberedDevices.firstOrNull { it.address == address }?.name
+            ?: deviceDisplayNames[address]
             ?: devices.firstOrNull { it.address == address }?.name
             ?: "蓝牙设备"
         connectionState = deviceConnectionStates[address] ?: BleConnectionState.Idle
@@ -1028,6 +1038,24 @@ class BridgeViewModel : ViewModel() {
         }
         return "address:$address"
     }
+
+    private fun displayNameForAddress(address: String, fallback: String): String =
+        rememberedDevices.firstOrNull { it.address == address }?.name
+            ?: fallback.ifBlank { "蓝牙设备" }
+
+    private fun connectedSvakomSl278PairAddressFor(manufacturerData: String): String? {
+        val pairIdentity = svakomSl278PairIdentity(manufacturerData) ?: return null
+        return deviceConnectionStates.entries.firstOrNull { (address, state) ->
+            state == BleConnectionState.Ready &&
+                protocolStatusFor(address).id == "svakom_sl278_plus_pair" &&
+                pairIdentity == svakomSl278PairIdentity(manufacturerDataForAddress(address))
+        }?.key
+    }
+
+    private fun manufacturerDataForAddress(address: String): String =
+        devices.firstOrNull { it.address == address }?.manufacturerData
+            ?: rememberedDevices.firstOrNull { it.address == address }?.manufacturerData
+            ?: ""
 
     private fun ScannedBleDevice.mergeScanUpdate(latest: ScannedBleDevice): ScannedBleDevice =
         copy(
