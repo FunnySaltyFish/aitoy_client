@@ -29,7 +29,7 @@ class MizzzeeXhtkjProtocolTest {
         val mode = protocol.commandsFor(ToyControlAction.Pattern(4)).single()
         val modeWrite = assertIs<BleProtocolOperation.Write>(mode)
         assertEquals(WRITE_UUID, modeWrite.characteristicUuid)
-        assertEquals("0312F404" + "00".repeat(16), modeWrite.bytes.hexUpper())
+        assertEquals("031204" + "00".repeat(17), modeWrite.bytes.hexUpper())
 
         val strength = protocol.commandsFor(ToyControlAction.Intensity(50)).single()
         val strengthWrite = assertIs<BleProtocolOperation.Write>(strength)

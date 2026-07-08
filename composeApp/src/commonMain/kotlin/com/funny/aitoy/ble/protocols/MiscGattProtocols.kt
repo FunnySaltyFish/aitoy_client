@@ -64,7 +64,7 @@ internal object MizzzeeXhtkjProtocol : BleDeviceProtocol {
             is ToyControlAction.Combined -> listOf(modelCommand(action.mode))
             is ToyControlAction.DualMotor -> listOf(modelCommand(action.mode))
             is ToyControlAction.Pattern -> listOf(modelCommand(action.mode))
-            ToyControlAction.Stop -> listOf(clearCommand(), modelCommand(0))
+            ToyControlAction.Stop -> listOf(clearCommand(), resetModelCommand())
         }
 
     private fun strengthCommand(intensity: Int): BleProtocolOperation.Write {
@@ -101,8 +101,7 @@ internal object MizzzeeXhtkjProtocol : BleDeviceProtocol {
         write(ByteArray(20).also {
             it[0] = 0x03
             it[1] = 0x12
-            it[2] = 0xf4.toByte()
-            it[3] = mode.coerceIn(0, status.modeMax).toByte()
+            it[2] = mode.coerceIn(0, status.modeMax).toByte()
         })
 
     private fun clearCommand(): BleProtocolOperation.Write =
@@ -111,6 +110,13 @@ internal object MizzzeeXhtkjProtocol : BleDeviceProtocol {
             it[1] = 0x12
             it[2] = 0xf0.toByte()
             it[3] = 0x07
+        })
+
+    private fun resetModelCommand(): BleProtocolOperation.Write =
+        write(ByteArray(20).also {
+            it[0] = 0x03
+            it[1] = 0x12
+            it[2] = 0xf4.toByte()
         })
 
     private fun write(bytes: ByteArray): BleProtocolOperation.Write =
