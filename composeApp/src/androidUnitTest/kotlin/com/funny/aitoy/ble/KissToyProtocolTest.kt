@@ -99,13 +99,9 @@ class KissToyProtocolTest {
         assertEquals(emptyList(), protocol.initialize(officialV2Fingerprint("QCPW")))
 
         val run = protocol.commandsFor(ToyControlAction.DualMotor(mode = 1, internalIntensity = 50, externalIntensity = 25))
-        assertKissToyBasicControlWrites(
-            run,
-            DDDD_WRITE_UUID,
-            contents = listOf(
-                listOf(153, 0, 0, 0, 0),
-                listOf(153, 0, 102, 0, 0),
-            ),
+        assertKissToyBasicControlData(
+            assertSingleKissToyBasicControlWrite(run, DDDD_WRITE_UUID).bytes,
+            content = listOf(153, 0, 102, 0, 0),
         )
 
         val stop = protocol.commandsFor(ToyControlAction.Stop)
@@ -133,13 +129,9 @@ class KissToyProtocolTest {
         assertEquals("KissToy 迷路-入体版", protocol.status.displayName)
 
         val run = protocol.commandsFor(ToyControlAction.DualMotor(mode = 1, internalIntensity = 50, externalIntensity = 25))
-        assertKissToyBasicControlWrites(
-            run,
-            FFE0_WRITE_UUID,
-            contents = listOf(
-                listOf(153, 0, 0, 0, 0),
-                listOf(153, 0, 102, 0, 0),
-            ),
+        assertKissToyBasicControlData(
+            assertSingleKissToyBasicControlWrite(run, FFE0_WRITE_UUID).bytes,
+            content = listOf(153, 0, 102, 0, 0),
         )
     }
 
@@ -187,13 +179,9 @@ class KissToyProtocolTest {
         assertEquals(AE3A_NOTIFY_UUID, assertIs<BleProtocolOperation.SubscribeNotify>(init[0]).characteristicUuid)
 
         val run = protocols.first().commandsFor(ToyControlAction.DualMotor(mode = 1, internalIntensity = 50, externalIntensity = 25))
-        assertKissToyBasicControlWrites(
-            run,
-            AE3A_WRITE_UUID,
-            contents = listOf(
-                listOf(153, 0, 0, 0, 0),
-                listOf(153, 0, 102, 0, 0),
-            ),
+        assertKissToyBasicControlData(
+            assertSingleKissToyBasicControlWrite(run, AE3A_WRITE_UUID).bytes,
+            content = listOf(153, 0, 102, 0, 0),
         )
     }
 
@@ -212,13 +200,9 @@ class KissToyProtocolTest {
         assertEquals(AE3A_NOTIFY_UUID, assertIs<BleProtocolOperation.SubscribeNotify>(init[0]).characteristicUuid)
 
         val run = protocol.commandsFor(ToyControlAction.DualMotor(mode = 1, internalIntensity = 50, externalIntensity = 25))
-        assertKissToyBasicControlWrites(
-            run,
-            AE3A_WRITE_UUID,
-            contents = listOf(
-                listOf(153, 0, 0, 0, 0),
-                listOf(153, 0, 102, 0, 0),
-            ),
+        assertKissToyBasicControlData(
+            assertSingleKissToyBasicControlWrite(run, AE3A_WRITE_UUID).bytes,
+            content = listOf(153, 0, 102, 0, 0),
         )
     }
 
@@ -321,13 +305,9 @@ class KissToyProtocolTest {
         assertEquals(listOf("震动", "第二震动"), protocol.status.channelNames)
 
         val run = protocol.commandsFor(ToyControlAction.DualMotor(mode = 1, internalIntensity = 50, externalIntensity = 25))
-        assertKissToyBasicControlWrites(
-            run,
-            DDDD_WRITE_UUID,
-            contents = listOf(
-                listOf(153, 0, 0, 0, 0),
-                listOf(153, 0, 102, 0, 0),
-            ),
+        assertKissToyBasicControlData(
+            assertSingleKissToyBasicControlWrite(run, DDDD_WRITE_UUID).bytes,
+            content = listOf(153, 0, 102, 0, 0),
         )
     }
 

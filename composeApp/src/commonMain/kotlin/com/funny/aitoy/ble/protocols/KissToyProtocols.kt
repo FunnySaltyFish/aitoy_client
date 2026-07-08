@@ -333,7 +333,7 @@ internal fun KissToyOfficialV2Profile.runOfficialV2(
     controlState: KissToyOfficialV2BasicControlState,
     write: (ByteArray) -> BleProtocolOperation.Write,
 ): List<BleProtocolOperation> =
-    controlState.update(intensities, intensityMax).map(write)
+    listOf(write(controlState.update(intensities, intensityMax)))
 
 internal fun KissToyOfficialV2Profile.stopOfficialV2(
     controlState: KissToyOfficialV2BasicControlState,
@@ -361,11 +361,12 @@ internal class KissToyOfficialV2BasicControlState(
     fun update(
         intensities: List<Int>,
         intensityMax: Int,
-    ): List<ByteArray> =
-        profile.motors.zip(intensities).map { (motor, intensity) ->
+    ): ByteArray {
+        profile.motors.zip(intensities).forEach { (motor, intensity) ->
             setMotor(motor, intensity, intensityMax)
-            profile.kissToyOfficialV2BasicControlPacket(content)
         }
+        return profile.kissToyOfficialV2BasicControlPacket(content)
+    }
 
     fun stop(): List<ByteArray> =
         profile.motors.map { motor ->
@@ -660,4 +661,3 @@ internal val KISS_TOY_HISTORICAL_KEY_TAB = arrayOf(
     byteArrayOf(0, 101, 120, 32, 84, 111, 121, 115, 10, -114, -99, -93),
     byteArrayOf(0, -59, -42, -25, -8, 10, 50, 32, 111, 98, 13, 10),
 )
-
