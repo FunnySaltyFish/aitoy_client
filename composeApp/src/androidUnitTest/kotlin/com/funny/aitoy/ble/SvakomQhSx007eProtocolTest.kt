@@ -21,27 +21,28 @@ class SvakomQhSx007eProtocolTest {
     }
 
     @Test
-    fun vibrateChannelUsesOfficialFrameWithGearInByte4AndStrengthInByte5() {
+    fun vibrateChannelWritesOnlyItsOwnFrameWithGearInByte4AndStrengthInByte5() {
         val protocol = BleProtocolRegistry.resolveNative(qhSx007eFingerprint())
             ?: error("QH-SX007E protocol not resolved")
 
-        // 只驱动震动（功能码 2，档位 7，强度 6）：吮吸通道保持停止帧。
+        // 只驱动震动（功能码 2，档位 7，强度 6）：官方每次只发当前功能单帧，
+        // 不再连发吮吸帧，避免设备背靠背收到无关功能帧后卡死。
         val vibrate = protocol.commandsFor(ToyControlAction.Combined(mode = 2 * 100 + 7, intensity = 6))
+        assertEquals(1, vibrate.size)
         // 官方 55 03 00 00 <档位> <强度> 00：档位在 byte[4]、强度在 byte[5]。
         assertEquals("55030000070600", assertIs<BleProtocolOperation.Write>(vibrate[0]).bytes.hexUpper())
-        assertEquals("55090000000000", assertIs<BleProtocolOperation.Write>(vibrate[1]).bytes.hexUpper())
     }
 
     @Test
-    fun suckChannelUsesOfficialFrameWithFiveGears() {
+    fun suckChannelWritesOnlyItsOwnFrameWithFiveGears() {
         val protocol = BleProtocolRegistry.resolveNative(qhSx007eFingerprint())
             ?: error("QH-SX007E protocol not resolved")
 
-        // 只驱动吮吸（功能码 3，档位 5，强度 8）：震动通道保持停止帧。
+        // 只驱动吮吸（功能码 3，档位 5，强度 8）：只发吮吸单帧。
         val suck = protocol.commandsFor(ToyControlAction.Combined(mode = 3 * 100 + 5, intensity = 8))
-        assertEquals("55030000000000", assertIs<BleProtocolOperation.Write>(suck[0]).bytes.hexUpper())
+        assertEquals(1, suck.size)
         // 官方吮吸 55 09 00 00 <档位1..5> <强度> 00。
-        assertEquals("55090000050800", assertIs<BleProtocolOperation.Write>(suck[1]).bytes.hexUpper())
+        assertEquals("55090000050800", assertIs<BleProtocolOperation.Write>(suck[0]).bytes.hexUpper())
     }
 
     @Test

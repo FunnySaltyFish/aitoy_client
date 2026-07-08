@@ -386,6 +386,9 @@ internal object SVAKOM_V2_FLAP : SvakomV2Profile(
 
 // 震动 + 吮吸双功能区通用 profile：震动 10 档、吮吸 5 档，各自独立命名和强度滑杆，不绑定单一型号。
 // QH-SX007E（Svakom Alberta）首个接入，后续同类司康沃设备可复用此 profile。
+// 官方 AutoV2ModeView 每个功能是独立 View，selectModeIndex 只发当前功能单帧；
+// 因此这里 writeCurrentStateOnUpdate=false：操作哪个功能就只写该功能帧，
+// 避免每次都把震动+吮吸两帧背靠背连发导致设备只响应第一条、之后卡死。
 internal object SVAKOM_V2_VIBRATE_SUCK : SvakomV2Profile(
     status = svakomV2Status(
         id = "svakom_vibrate_suck",
@@ -393,6 +396,7 @@ internal object SVAKOM_V2_VIBRATE_SUCK : SvakomV2Profile(
         functions = listOf(SvakomV2Vibrate, SvakomV2Suck),
     ),
     functions = listOf(SvakomV2Vibrate, SvakomV2Suck),
+    writeCurrentStateOnUpdate = false,
 )
 
 internal fun Int?.svakomV2Profile(): SvakomV2Profile =
