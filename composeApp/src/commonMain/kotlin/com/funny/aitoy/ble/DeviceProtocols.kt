@@ -98,6 +98,7 @@ internal object BleProtocolRegistry {
                     SvakomVibrateSuckProtocol,
                     SvakomSt419Protocol,
                     SvakomQhSx045Protocol,
+                    ChokerMiyinProtocol,
                     MizzzeeXhtkjProtocol,
                     SenseeCcpa10S2Protocol,
                     OhMiBodEsca2Protocol,
