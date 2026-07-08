@@ -177,6 +177,8 @@ internal object SistalkWeightless808Protocol : BleDeviceProtocol {
     private val functionUuid = Uuid.parse("00009002-0000-1000-8000-00805f9b34fb")
 
     private const val COMMAND_MOTOR = 0xA0
+    private const val STARTUP_PWM = 70
+    private const val STARTUP_SETTLE_MS = 120L
     private val currentPwm = IntArray(2)
 
     override val status = BleProtocolStatus(
@@ -196,7 +198,7 @@ internal object SistalkWeightless808Protocol : BleDeviceProtocol {
     )
 
     override fun matches(fingerprint: BleGattFingerprint): Boolean =
-        fingerprint.hasWeightless808Name() &&
+        fingerprint.hasWeightless808Identity() &&
                 fingerprint.sistalkProtocolVersion != 1 &&
                 fingerprint.serviceUuids.contains(serviceUuid) &&
                 fingerprint.characteristicUuids.contains(opUuid) &&
@@ -212,28 +214,49 @@ internal object SistalkWeightless808Protocol : BleDeviceProtocol {
 
     override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
         when (action) {
-            is ToyControlAction.Intensity -> listOf(updateAllChannels(action.value))
-            is ToyControlAction.Combined -> listOf(updateChannel(action.mode, action.intensity))
-            is ToyControlAction.DualMotor -> listOf(updateDualChannels(action.internalIntensity, action.externalIntensity))
-            is ToyControlAction.Pattern -> listOf(updateAllChannels(status.intensityMax.coerceAtLeast(1)))
+            is ToyControlAction.Intensity -> updateAllChannels(action.value)
+            is ToyControlAction.Combined -> updateChannel(action.mode, action.intensity)
+            is ToyControlAction.DualMotor -> updateDualChannels(action.internalIntensity, action.externalIntensity)
+            is ToyControlAction.Pattern -> updateAllChannels(status.intensityMax.coerceAtLeast(1))
             ToyControlAction.Stop -> stop()?.let(::listOf).orEmpty()
         }
 
-    private fun updateAllChannels(intensity: Int): BleProtocolOperation.Write {
-        currentPwm.fill(intensity.coerceIn(0, status.intensityMax))
-        return motorCommand(currentPwm[0], currentPwm[1])
+    private fun updateAllChannels(intensity: Int): List<BleProtocolOperation> {
+        val target = intensity.coerceIn(0, status.intensityMax)
+        return updateTargets(target, target)
     }
 
-    private fun updateDualChannels(headVibration: Int, tailVibration: Int): BleProtocolOperation.Write {
-        currentPwm[0] = headVibration.coerceIn(0, status.intensityMax)
-        currentPwm[1] = tailVibration.coerceIn(0, status.intensityMax)
-        return motorCommand(currentPwm[0], currentPwm[1])
-    }
+    private fun updateDualChannels(headVibration: Int, tailVibration: Int): List<BleProtocolOperation> =
+        updateTargets(
+            headVibration.coerceIn(0, status.intensityMax),
+            tailVibration.coerceIn(0, status.intensityMax),
+        )
 
-    private fun updateChannel(channel: Int, intensity: Int): BleProtocolOperation.Write {
+    private fun updateChannel(channel: Int, intensity: Int): List<BleProtocolOperation> {
+        val target = currentPwm.copyOf()
         val index = channel.coerceIn(1, 2) - 1
-        currentPwm[index] = intensity.coerceIn(0, status.intensityMax)
-        return motorCommand(currentPwm[0], currentPwm[1])
+        target[index] = intensity.coerceIn(0, status.intensityMax)
+        return updateTargets(target[0], target[1])
+    }
+
+    private fun updateTargets(headVibration: Int, tailVibration: Int): List<BleProtocolOperation> {
+        val startupHead = currentPwm[0] == 0 && headVibration in 1 until STARTUP_PWM
+        val startupTail = currentPwm[1] == 0 && tailVibration in 1 until STARTUP_PWM
+        val operations = buildList {
+            if (startupHead || startupTail) {
+                add(
+                    motorCommand(
+                        if (startupHead) STARTUP_PWM else headVibration,
+                        if (startupTail) STARTUP_PWM else tailVibration,
+                    )
+                )
+                add(BleProtocolOperation.Sleep(STARTUP_SETTLE_MS))
+            }
+            add(motorCommand(headVibration, tailVibration))
+        }
+        currentPwm[0] = headVibration
+        currentPwm[1] = tailVibration
+        return operations
     }
 
     private fun stop(): BleProtocolOperation.Write? {
@@ -255,8 +278,15 @@ internal object SistalkWeightless808Protocol : BleDeviceProtocol {
             withResponse = false,
         )
 
-    private fun BleGattFingerprint.hasWeightless808Name(): Boolean =
-        name.normalizedDeviceName().contains("失重808")
+    private fun BleGattFingerprint.hasWeightless808Identity(): Boolean {
+        if (name.normalizedDeviceName().contains("失重808")) return true
+        val manufacturerPayload = manufacturerData.toManufacturerDataMap()[0x2512] ?: return false
+        return name.normalizedDeviceName() == "monsterpub" &&
+                manufacturerPayload.startsWith(0x02, 0x00, 0x07, 0x00, 0x0D)
+    }
+
+    private fun ByteArray.startsWith(vararg prefix: Int): Boolean =
+        size >= prefix.size && prefix.indices.all { index -> this[index].unsignedByte() == prefix[index] }
 }
 
 internal object SistalkMonsterPubMultiMotorProtocol : SistalkMonsterPubProtocolBase(

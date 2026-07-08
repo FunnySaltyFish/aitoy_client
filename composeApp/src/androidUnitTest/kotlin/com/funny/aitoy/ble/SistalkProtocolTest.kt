@@ -11,7 +11,7 @@ import kotlin.uuid.Uuid
 class SistalkProtocolTest {
     @Test
     fun weightless808UsesDedicatedDualVibrationControl() {
-        val fingerprint = sistalkV2Fingerprint(name = "失重808")
+        val fingerprint = weightless808Fingerprint()
         val protocol = BleProtocolRegistry.resolveNative(fingerprint)
             ?: error("失重808 protocol not resolved")
 
@@ -26,10 +26,18 @@ class SistalkProtocolTest {
         assertEquals(FUNCTION_UUID, assertIs<BleProtocolOperation.SubscribeNotify>(init[1]).characteristicUuid)
 
         val run = protocol.commandsFor(ToyControlAction.DualMotor(mode = 1, internalIntensity = 25, externalIntensity = 70))
-        val runWrite = assertIs<BleProtocolOperation.Write>(run.single())
-        assertEquals(FUNCTION_UUID, runWrite.characteristicUuid)
-        assertFalse(runWrite.withResponse)
+        assertEquals(3, run.size)
+        val startupWrite = assertIs<BleProtocolOperation.Write>(run[0])
+        assertEquals(FUNCTION_UUID, startupWrite.characteristicUuid)
+        assertFalse(startupWrite.withResponse)
+        assertEquals("A098024646", startupWrite.bytes.hexUpper())
+        assertEquals(BleProtocolOperation.Sleep(120L), run[1])
+        val runWrite = assertIs<BleProtocolOperation.Write>(run[2])
         assertEquals("A098021946", runWrite.bytes.hexUpper())
+
+        val lower = protocol.commandsFor(ToyControlAction.DualMotor(mode = 1, internalIntensity = 20, externalIntensity = 30))
+        val lowerWrite = assertIs<BleProtocolOperation.Write>(lower.single())
+        assertEquals("A09802141E", lowerWrite.bytes.hexUpper())
 
         val stop = protocol.commandsFor(ToyControlAction.Stop)
         val stopWrite = assertIs<BleProtocolOperation.Write>(stop.single())
@@ -51,10 +59,43 @@ class SistalkProtocolTest {
         assertEquals("A098024646", runWrite.bytes.hexUpper())
     }
 
+    @Test
+    fun localizedWeightless808NameAlsoMatchesDedicatedRoute() {
+        val protocol = BleProtocolRegistry.resolveNative(
+            sistalkV2Fingerprint(name = "失重808", manufacturerData = "0xffff:02 00 00 00")
+        ) ?: error("localized 失重808 protocol not resolved")
+
+        assertEquals("sistalk_weightless_808", protocol.status.id)
+    }
+
+    @Test
+    fun monsterPubWithoutWeightlessManufacturerKeepsGenericRoute() {
+        val protocol = BleProtocolRegistry.resolveNative(
+            sistalkV2Fingerprint(name = "MonsterPub", manufacturerData = "0x2512:02 00 08 00 0D")
+        ) ?: error("generic MonsterPub V2 protocol not resolved")
+
+        assertEquals("sistalk_monsterparty", protocol.status.id)
+    }
+
+    private fun weightless808Fingerprint(): BleGattFingerprint =
+        sistalkV2Fingerprint(
+            name = "MonsterPub",
+            manufacturerData = "0x2512:02 00 07 00 0D 00 00 00 00 00",
+        )
+
     private fun sistalkV2Fingerprint(name: String): BleGattFingerprint =
         BleGattFingerprint(
             name = name,
             manufacturerData = "0xffff:02 00 00 00",
+            scanRecordHex = "",
+            serviceUuids = setOf(SERVICE_UUID),
+            characteristicUuids = setOf(OP_UUID, FUNCTION_UUID),
+        )
+
+    private fun sistalkV2Fingerprint(name: String, manufacturerData: String): BleGattFingerprint =
+        BleGattFingerprint(
+            name = name,
+            manufacturerData = manufacturerData,
             scanRecordHex = "",
             serviceUuids = setOf(SERVICE_UUID),
             characteristicUuids = setOf(OP_UUID, FUNCTION_UUID),
