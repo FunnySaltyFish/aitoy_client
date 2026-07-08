@@ -786,8 +786,8 @@ private fun DeviceRow(
             )
             val hint = when {
                 device.broadcastProtocolName.isNotBlank() -> "已识别：${device.broadcastProtocolName}"
-                device.connectable -> "可连接"
-                device.serviceUuids.isNotEmpty() -> "可尝试连接"
+                device.controllable && device.connectable -> "可连接"
+                device.controllable -> "可尝试连接"
                 else -> "暂不支持连接"
             }
             Text(
@@ -812,8 +812,8 @@ private fun DeviceRow(
                     runtimeState == ToyRuntimeState.Connected -> "控制"
                     runtimeState == ToyRuntimeState.Connecting -> "连接中"
                     device.broadcastProtocolName.isNotBlank() -> "连接"
-                    device.connectable -> "连接"
-                    device.serviceUuids.isNotEmpty() -> "尝试连接"
+                    device.controllable && device.connectable -> "连接"
+                    device.controllable -> "尝试连接"
                     else -> "暂不支持"
                 }
             )

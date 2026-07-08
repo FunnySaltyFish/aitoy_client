@@ -112,7 +112,12 @@ class AndroidBleController(
                 append(" record=${record?.bytes?.toHexString() ?: "<none>"}")
             }
             if (scanSignatures.put(device.address, signature) != signature) {
-                trace("扫描结果 $signature rssi=${result.rssi}")
+                trace(
+                    "扫描结果 $signature rssi=${result.rssi} controllable=${scannedDevice.controllable}",
+                    type = "ble_scan_result",
+                    uploadPolicy = AiToyTraceUploadPolicy.SessionOnce,
+                    key = "ble_scan_result:${device.address}:${signature.hashCode()}",
+                )
             }
         }
 

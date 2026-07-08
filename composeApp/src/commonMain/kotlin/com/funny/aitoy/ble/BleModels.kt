@@ -11,27 +11,43 @@ data class ScannedBleDevice(
     val broadcastProtocolName: String = "",
 ) {
     val controllable: Boolean
-        get() = !isLikelyAppleContinuityDevice &&
-                (connectable || broadcastProtocolName.isNotBlank() || serviceUuids.isNotEmpty())
+        get() = !isLikelySystemPeripheral &&
+                (broadcastProtocolName.isNotBlank() || hasCustomGattService)
 
     val isLikelyAppleContinuityDevice: Boolean
         get() {
-            val lowerName = name.lowercase()
             val hasContinuityService = serviceUuids.any { it.equals(APPLE_CONTINUITY_SERVICE_UUID, ignoreCase = true) }
             if (hasContinuityService) return true
 
             val hasAppleManufacturerData = manufacturerData.trim().lowercase().startsWith("0x4c:")
-            val looksLikeAppleHost = name == "未命名设备" ||
-                    lowerName.contains("iphone") ||
-                    lowerName.contains("ipad") ||
-                    lowerName.contains("macbook") ||
-                    lowerName.contains("imac")
-            return hasAppleManufacturerData && looksLikeAppleHost
+            return hasAppleManufacturerData
         }
+
+    val isLikelySystemPeripheral: Boolean
+        get() = isLikelyAppleContinuityDevice ||
+                name.equals("Windows Device", ignoreCase = true) ||
+                hasOnlyGenericGattServices
 
     private companion object {
         const val APPLE_CONTINUITY_SERVICE_UUID = "d0611e78-bbb4-4591-a5f8-487910ae4366"
+        val GENERIC_GATT_SERVICE_UUIDS by lazy {
+            setOf(
+                "00001800-0000-1000-8000-00805f9b34fb",
+                "00001801-0000-1000-8000-00805f9b34fb",
+                "0000180a-0000-1000-8000-00805f9b34fb",
+                "0000180f-0000-1000-8000-00805f9b34fb",
+                APPLE_CONTINUITY_SERVICE_UUID,
+            )
+        }
     }
+
+    private val hasCustomGattService: Boolean
+        get() = serviceUuids.any { uuid ->
+            uuid.lowercase() !in GENERIC_GATT_SERVICE_UUIDS
+        }
+
+    private val hasOnlyGenericGattServices: Boolean
+        get() = serviceUuids.isNotEmpty() && !hasCustomGattService
 }
 
 enum class BleConnectionState(val label: String) {

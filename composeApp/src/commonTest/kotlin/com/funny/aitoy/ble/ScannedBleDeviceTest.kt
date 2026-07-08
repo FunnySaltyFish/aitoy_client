@@ -20,7 +20,60 @@ class ScannedBleDeviceTest {
     }
 
     @Test
-    fun chokerBtDeviceCanStillBeAttempted() {
+    fun appleManufacturerWithRandomNameIsNotShownAsControllable() {
+        val device = ScannedBleDevice(
+            name = "NGNXKCJI501zwdMQMt661rTLA",
+            address = "62:CD:63:20:E1:F4",
+            rssi = -60,
+            connectable = true,
+            manufacturerData = "0x4c:0C 0E 00 65 88 F1 A9",
+        )
+
+        assertTrue(device.isLikelyAppleContinuityDevice)
+        assertFalse(device.controllable)
+    }
+
+    @Test
+    fun windowsDeviceIsNotShownAsControllable() {
+        val device = ScannedBleDevice(
+            name = "Windows Device",
+            address = "56:DE:A1:66:06:63",
+            rssi = -70,
+            connectable = true,
+        )
+
+        assertTrue(device.isLikelySystemPeripheral)
+        assertFalse(device.controllable)
+    }
+
+    @Test
+    fun genericGattOnlyDeviceIsNotShownAsControllable() {
+        val device = ScannedBleDevice(
+            name = "未命名设备",
+            address = "01:45:C3:8B:08:6E",
+            rssi = -90,
+            connectable = true,
+            serviceUuids = listOf("00001801-0000-1000-8000-00805f9b34fb"),
+        )
+
+        assertTrue(device.isLikelySystemPeripheral)
+        assertFalse(device.controllable)
+    }
+
+    @Test
+    fun unknownConnectableDeviceIsNotShownAsControllableWithoutToySignal() {
+        val device = ScannedBleDevice(
+            name = "未命名设备",
+            address = "43:31:06:44:A5:AB",
+            rssi = -85,
+            connectable = true,
+        )
+
+        assertFalse(device.controllable)
+    }
+
+    @Test
+    fun chokerBtNameAloneIsNotShownAsControllable() {
         val device = ScannedBleDevice(
             name = "BT003250",
             address = "14:DC:51:01:BF:BC",
@@ -29,6 +82,34 @@ class ScannedBleDeviceTest {
         )
 
         assertFalse(device.isLikelyAppleContinuityDevice)
+        assertFalse(device.controllable)
+    }
+
+    @Test
+    fun chokerBtDeviceWithCustomGattServiceCanStillBeAttempted() {
+        val device = ScannedBleDevice(
+            name = "BT003250",
+            address = "14:DC:51:01:BF:BC",
+            rssi = -84,
+            connectable = true,
+            serviceUuids = listOf("0000fff0-0000-1000-8000-00805f9b34fb"),
+        )
+
+        assertFalse(device.isLikelyAppleContinuityDevice)
+        assertTrue(device.controllable)
+    }
+
+    @Test
+    fun customGattServiceDeviceCanStillBeAttempted() {
+        val device = ScannedBleDevice(
+            name = "Custom Toy",
+            address = "22:33:44:55:66:77",
+            rssi = -64,
+            connectable = true,
+            serviceUuids = listOf("0000fff0-0000-1000-8000-00805f9b34fb"),
+        )
+
+        assertFalse(device.isLikelySystemPeripheral)
         assertTrue(device.controllable)
     }
 }
