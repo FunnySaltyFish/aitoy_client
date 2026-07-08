@@ -878,6 +878,7 @@ class AndroidBleController(
         if (resolvedWriteCharacteristic == null) {
             updateState(BleConnectionState.Error)
             trace("设备没有可写特征", error = true)
+            traceGattSummary(gatt)
             updateProtocolAttempt(
                 ProtocolAttemptStatus(
                     title = "连接失败",
@@ -918,6 +919,7 @@ class AndroidBleController(
             onProtocol(
                 BleProtocolStatus(),
             )
+            traceGattSummary(gatt)
             updateProtocolAttempt(
                 ProtocolAttemptStatus(
                     title = "暂不支持这个设备",
@@ -932,6 +934,25 @@ class AndroidBleController(
             return
         }
         updateState(BleConnectionState.Ready)
+    }
+
+    private fun traceGattSummary(gatt: BluetoothGatt) {
+        val summary = gatt.services
+            .take(8)
+            .joinToString(" | ") { service ->
+                val chars = service.characteristics
+                    .take(8)
+                    .joinToString(",") { characteristic ->
+                        "${characteristic.uuid}/0x${characteristic.properties.toString(16)}"
+                    }
+                "${service.uuid}[$chars]"
+            }
+        trace(
+            "未支持设备 GATT 摘要 serviceCount=${gatt.services.size} services=$summary",
+            type = "ble_unsupported_gatt_summary",
+            uploadPolicy = AiToyTraceUploadPolicy.Always,
+            key = "ble_unsupported_gatt_summary:$operationId",
+        )
     }
 
     private fun finishUnsupportedAfterUserFeedback() {
