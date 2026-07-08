@@ -12,7 +12,7 @@ data class ScannedBleDevice(
 ) {
     val controllable: Boolean
         get() = !isLikelySystemPeripheral &&
-                (broadcastProtocolName.isNotBlank() || hasCustomGattService)
+                (connectable || broadcastProtocolName.isNotBlank() || serviceUuids.isNotEmpty())
 
     val isLikelyAppleContinuityDevice: Boolean
         get() {
@@ -25,29 +25,11 @@ data class ScannedBleDevice(
 
     val isLikelySystemPeripheral: Boolean
         get() = isLikelyAppleContinuityDevice ||
-                name.equals("Windows Device", ignoreCase = true) ||
-                hasOnlyGenericGattServices
+                name.equals("Windows Device", ignoreCase = true)
 
     private companion object {
         const val APPLE_CONTINUITY_SERVICE_UUID = "d0611e78-bbb4-4591-a5f8-487910ae4366"
-        val GENERIC_GATT_SERVICE_UUIDS by lazy {
-            setOf(
-                "00001800-0000-1000-8000-00805f9b34fb",
-                "00001801-0000-1000-8000-00805f9b34fb",
-                "0000180a-0000-1000-8000-00805f9b34fb",
-                "0000180f-0000-1000-8000-00805f9b34fb",
-                APPLE_CONTINUITY_SERVICE_UUID,
-            )
-        }
     }
-
-    private val hasCustomGattService: Boolean
-        get() = serviceUuids.any { uuid ->
-            uuid.lowercase() !in GENERIC_GATT_SERVICE_UUIDS
-        }
-
-    private val hasOnlyGenericGattServices: Boolean
-        get() = serviceUuids.isNotEmpty() && !hasCustomGattService
 }
 
 enum class BleConnectionState(val label: String) {

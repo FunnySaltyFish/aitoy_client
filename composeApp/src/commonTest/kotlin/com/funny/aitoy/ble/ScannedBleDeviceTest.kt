@@ -47,7 +47,7 @@ class ScannedBleDeviceTest {
     }
 
     @Test
-    fun genericGattOnlyDeviceIsNotShownAsControllable() {
+    fun genericGattOnlyConnectableDeviceCanBeAttempted() {
         val device = ScannedBleDevice(
             name = "未命名设备",
             address = "01:45:C3:8B:08:6E",
@@ -56,12 +56,12 @@ class ScannedBleDeviceTest {
             serviceUuids = listOf("00001801-0000-1000-8000-00805f9b34fb"),
         )
 
-        assertTrue(device.isLikelySystemPeripheral)
-        assertFalse(device.controllable)
+        assertFalse(device.isLikelySystemPeripheral)
+        assertTrue(device.controllable)
     }
 
     @Test
-    fun unknownConnectableDeviceIsNotShownAsControllableWithoutToySignal() {
+    fun unknownConnectableDeviceCanBeAttempted() {
         val device = ScannedBleDevice(
             name = "未命名设备",
             address = "43:31:06:44:A5:AB",
@@ -69,11 +69,11 @@ class ScannedBleDeviceTest {
             connectable = true,
         )
 
-        assertFalse(device.controllable)
+        assertTrue(device.controllable)
     }
 
     @Test
-    fun chokerBtNameAloneIsNotShownAsControllable() {
+    fun chokerBtDeviceCanBeAttempted() {
         val device = ScannedBleDevice(
             name = "BT003250",
             address = "14:DC:51:01:BF:BC",
@@ -82,7 +82,7 @@ class ScannedBleDeviceTest {
         )
 
         assertFalse(device.isLikelyAppleContinuityDevice)
-        assertFalse(device.controllable)
+        assertTrue(device.controllable)
     }
 
     @Test
