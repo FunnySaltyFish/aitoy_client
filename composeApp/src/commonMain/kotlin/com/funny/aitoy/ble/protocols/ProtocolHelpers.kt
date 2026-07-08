@@ -130,6 +130,7 @@ fun svakomSl278PairIdentity(manufacturerData: String): String? {
     )
     return when (fingerprint.svakomProductCode()) {
         128, 129 -> "svakom_sl278_pair:sl278k"
+        107, 108 -> "svakom_sl278_pair:sl278b"
         else -> null
     }
 }

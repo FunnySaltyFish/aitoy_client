@@ -187,7 +187,7 @@ internal class SvakomV2Session(
     private fun updateFunction(functionCode: Int, mode: Int, intensity: Int): List<BleProtocolOperation> {
         val function = profile.functions.firstOrNull { it.code == functionCode } ?: profile.defaultFunction
         updateState(function, mode, intensity)
-        return writeCurrentState()
+        return if (profile.writeCurrentStateOnUpdate) writeCurrentState() else listOf(write(function.commandBytes(states[function.code] ?: SvakomV2FunctionState())))
     }
 
     private fun updateState(function: SvakomV2Function, mode: Int, intensity: Int) {
@@ -248,6 +248,7 @@ internal sealed class SvakomV2Profile(
     val status: BleProtocolStatus,
     val functions: List<SvakomV2Function>,
     val defaultFunction: SvakomV2Function = functions.first(),
+    val writeCurrentStateOnUpdate: Boolean = true,
 ) {
     fun functionByType(type: String): SvakomV2Function? =
         functions.firstOrNull { it.type == type }
@@ -346,6 +347,25 @@ internal object SVAKOM_V2_SUCK : SvakomV2Profile(
     functions = listOf(SvakomV2Suck, SvakomV2Heat),
 )
 
+internal object SVAKOM_V2_SL278B_SUCK : SvakomV2Profile(
+    status = svakomV2Status(
+        id = "svakom_sl278_ai_s",
+        displayName = "SVAKOM 分欣(AI 版)",
+        functions = listOf(SvakomV2Suck, SvakomV2Heat),
+    ),
+    functions = listOf(SvakomV2Suck, SvakomV2Heat),
+)
+
+internal object SVAKOM_V2_SL278B_PAIR : SvakomV2Profile(
+    status = svakomV2Status(
+        id = "svakom_sl278_ai_pair",
+        displayName = "SVAKOM 分欣(AI 版)",
+        functions = listOf(SvakomV2Stretch, SvakomV2Vibrate, SvakomV2Suck, SvakomV2Heat),
+    ),
+    functions = listOf(SvakomV2Stretch, SvakomV2Vibrate, SvakomV2Suck, SvakomV2Heat),
+    writeCurrentStateOnUpdate = false,
+)
+
 internal object SVAKOM_V2_SL278K_PAIR : SvakomV2Profile(
     status = svakomV2Status(
         id = "svakom_sl278_plus_pair",
@@ -377,9 +397,12 @@ internal object SVAKOM_V2_VIBRATE_SUCK : SvakomV2Profile(
 
 internal fun Int?.svakomV2Profile(): SvakomV2Profile =
     when (this) {
-        128, 129 -> SVAKOM_V2_SL278K_PAIR
+        128 -> SVAKOM_V2_SL278K_PAIR
+        129 -> SVAKOM_V2_SUCK
+        108 -> SVAKOM_V2_SL278B_PAIR
+        107 -> SVAKOM_V2_SL278B_SUCK
         101, 111, 145, 328 -> SVAKOM_V2_FLAP
-        107, 121 -> SVAKOM_V2_SUCK
+        121 -> SVAKOM_V2_SUCK
         else -> SVAKOM_V2_STRETCH_VIBRATE
     }
 

@@ -1047,10 +1047,15 @@ class BridgeViewModel : ViewModel() {
         val pairIdentity = svakomSl278PairIdentity(manufacturerData) ?: return null
         return deviceConnectionStates.entries.firstOrNull { (address, state) ->
             state == BleConnectionState.Ready &&
-                protocolStatusFor(address).id == "svakom_sl278_plus_pair" &&
+                protocolStatusFor(address).id in SVAKOM_SL278_PAIR_PROTOCOL_IDS &&
                 pairIdentity == svakomSl278PairIdentity(manufacturerDataForAddress(address))
         }?.key
     }
+
+    private val SVAKOM_SL278_PAIR_PROTOCOL_IDS = setOf(
+        "svakom_sl278_plus_pair",
+        "svakom_sl278_ai_pair",
+    )
 
     private fun manufacturerDataForAddress(address: String): String =
         devices.firstOrNull { it.address == address }?.manufacturerData

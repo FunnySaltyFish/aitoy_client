@@ -73,16 +73,44 @@ class SvakomSl278hProtocolTest {
     }
 
     @Test
-    fun sl278kSuctionProductCodeUsesPairProfile() {
+    fun sl278kSuctionProductCodeUsesSuctionProfile() {
         val protocol = BleProtocolRegistry.resolveNative(svakomFingerprint(productCode = 0x81, name = "SL278K"))
             ?: error("SL278K suction product code did not resolve")
 
-        assertEquals("svakom_sl278_plus_pair", protocol.status.id)
-        assertEquals(listOf("伸缩", "震动", "吮吸"), protocol.status.channelNames)
+        assertEquals("svakom_sl278_plus_s", protocol.status.id)
+        assertEquals(listOf("吮吸"), protocol.status.channelNames)
         val operations = protocol.commandsFor(ToyControlAction.Combined(mode = 303, intensity = 8))
-        assertEquals("55080000000000", assertIs<BleProtocolOperation.Write>(operations[0]).bytes.hexUpper())
-        assertEquals("55030000000000", assertIs<BleProtocolOperation.Write>(operations[1]).bytes.hexUpper())
-        assertEquals("55090000030800", assertIs<BleProtocolOperation.Write>(operations[2]).bytes.hexUpper())
+        assertEquals("55090000030800", assertIs<BleProtocolOperation.Write>(operations[0]).bytes.hexUpper())
+        assertEquals("55050000000000", assertIs<BleProtocolOperation.Write>(operations[1]).bytes.hexUpper())
+    }
+
+    @Test
+    fun sl278bLiveVibrationCodeUsesAiPairProfileAndWritesOnlySelectedFunction() {
+        val protocol = BleProtocolRegistry.resolveNative(
+            svakomFingerprint(
+                productCode = 0x6c,
+                name = "SL278B",
+                manufacturerData = "0x32:53 56 41 02 FF 32 26 01 CF D2 B0 FF 32 00 00 6C 19 04 0A 01 00",
+            ),
+        ) ?: error("SL278B AI profile did not resolve")
+
+        assertEquals("svakom_sl278_ai_pair", protocol.status.id)
+        assertEquals("SVAKOM 分欣(AI 版)", protocol.status.displayName)
+        assertEquals(listOf("伸缩", "震动", "吮吸"), protocol.status.channelNames)
+
+        val suction = protocol.commandsFor(ToyControlAction.Combined(mode = 303, intensity = 8))
+        assertEquals(1, suction.size)
+        assertEquals("55090000030800", assertIs<BleProtocolOperation.Write>(suction.single()).bytes.hexUpper())
+    }
+
+    @Test
+    fun sl278bOfficialSuctionCodeUsesAiSuctionProfile() {
+        val protocol = BleProtocolRegistry.resolveNative(svakomFingerprint(productCode = 0x6b, name = "SL278B"))
+            ?: error("SL278B suction profile did not resolve")
+
+        assertEquals("svakom_sl278_ai_s", protocol.status.id)
+        assertEquals("SVAKOM 分欣(AI 版)", protocol.status.displayName)
+        assertEquals(listOf("吮吸"), protocol.status.channelNames)
     }
 
     @Test
