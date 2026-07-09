@@ -9,6 +9,33 @@ import kotlin.uuid.Uuid
 @OptIn(ExperimentalUuidApi::class)
 class SvakomQhSx007eProtocolTest {
     @Test
+    fun sx119bLiveAdvertisementResolvesToOfficialVibrateSuckProfile() {
+        val protocol = BleProtocolRegistry.resolveNative(sx119bFingerprint())
+            ?: error("SX119B protocol not resolved")
+
+        assertEquals("svakom_sx119b", protocol.status.id)
+        assertEquals(ToyControlStyle.IndependentFunctions, protocol.status.controlStyle)
+        assertEquals(listOf("吮吸", "震动"), protocol.status.channelNames)
+        assertEquals(11, protocol.status.modeMax)
+        assertEquals(5, protocol.status.features.first { it.type == "constrict" }.max)
+        assertEquals(10, protocol.status.features.first { it.type == "vibrate" }.max)
+    }
+
+    @Test
+    fun sx119bUsesEightSuckGearsAndElevenVibrateGears() {
+        val protocol = BleProtocolRegistry.resolveNative(sx119bFingerprint())
+            ?: error("SX119B protocol not resolved")
+
+        val suck = protocol.commandsFor(ToyControlAction.Combined(mode = 3 * 100 + 8, intensity = 5))
+        assertEquals(1, suck.size)
+        assertEquals("55090000080500", assertIs<BleProtocolOperation.Write>(suck[0]).bytes.hexUpper())
+
+        val vibrate = protocol.commandsFor(ToyControlAction.Combined(mode = 2 * 100 + 11, intensity = 10))
+        assertEquals(1, vibrate.size)
+        assertEquals("550300000B0A00", assertIs<BleProtocolOperation.Write>(vibrate[0]).bytes.hexUpper())
+    }
+
+    @Test
     fun qhSx007eExposesIndependentVibrateAndSuckPanels() {
         val protocol = BleProtocolRegistry.resolveNative(qhSx007eFingerprint())
             ?: error("QH-SX007E protocol not resolved")
@@ -66,6 +93,19 @@ class SvakomQhSx007eProtocolTest {
         // 缺司康沃厂商数据时不匹配 native 协议。
         assertEquals(null, BleProtocolRegistry.resolveNative(qhSx007eFingerprint(manufacturerData = "")))
     }
+
+    // 真实广播（线上 trace 2026-07-09）：name=SX119B manufacturer=0x3500:53 56 41 02 FF 35 31 CF E7 2A CE FF 35 00 00 39 18 08 1B FF
+    private fun sx119bFingerprint(
+        name: String = "SX119B",
+        manufacturerData: String = "0x3500:53 56 41 02 FF 35 31 CF E7 2A CE FF 35 00 00 39 18 08 1B FF",
+    ) = BleGattFingerprint(
+        name = name,
+        address = "17:31:CF:E7:2A:CE",
+        manufacturerData = manufacturerData,
+        scanRecordHex = "",
+        serviceUuids = setOf(SERVICE_UUID),
+        characteristicUuids = setOf(WRITE_UUID, NOTIFY_UUID),
+    )
 
     // 真实广播（线上 trace 2026-07-07）：name=QH-SX007E manufacturer=0x101:53 56 41 10 F7 FF 24 09 07 12 97 20
     private fun qhSx007eFingerprint(

@@ -104,8 +104,9 @@ internal object SvakomV2MultiFunctionProtocol : BleDeviceProtocol {
     private val SL278_PLUS_NAMES = listOf("sl278b", "sl278f", "sl278h", "sl278i", "sl278j", "sl278k", "sl278u")
 }
 
-// 司康沃「震动 + 吮吸」双功能区设备，按设备名识别（产品码为 OEM 变体，官方 APK 未收录）。
+// 司康沃「震动 + 吮吸」双功能区设备。
 // QH-SX007E / Svakom Alberta：十档震动（强度可调）+ 五档吮吸，走通用 SVAKOM V2 GATT。
+// SX119B：官方产品码 57，八档吮吸（强度 0..5）+ 十一档震动（强度 0..10）。
 internal object SvakomVibrateSuckProtocol : BleDeviceProtocol {
     private val serviceUuid = Uuid.parse("0000ffe0-0000-1000-8000-00805f9b34fb")
     private val writeUuid = Uuid.parse("0000ffe1-0000-1000-8000-00805f9b34fb")
@@ -118,17 +119,26 @@ internal object SvakomVibrateSuckProtocol : BleDeviceProtocol {
         val hasSvakomGatt = fingerprint.serviceUuids.contains(serviceUuid) &&
                 fingerprint.characteristicUuids.contains(writeUuid) &&
                 fingerprint.characteristicUuids.contains(notifyUuid)
-        val isKnownModel = VIBRATE_SUCK_NAMES.any { name.contains(it) }
+        val isKnownModel = vibrateSuckProfile(fingerprint.svakomProductCode(), name) != null
         return isKnownModel && hasSvakomGatt && fingerprint.hasSvakomManufacturerData()
     }
 
     override fun createInstance(fingerprint: BleGattFingerprint): BleDeviceProtocol =
-        SvakomV2Session(SVAKOM_V2_VIBRATE_SUCK)
+        SvakomV2Session(
+            vibrateSuckProfile(
+                fingerprint.svakomProductCode(),
+                fingerprint.name.normalizedDeviceName(),
+            ) ?: SVAKOM_V2_VIBRATE_SUCK,
+        )
 
     override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> = emptyList()
 
-    // 未来其它「震动+吮吸」司康沃设备只需把归一化型号名加进这里即可复用整套面板与帧逻辑。
-    private val VIBRATE_SUCK_NAMES = listOf("qhsx007e")
+    private fun vibrateSuckProfile(productCode: Int?, normalizedName: String): SvakomV2Profile? =
+        when {
+            productCode == 57 || normalizedName.contains("sx119b") -> SVAKOM_V2_SX119B
+            normalizedName.contains("qhsx007e") -> SVAKOM_V2_VIBRATE_SUCK
+            else -> null
+        }
 }
 
 internal class SvakomV2Session(
@@ -282,7 +292,9 @@ internal data class SvakomV2FunctionState(
 // 伸缩、拍打没有强度滑杆：官方固定发 0xFF，只用模式区分动作，intensityMax=1 表示只有开/关。
 internal val SvakomV2Stretch = SvakomV2Function(1, "oscillate", "伸缩", 0x08, modeMax = 7, intensityMax = 1, strengthDriven = false)
 internal val SvakomV2Vibrate = SvakomV2Function(2, "vibrate", "震动", 0x03, modeMax = 10)
+internal val SvakomV2Vibrate11 = SvakomV2Vibrate.copy(modeMax = 11)
 internal val SvakomV2Suck = SvakomV2Function(3, "constrict", "吮吸", 0x09, modeMax = 5)
+internal val SvakomV2Suck8Level5 = SvakomV2Suck.copy(modeMax = 8, intensityMax = 5)
 internal val SvakomV2Flap = SvakomV2Function(4, "flap", "拍打", 0x07, modeMax = 7, intensityMax = 1, strengthDriven = false)
 internal val SvakomV2Heat = SvakomV2Function(5, "heat", "加热", 0x05, modeMax = 1, intensityMax = 1, strengthDriven = false)
 
@@ -396,6 +408,17 @@ internal object SVAKOM_V2_VIBRATE_SUCK : SvakomV2Profile(
         functions = listOf(SvakomV2Vibrate, SvakomV2Suck),
     ),
     functions = listOf(SvakomV2Vibrate, SvakomV2Suck),
+    writeCurrentStateOnUpdate = false,
+)
+
+internal object SVAKOM_V2_SX119B : SvakomV2Profile(
+    status = svakomV2Status(
+        id = "svakom_sx119b",
+        displayName = "SVAKOM SX119B",
+        functions = listOf(SvakomV2Suck8Level5, SvakomV2Vibrate11),
+    ),
+    functions = listOf(SvakomV2Suck8Level5, SvakomV2Vibrate11),
+    defaultFunction = SvakomV2Suck8Level5,
     writeCurrentStateOnUpdate = false,
 )
 
