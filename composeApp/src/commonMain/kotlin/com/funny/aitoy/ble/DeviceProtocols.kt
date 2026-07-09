@@ -94,6 +94,7 @@ internal object BleProtocolRegistry {
                     SistalkMonsterPubMultiMotorProtocol,
                     SistalkMonsterPubDualMotorProtocol,
                     SistalkMonsterPubSingleMotorProtocol,
+                    SvakomZemaliaProtocol,
                     SvakomV2MultiFunctionProtocol,
                     SvakomVibrateSuckProtocol,
                     SvakomSt419Protocol,
