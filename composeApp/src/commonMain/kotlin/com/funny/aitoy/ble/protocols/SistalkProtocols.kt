@@ -281,12 +281,23 @@ internal object SistalkWeightless808Protocol : BleDeviceProtocol {
     private fun BleGattFingerprint.hasWeightless808Identity(): Boolean {
         if (name.normalizedDeviceName().contains("失重808")) return true
         val manufacturerPayload = manufacturerData.toManufacturerDataMap()[0x2512] ?: return false
-        return name.normalizedDeviceName() == "monsterpub" &&
-                manufacturerPayload.startsWith(0x02, 0x00, 0x07, 0x00, 0x0D)
+        return manufacturerPayload.isWeightless808ManufacturerPayload()
     }
 
-    private fun ByteArray.startsWith(vararg prefix: Int): Boolean =
-        size >= prefix.size && prefix.indices.all { index -> this[index].unsignedByte() == prefix[index] }
+    private fun ByteArray.isWeightless808ManufacturerPayload(): Boolean {
+        if (size < 4 || unsignedByteAt(0) != 0x02) return false
+        val productId = unsignedByteAt(2)
+        val variantId = unsignedByteAt(3)
+        val hardwareId = getOrNull(4)?.unsignedByte() ?: 0
+        return when (productId) {
+            0x07 -> variantId == 0x00 && hardwareId == 0x0D
+            0x1C -> variantId == 0x00
+            else -> false
+        }
+    }
+
+    private fun ByteArray.unsignedByteAt(index: Int): Int =
+        this[index].unsignedByte()
 }
 
 internal object SistalkMonsterPubMultiMotorProtocol : SistalkMonsterPubProtocolBase(

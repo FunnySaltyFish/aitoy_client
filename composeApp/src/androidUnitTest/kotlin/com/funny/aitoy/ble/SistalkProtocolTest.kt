@@ -69,6 +69,31 @@ class SistalkProtocolTest {
     }
 
     @Test
+    fun catTailWeightless808FingerprintMatchesDedicatedRoute() {
+        val protocol = BleProtocolRegistry.resolveNative(
+            sistalkV2Fingerprint(name = "猫尾巴", manufacturerData = "0x2512:02 00 1C 00 00 00 00 00 00 00")
+        ) ?: error("猫尾巴 失重808 protocol not resolved")
+
+        assertEquals("sistalk_weightless_808", protocol.status.id)
+        val run = protocol.commandsFor(ToyControlAction.Combined(mode = 1, intensity = 23))
+        assertEquals(3, run.size)
+        val startupWrite = assertIs<BleProtocolOperation.Write>(run[0])
+        assertEquals("A098024600", startupWrite.bytes.hexUpper())
+        assertEquals(BleProtocolOperation.Sleep(120L), run[1])
+        val targetWrite = assertIs<BleProtocolOperation.Write>(run[2])
+        assertEquals("A098021700", targetWrite.bytes.hexUpper())
+    }
+
+    @Test
+    fun weightless808ProductIdMatchesEvenWhenAdvertisedNameChanges() {
+        val protocol = BleProtocolRegistry.resolveNative(
+            sistalkV2Fingerprint(name = "SISTALK", manufacturerData = "0x2512:02 00 1C 00 00 00 00 00 00 00")
+        ) ?: error("renamed 失重808 protocol not resolved")
+
+        assertEquals("sistalk_weightless_808", protocol.status.id)
+    }
+
+    @Test
     fun monsterPubWithoutWeightlessManufacturerKeepsGenericRoute() {
         val protocol = BleProtocolRegistry.resolveNative(
             sistalkV2Fingerprint(name = "MonsterPub", manufacturerData = "0x2512:02 00 08 00 0D")
