@@ -134,9 +134,18 @@ internal object MizzzeeXhtkjProtocol : BleDeviceProtocol {
 }
 
 internal object XiuxiudaOfficialProtocol : BleDeviceProtocol {
-    private val serviceUuid = Uuid.parse("53300001-0023-4bd4-bbd5-a6920e4c5653")
-    private val notifyUuid = Uuid.parse("53300002-0023-4bd4-bbd5-a6920e4c5653")
-    private val writeUuid = Uuid.parse("53300003-0023-4bd4-bbd5-a6920e4c5653")
+    private val routes = listOf(
+        XiuxiudaOfficialRoute(
+            serviceUuid = Uuid.parse("53300001-0023-4bd4-bbd5-a6920e4c5653"),
+            notifyUuid = Uuid.parse("53300002-0023-4bd4-bbd5-a6920e4c5653"),
+            writeUuid = Uuid.parse("53300003-0023-4bd4-bbd5-a6920e4c5653"),
+        ),
+        XiuxiudaOfficialRoute(
+            serviceUuid = Uuid.parse("00000001-0000-1000-8000-00805f9b34fb"),
+            notifyUuid = Uuid.parse("00000002-0000-1000-8000-00805f9b34fb"),
+            writeUuid = Uuid.parse("00000003-0000-1000-8000-00805f9b34fb"),
+        ),
+    )
     private val highPowerNames = setOf(
         "XXD-Lush12C",
         "XXD-Lush12D",
@@ -171,27 +180,39 @@ internal object XiuxiudaOfficialProtocol : BleDeviceProtocol {
         val name = fingerprint.name.normalizedDeviceName()
         return name.startsWith("xxdlush") &&
                 fingerprint.address.xiuxiudaAddressPrefix() != null &&
-                fingerprint.serviceUuids.contains(serviceUuid) &&
-                fingerprint.characteristicUuids.contains(writeUuid)
+                findRoute(fingerprint) != null
     }
 
     override fun initialize(fingerprint: BleGattFingerprint): List<BleProtocolOperation> =
+        initialize(
+            fingerprint = fingerprint,
+            route = requireNotNull(findRoute(fingerprint)) { "羞羞哒官方协议缺少可用通道" },
+        )
+
+    private fun initialize(
+        fingerprint: BleGattFingerprint,
+        route: XiuxiudaOfficialRoute,
+    ): List<BleProtocolOperation> =
         buildList {
-            if (fingerprint.characteristicUuids.contains(notifyUuid)) {
-                add(BleProtocolOperation.SubscribeNotify(notifyUuid))
-                add(write(fingerprint, command(0x65, 0x3D, 0x33, 0x01)))
+            if (fingerprint.characteristicUuids.contains(route.notifyUuid)) {
+                add(BleProtocolOperation.SubscribeNotify(route.notifyUuid))
+                add(write(fingerprint, route, command(0x65, 0x3D, 0x33, 0x01)))
                 add(BleProtocolOperation.Sleep(300))
             }
-            add(write(fingerprint, controlCommand(fingerprint.name, 0)))
+            add(write(fingerprint, route, controlCommand(fingerprint.name, 0)))
         }
 
     override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> = emptyList()
 
     override fun createInstance(fingerprint: BleGattFingerprint): BleDeviceProtocol =
-        Session(fingerprint)
+        Session(
+            fingerprint = fingerprint,
+            route = requireNotNull(findRoute(fingerprint)) { "羞羞哒官方协议缺少可用通道" },
+        )
 
     private class Session(
         private val fingerprint: BleGattFingerprint,
+        private val route: XiuxiudaOfficialRoute,
     ) : BleDeviceProtocol {
         override val status: BleProtocolStatus = XiuxiudaOfficialProtocol.status
 
@@ -199,15 +220,15 @@ internal object XiuxiudaOfficialProtocol : BleDeviceProtocol {
             XiuxiudaOfficialProtocol.matches(fingerprint)
 
         override fun initialize(fingerprint: BleGattFingerprint): List<BleProtocolOperation> =
-            XiuxiudaOfficialProtocol.initialize(fingerprint)
+            XiuxiudaOfficialProtocol.initialize(fingerprint, route)
 
         override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
             when (action) {
-                is ToyControlAction.Intensity -> listOf(write(fingerprint, controlCommand(fingerprint.name, action.value)))
-                is ToyControlAction.Combined -> listOf(write(fingerprint, controlCommand(fingerprint.name, action.intensity)))
-                is ToyControlAction.DualMotor -> listOf(write(fingerprint, controlCommand(fingerprint.name, action.strongestIntensity(status.intensityMax))))
-                is ToyControlAction.Pattern -> listOf(write(fingerprint, controlCommand(fingerprint.name, status.intensityMax)))
-                ToyControlAction.Stop -> listOf(write(fingerprint, controlCommand(fingerprint.name, 0)))
+                is ToyControlAction.Intensity -> listOf(write(fingerprint, route, controlCommand(fingerprint.name, action.value)))
+                is ToyControlAction.Combined -> listOf(write(fingerprint, route, controlCommand(fingerprint.name, action.intensity)))
+                is ToyControlAction.DualMotor -> listOf(write(fingerprint, route, controlCommand(fingerprint.name, action.strongestIntensity(status.intensityMax))))
+                is ToyControlAction.Pattern -> listOf(write(fingerprint, route, controlCommand(fingerprint.name, status.intensityMax)))
+                ToyControlAction.Stop -> listOf(write(fingerprint, route, controlCommand(fingerprint.name, 0)))
             }
     }
 
@@ -221,15 +242,31 @@ internal object XiuxiudaOfficialProtocol : BleDeviceProtocol {
         }
     }
 
-    private fun write(fingerprint: BleGattFingerprint, command: IntArray): BleProtocolOperation.Write =
+    private fun write(
+        fingerprint: BleGattFingerprint,
+        route: XiuxiudaOfficialRoute,
+        command: IntArray,
+    ): BleProtocolOperation.Write =
         BleProtocolOperation.Write(
-            characteristicUuid = writeUuid,
+            characteristicUuid = route.writeUuid,
             bytes = fingerprint.address.xiuxiudaPacket(command),
             withResponse = false,
         )
 
     private fun command(logo: Int, category1: Int, category2: Int, gear: Int): IntArray =
         intArrayOf(logo, category1, category2, gear)
+
+    private fun findRoute(fingerprint: BleGattFingerprint): XiuxiudaOfficialRoute? =
+        routes.firstOrNull { route ->
+            fingerprint.serviceUuids.contains(route.serviceUuid) &&
+                    fingerprint.characteristicUuids.contains(route.writeUuid)
+        }
+
+    private data class XiuxiudaOfficialRoute(
+        val serviceUuid: Uuid,
+        val notifyUuid: Uuid,
+        val writeUuid: Uuid,
+    )
 }
 
 internal object SenseeCcpa10S2Protocol : BleDeviceProtocol {
