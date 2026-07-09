@@ -89,6 +89,8 @@ data class ManagedToy(
 private fun ManagedToy.lastSeenKey(saved: List<RememberedToy>): Long =
     saved.firstOrNull { it.address == address }?.lastSeenAt ?: 0L
 
+private const val EXCLUSIVE_INTENSITY_MODE = 0
+
 data class AppUpdateState(
     val checked: Boolean = false,
     val updateAvailable: Boolean = false,
@@ -603,9 +605,18 @@ class BridgeViewModel : ViewModel() {
 
     fun updateIntensity(value: Int) {
         val next = value.coerceIn(0, protocolStatus.intensityMax.coerceAtLeast(1))
-        if (intensity == next) return
+        val usesExclusiveIntensity = protocolStatus.controlStyle == ToyControlStyle.ExclusivePatternOrIntensity
+        if (intensity == next && !(usesExclusiveIntensity && mode != EXCLUSIVE_INTENSITY_MODE)) return
         intensity = next
-        selectedAddress.takeIf { it.isNotBlank() }?.let { deviceIntensities[it] = next }
+        if (usesExclusiveIntensity) {
+            mode = EXCLUSIVE_INTENSITY_MODE
+        }
+        selectedAddress.takeIf { it.isNotBlank() }?.let {
+            deviceIntensities[it] = next
+            if (usesExclusiveIntensity) {
+                deviceModes[it] = EXCLUSIVE_INTENSITY_MODE
+            }
+        }
         scheduleControlTrial(intensityAction(next))
     }
 
@@ -1308,10 +1319,18 @@ class BridgeViewModel : ViewModel() {
                             keepAliveDurationSec = if (unlimited) null else actionDurationSec,
                         )
                         deviceIntensities[address] = mappedIntensity
+                        if (status.controlStyle == ToyControlStyle.ExclusivePatternOrIntensity) {
+                            deviceModes[address] = EXCLUSIVE_INTENSITY_MODE
+                        }
                         if (status.supportsDualIntensity()) {
                             deviceSecondaryIntensities[address] = mappedIntensity
                         }
-                        if (address == selectedAddress) intensity = mappedIntensity
+                        if (address == selectedAddress) {
+                            intensity = mappedIntensity
+                            if (status.controlStyle == ToyControlStyle.ExclusivePatternOrIntensity) {
+                                mode = EXCLUSIVE_INTENSITY_MODE
+                            }
+                        }
                         if (address == selectedAddress && status.supportsDualIntensity()) {
                             secondaryIntensity = mappedIntensity
                         }
@@ -1459,23 +1478,28 @@ class BridgeViewModel : ViewModel() {
             ToyControlStyle.PatternOnly -> ToyControlAction.Pattern(mappedMode)
             ToyControlStyle.IntensityOnly -> ToyControlAction.Intensity(mappedIntensity)
             ToyControlStyle.DualIntensityOnly -> ToyControlAction.DualMotor(1, mappedIntensity, mappedIntensity)
-            ToyControlStyle.ExclusivePatternOrIntensity -> {
-                if (mappedIntensity > 0) ToyControlAction.Intensity(mappedIntensity)
-                else ToyControlAction.Pattern(mappedMode)
-            }
+            ToyControlStyle.ExclusivePatternOrIntensity -> ToyControlAction.Intensity(mappedIntensity)
             ToyControlStyle.CombinedPatternAndIntensity -> ToyControlAction.Combined(mappedMode, mappedIntensity)
             ToyControlStyle.PatternAndDualIntensity ->
                 ToyControlAction.DualMotor(mappedMode, mappedIntensity, mappedIntensity)
             ToyControlStyle.IndependentFunctions -> ToyControlAction.Combined(mappedMode, mappedIntensity)
         }
         sendToyAction(action, autoStopSec, address, scheduleAutoStop, keepAliveDurationSec)
-        deviceModes[address] = mappedMode
+        deviceModes[address] = if (status.controlStyle == ToyControlStyle.ExclusivePatternOrIntensity) {
+            EXCLUSIVE_INTENSITY_MODE
+        } else {
+            mappedMode
+        }
         deviceIntensities[address] = mappedIntensity
         if (status.supportsDualIntensity()) {
             deviceSecondaryIntensities[address] = mappedIntensity
         }
         if (address == selectedAddress) {
-            mode = mappedMode
+            mode = if (status.controlStyle == ToyControlStyle.ExclusivePatternOrIntensity) {
+                EXCLUSIVE_INTENSITY_MODE
+            } else {
+                mappedMode
+            }
             intensity = mappedIntensity
             if (status.supportsDualIntensity()) {
                 secondaryIntensity = mappedIntensity
@@ -1672,6 +1696,9 @@ class BridgeViewModel : ViewModel() {
     }
 
     private fun modeLabel(status: BleProtocolStatus, targetMode: Int): String {
+        if (status.controlStyle == ToyControlStyle.ExclusivePatternOrIntensity && targetMode == EXCLUSIVE_INTENSITY_MODE) {
+            return if (status.id == "jiuai_jellyfish_stroker") "当前为匀速伸缩" else "当前为${status.intensityLabel}"
+        }
         val base = status.modeLabel.ifBlank { "模式" }
         val name = status.modeNames.getOrNull(targetMode - 1)
         return if (name.isNullOrBlank()) "$base $targetMode" else "$base $targetMode：$name"

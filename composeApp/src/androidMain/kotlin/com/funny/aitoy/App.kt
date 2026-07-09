@@ -837,7 +837,7 @@ private fun ControlRoom(vm: BridgeViewModel, toy: ManagedToy? = null) {
             text = when {
                 !status.controllable -> "还没有可用的控制指令。"
                 status.controlStyle == ToyControlStyle.ExclusivePatternOrIntensity ->
-                    "节奏和强度是两套独立控制。"
+                    "节奏和强度一次只能选择一种。"
                 status.controlStyle == ToyControlStyle.DualIntensityOnly ->
                     "分别调节两个部位。"
                 status.controlStyle == ToyControlStyle.PatternAndDualIntensity ->
@@ -1037,7 +1037,11 @@ private fun IntensityControl(
     }
     Spacer(Modifier.height(6.dp))
     Text(
-        "震动控制会持续保持当前强度，直到调为 0 或点击立即停止；正常情况下不会主动停止。如立马停止，可加群反馈。",
+        if (status.controlStyle == ToyControlStyle.ExclusivePatternOrIntensity) {
+            "${status.intensityLabel}会切换到单独控制，选择${status.modeLabel}或点击立即停止即可退出。"
+        } else {
+            "${status.intensityLabel}会保持当前设置，调为 0 或点击立即停止即可停下。"
+        },
         color = TextSoft,
         style = MaterialTheme.typography.bodySmall,
     )
