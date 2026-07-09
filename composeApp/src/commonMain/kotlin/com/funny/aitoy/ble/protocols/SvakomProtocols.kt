@@ -104,9 +104,11 @@ internal object SvakomV2MultiFunctionProtocol : BleDeviceProtocol {
     private val SL278_PLUS_NAMES = listOf("sl278b", "sl278f", "sl278h", "sl278i", "sl278j", "sl278k", "sl278u")
 }
 
-// 司康沃「震动 + 吮吸」双功能区设备。
-// QH-SX007E / Svakom Alberta：十档震动（强度可调）+ 五档吮吸，走通用 SVAKOM V2 GATT。
-// SX119B：官方产品码 57，八档吮吸（强度 0..5）+ 十一档震动（强度 0..10）。
+// 司康沃按官方产品码分流的通用 V2 多功能 matcher（走通用 SVAKOM V2 GATT FFE0/FFE1/FFE2）。
+// QH-SX007E / Svakom Alberta：十档震动（强度可调）+ 五档吮吸。
+// SX119B（波波鸟）：官方产品码 57，八档吮吸（强度 0..5）+ 十一档震动（强度 0..10）。
+// SX589A（青提）：官方产品码 59，与 SX119B 同构（case 45/46 fall-through）。
+// ST462A（口口甜）：官方产品码 313，舔（10 档）+ 吮吸（3 档无强度）+ 震动（10 档）三功能区。
 internal object SvakomVibrateSuckProtocol : BleDeviceProtocol {
     private val serviceUuid = Uuid.parse("0000ffe0-0000-1000-8000-00805f9b34fb")
     private val writeUuid = Uuid.parse("0000ffe1-0000-1000-8000-00805f9b34fb")
@@ -136,6 +138,8 @@ internal object SvakomVibrateSuckProtocol : BleDeviceProtocol {
     private fun vibrateSuckProfile(productCode: Int?, normalizedName: String): SvakomV2Profile? =
         when {
             productCode == 57 || normalizedName.contains("sx119b") -> SVAKOM_V2_SX119B
+            productCode == 59 || normalizedName.contains("sx589a") -> SVAKOM_V2_SX589A
+            productCode == 313 || normalizedName.contains("st462a") -> SVAKOM_V2_ST462A
             normalizedName.contains("qhsx007e") -> SVAKOM_V2_VIBRATE_SUCK
             else -> null
         }
@@ -295,14 +299,19 @@ internal val SvakomV2Vibrate = SvakomV2Function(2, "vibrate", "震动", 0x03, mo
 internal val SvakomV2Vibrate11 = SvakomV2Vibrate.copy(modeMax = 11)
 internal val SvakomV2Suck = SvakomV2Function(3, "constrict", "吮吸", 0x09, modeMax = 5)
 internal val SvakomV2Suck8Level5 = SvakomV2Suck.copy(modeMax = 8, intensityMax = 5)
+// ST462A 官方 case 82 的吮吸：setSuck_num(3) 且未 setSuck_strong_max，没有强度滑杆，只有 3 档模式启停。
+internal val SvakomV2Suck3Mode = SvakomV2Function(3, "constrict", "吮吸", 0x09, modeMax = 3, intensityMax = 1, strengthDriven = false)
 internal val SvakomV2Flap = SvakomV2Function(4, "flap", "拍打", 0x07, modeMax = 7, intensityMax = 1, strengthDriven = false)
 internal val SvakomV2Heat = SvakomV2Function(5, "heat", "加热", 0x05, modeMax = 1, intensityMax = 1, strengthDriven = false)
+// 舔（LICKING）：官方 AutoV2ModeView case 5 命令字 0x14(=20)，帧仍是通用 55 CMD 00 00 <档> <强> 00。
+// ST462A 官方 case 82 的舔为 setLicking_num(10) + setLicking_strong_max(10)，10 档 + 0..10 强度滑杆。
+internal val SvakomV2Lick = SvakomV2Function(6, "lick", "舔", 0x14, modeMax = 10)
 
 /** 多功能协议里加热功能的固定功能码。 */
 const val SvakomV2HeatFunctionCode: Int = 5
 
 internal val svakomV2FunctionsByType: Map<String, SvakomV2Function> =
-    listOf(SvakomV2Stretch, SvakomV2Vibrate, SvakomV2Suck, SvakomV2Flap, SvakomV2Heat)
+    listOf(SvakomV2Stretch, SvakomV2Vibrate, SvakomV2Suck, SvakomV2Flap, SvakomV2Heat, SvakomV2Lick)
         .associateBy { it.type }
 
 /** 按功能类型返回多功能协议的功能码；未知类型回退到伸缩。 */
@@ -411,6 +420,7 @@ internal object SVAKOM_V2_VIBRATE_SUCK : SvakomV2Profile(
     writeCurrentStateOnUpdate = false,
 )
 
+// SX119B（波波鸟）：官方 case 45，八档吮吸（强度 0..5）+ 十一档震动（强度 0..10）。
 internal object SVAKOM_V2_SX119B : SvakomV2Profile(
     status = svakomV2Status(
         id = "svakom_sx119b",
@@ -419,6 +429,32 @@ internal object SVAKOM_V2_SX119B : SvakomV2Profile(
     ),
     functions = listOf(SvakomV2Suck8Level5, SvakomV2Vibrate11),
     defaultFunction = SvakomV2Suck8Level5,
+    writeCurrentStateOnUpdate = false,
+)
+
+// SX589A（青提）：官方 case 46 与 case 45（SX119B）fall-through 共用同一功能表，
+// 八档吮吸（强度 0..5）+ 十一档震动（强度 0..10）；产品码 59，独立 id 便于溯源与状态区分。
+internal object SVAKOM_V2_SX589A : SvakomV2Profile(
+    status = svakomV2Status(
+        id = "svakom_sx589a",
+        displayName = "SVAKOM SX589A",
+        functions = listOf(SvakomV2Suck8Level5, SvakomV2Vibrate11),
+    ),
+    functions = listOf(SvakomV2Suck8Level5, SvakomV2Vibrate11),
+    defaultFunction = SvakomV2Suck8Level5,
+    writeCurrentStateOnUpdate = false,
+)
+
+// ST462A（口口甜）：官方 case 82，三功能区——舔（10 档 + 强度 0..10）、吮吸（3 档无强度）、震动（10 档 + 强度 0..10）。
+// 官方每个功能是独立 View、单帧下发，故 writeCurrentStateOnUpdate=false：操作哪个功能就只写该功能帧。
+internal object SVAKOM_V2_ST462A : SvakomV2Profile(
+    status = svakomV2Status(
+        id = "svakom_st462a",
+        displayName = "SVAKOM ST462A",
+        functions = listOf(SvakomV2Lick, SvakomV2Suck3Mode, SvakomV2Vibrate),
+    ),
+    functions = listOf(SvakomV2Lick, SvakomV2Suck3Mode, SvakomV2Vibrate),
+    defaultFunction = SvakomV2Lick,
     writeCurrentStateOnUpdate = false,
 )
 
