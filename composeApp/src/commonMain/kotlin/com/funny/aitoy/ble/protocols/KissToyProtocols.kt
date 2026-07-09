@@ -557,6 +557,29 @@ internal object KissToyProtocol : BleDeviceProtocol {
         return knownName || hasNotify
     }
 
+    // 迷路系列（QCPW/QCSW/QCVW/QCFW）走历史通道时马达静摩擦大，从静止直接给小 PWM 转不起来，
+    // 需要冷启动脉冲；其余历史设备沿用无脉冲逻辑，保持既有真机反馈。
+    override fun createInstance(fingerprint: BleGattFingerprint): BleDeviceProtocol =
+        KissToyHistoricalSession(status, kickStart = fingerprint.needsKissToyKickStart())
+
+    override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
+        KissToyHistoricalSession(status, kickStart = false).commandsFor(action)
+}
+
+// 历史 Kisstoy Lost / 迷路通道的有状态会话：记录每个电机命令字节（0x31/0x32/0x71）的上次强度，
+// 以便判断某通道是否“从静止启动”，只有这种情况才补冷启动脉冲。
+internal class KissToyHistoricalSession(
+    override val status: BleProtocolStatus,
+    private val kickStart: Boolean,
+) : BleDeviceProtocol {
+    private val lastIntensityByCommand = mutableMapOf(
+        0x31 to 0,
+        0x32 to 0,
+        0x71 to 0,
+    )
+
+    override fun matches(fingerprint: BleGattFingerprint): Boolean = false
+
     override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
         when (action) {
             is ToyControlAction.Combined -> run(action.mode, action.intensity)
@@ -570,40 +593,74 @@ internal object KissToyProtocol : BleDeviceProtocol {
         val normalizedMode = mode.coerceIn(1, status.modeMax)
         val normalizedIntensity = intensity.coerceIn(0, 100)
         val clearCommands = when (normalizedMode) {
-            1 -> listOf(command(0x32, 0), command(0x71, 0))
-            2 -> listOf(command(0x31, 0), command(0x71, 0))
-            3 -> listOf(command(0x31, 0), command(0x32, 0))
-            else -> listOf(command(0x71, 0))
-        }
+            1 -> listOf(clearMotor(0x32), clearMotor(0x71))
+            2 -> listOf(clearMotor(0x31), clearMotor(0x71))
+            3 -> listOf(clearMotor(0x31), clearMotor(0x32))
+            else -> listOf(clearMotor(0x71))
+        }.flatten()
         val runCommands = if (normalizedMode == 4) {
-            listOf(
-                command(0x32, normalizedIntensity),
-                command(0x31, normalizedIntensity),
-            )
+            driveMotor(0x32, normalizedIntensity) + driveMotor(0x31, normalizedIntensity)
         } else {
-            listOf(commandForMode(normalizedMode, normalizedIntensity))
+            driveMotor(motorCommandForMode(normalizedMode), normalizedIntensity)
         }
         return clearCommands + runCommands
     }
 
-    private fun stop(): List<BleProtocolOperation> =
-        listOf(
+    private fun stop(): List<BleProtocolOperation> {
+        lastIntensityByCommand.keys.forEach { lastIntensityByCommand[it] = 0 }
+        return listOf(
             command(0x40, 0, 0),
             command(0x31, 0),
             command(0x32, 0),
             command(0x71, 0),
         )
+    }
+
+    private fun clearMotor(motorCommand: Int): List<BleProtocolOperation> {
+        lastIntensityByCommand[motorCommand] = 0
+        return listOf(command(motorCommand, 0))
+    }
+
+    // 冷启动脉冲：迷路系列且该电机上次强度为 0（从静止启动）且目标落在启动阈值以下时，
+    // 先满档踢转、短暂等待，再落到目标强度；目标已够大或马达仍在转（微调）时直接写目标，避免顿挫。
+    private fun driveMotor(motorCommand: Int, intensity: Int): List<BleProtocolOperation> {
+        val previous = lastIntensityByCommand[motorCommand] ?: 0
+        val needsPulse = kickStart &&
+            previous == 0 &&
+            intensity in 1 until KISS_TOY_KICK_START_THRESHOLD
+        lastIntensityByCommand[motorCommand] = intensity
+        return if (needsPulse) {
+            listOf(
+                command(motorCommand, KISS_TOY_KICK_START_PULSE),
+                BleProtocolOperation.Sleep(KISS_TOY_KICK_START_DELAY_MS),
+                command(motorCommand, intensity),
+            )
+        } else {
+            listOf(command(motorCommand, intensity))
+        }
+    }
 
     private fun command(command: Int, first: Int, second: Int = 0): BleProtocolOperation.Write =
         kissToyHistoricalCommand(command, first, second)
 
-    private fun commandForMode(mode: Int, intensity: Int): BleProtocolOperation.Write =
+    private fun motorCommandForMode(mode: Int): Int =
         when (mode) {
-            1 -> command(0x31, intensity)
-            2 -> command(0x32, intensity)
-            3 -> command(0x71, intensity)
-            else -> command(0x31, intensity)
+            1 -> 0x31
+            2 -> 0x32
+            3 -> 0x71
+            else -> 0x31
         }
+}
+
+// 迷路系列历史通道冷启动脉冲参数：满档 100 踢转、持续 180ms，仅在目标强度低于该阈值时触发。
+private const val KISS_TOY_KICK_START_THRESHOLD = 50
+private const val KISS_TOY_KICK_START_PULSE = 100
+private const val KISS_TOY_KICK_START_DELAY_MS = 180L
+internal val KISS_TOY_MILU_KICK_START_CODES = setOf("QCPW", "QCSW", "QCVW", "QCFW")
+
+internal fun BleGattFingerprint.needsKissToyKickStart(): Boolean {
+    val normalizedName = name.normalizedDeviceName()
+    return KISS_TOY_MILU_KICK_START_CODES.any { normalizedName == it.normalizedDeviceName() }
 }
 
 internal fun BleGattFingerprint.hasKissToyHistoricalGattRoute(): Boolean =

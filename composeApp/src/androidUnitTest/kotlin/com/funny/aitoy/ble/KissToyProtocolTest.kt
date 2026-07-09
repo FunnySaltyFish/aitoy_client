@@ -12,6 +12,7 @@ import kotlin.uuid.Uuid
 class KissToyProtocolTest {
     @Test
     fun existingKissToyProtocolKeepsHistoricalControlShape() {
+        // 非迷路历史设备（JY11）保持原有无脉冲控制形状：清零其它通道 + 写目标通道 = 3 帧。
         val protocol = BleProtocolRegistry.resolveNative(kissToyFingerprint()) ?: error("KissToy protocol not resolved")
 
         assertEquals("kisstoy_gatt", protocol.status.id)
@@ -26,6 +27,46 @@ class KissToyProtocolTest {
             assertEquals(KISSTOY_WRITE_UUID, write.characteristicUuid)
             assertEquals(true, write.withResponse)
         }
+    }
+
+    @Test
+    fun miluKissToyGattColdStartInsertsKickStartPulse() {
+        // 迷路系列（QCPW）从静止启动到低强度：补满档脉冲 + Sleep + 目标帧，克服马达静摩擦。
+        val protocol = BleProtocolRegistry.resolveNative(kissToyFingerprint(name = "QCPW"))
+            ?: error("KissToy 迷路 protocol not resolved")
+        assertEquals("kisstoy_gatt", protocol.status.id)
+
+        // mode=1 主电机从 0 拉到 15（< 阈值 50）：clear 2 帧 + 脉冲 100 + Sleep + 目标 15 = 5 帧。
+        val coldStart = protocol.commandsFor(ToyControlAction.Combined(mode = 1, intensity = 15))
+        assertEquals(5, coldStart.size)
+        assertIs<BleProtocolOperation.Write>(coldStart[0])
+        assertIs<BleProtocolOperation.Write>(coldStart[1])
+        val pulse = assertIs<BleProtocolOperation.Write>(coldStart[2])
+        assertEquals(KISSTOY_WRITE_UUID, pulse.characteristicUuid)
+        assertEquals(kissToyHistoricalCommand(0x31, 100).bytes.toList(), pulse.bytes.toList())
+        assertEquals(180L, assertIs<BleProtocolOperation.Sleep>(coldStart[3]).millis)
+        val target = assertIs<BleProtocolOperation.Write>(coldStart[4])
+        assertEquals(kissToyHistoricalCommand(0x31, 15).bytes.toList(), target.bytes.toList())
+    }
+
+    @Test
+    fun miluKissToyGattSkipsPulseWhenAlreadyRunningOrHighTarget() {
+        val protocol = BleProtocolRegistry.resolveNative(kissToyFingerprint(name = "QCPW"))
+            ?: error("KissToy 迷路 protocol not resolved")
+
+        // 目标 >= 阈值 50：不插脉冲，clear 2 帧 + 目标 1 帧 = 3。
+        val highTarget = protocol.commandsFor(ToyControlAction.Combined(mode = 1, intensity = 80))
+        assertEquals(3, highTarget.size)
+
+        // 马达已在转（上一步 80），再微调到 15：不插脉冲，仍为 3 帧。
+        val fineTune = protocol.commandsFor(ToyControlAction.Combined(mode = 1, intensity = 15))
+        assertEquals(3, fineTune.size)
+
+        // 停止后回到静止，再从 0 拉到 15：重新踢转，5 帧含脉冲。
+        protocol.commandsFor(ToyControlAction.Stop)
+        val restart = protocol.commandsFor(ToyControlAction.Combined(mode = 1, intensity = 15))
+        assertEquals(5, restart.size)
+        assertIs<BleProtocolOperation.Sleep>(restart[3])
     }
 
     @Test
@@ -446,8 +487,8 @@ class KissToyProtocolTest {
         return chunked(2).map { it.toInt(16).toByte() }.toByteArray()
     }
 
-    private fun kissToyFingerprint() = BleGattFingerprint(
-        name = "QCPW",
+    private fun kissToyFingerprint(name: String = "JY11") = BleGattFingerprint(
+        name = name,
         manufacturerData = "",
         scanRecordHex = "",
         serviceUuids = setOf(KISSTOY_SERVICE_UUID),
