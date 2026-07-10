@@ -137,6 +137,21 @@ class SvakomQhSx007eProtocolTest {
     }
 
     @Test
+    fun pairedDualWritesSuckThenVibrateWithASettlingInterval() {
+        val protocol = BleProtocolRegistry.resolveNative(qhSx007eFingerprint())
+            ?: error("QH-SX007E protocol not resolved")
+
+        // `dual` 的内侧对应吮吸、外侧对应震动；两个独立帧之间必须留出间隔。
+        val operations = protocol.commandsFor(
+            ToyControlAction.DualMotor(mode = 3, internalIntensity = 5, externalIntensity = 6),
+        )
+        assertEquals(3, operations.size)
+        assertEquals("55090000030500", assertIs<BleProtocolOperation.Write>(operations[0]).bytes.hexUpper())
+        assertEquals(BleProtocolOperation.Sleep(500L), operations[1])
+        assertEquals("55030000030600", assertIs<BleProtocolOperation.Write>(operations[2]).bytes.hexUpper())
+    }
+
+    @Test
     fun vibrateChannelWritesOnlyItsOwnFrameWithGearInByte4AndStrengthInByte5() {
         val protocol = BleProtocolRegistry.resolveNative(qhSx007eFingerprint())
             ?: error("QH-SX007E protocol not resolved")

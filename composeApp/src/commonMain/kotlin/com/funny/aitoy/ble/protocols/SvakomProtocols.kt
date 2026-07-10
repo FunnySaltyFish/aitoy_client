@@ -186,6 +186,20 @@ internal class SvakomV2Session(
     }
 
     private fun updateDualMotor(action: ToyControlAction.DualMotor): List<BleProtocolOperation> {
+        profile.pairedDualControl?.let { control ->
+            val internalFunction = profile.functionByType(control.internalType)
+            val externalFunction = profile.functionByType(control.externalType)
+            if (internalFunction != null && externalFunction != null) {
+                updateState(internalFunction, action.mode, action.internalIntensity)
+                updateState(externalFunction, action.mode, action.externalIntensity)
+                // 这些设备的两个功能区需要分别下发；紧邻写入会让部分固件只响应第一帧。
+                return listOf(
+                    write(internalFunction.commandBytes(states.getValue(internalFunction.code))),
+                    BleProtocolOperation.Sleep(control.interFrameDelayMs),
+                    write(externalFunction.commandBytes(states.getValue(externalFunction.code))),
+                )
+            }
+        }
         profile.functionByType("oscillate")?.let {
             updateState(it, action.mode, action.internalIntensity)
         }
@@ -230,10 +244,10 @@ internal class SvakomV2Session(
                 bytes(0x55, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00)
             }
         }
-        // 强度型(震动/吮吸)：强度>0 才算激活，level 走 0..10 滑杆值。
-        // 模式型(伸缩/拍打)：官方 level 恒为 0，激活与否由“模式>0”决定，强度字节不参与。
-        val active = if (strengthDriven) state.intensity > 0 else state.mode > 0
-        val level = if (strengthDriven && active) state.intensity else 0
+        // 强度型默认以强度判活；低档关闭强度滑杆的型号改为仅按模式判活，level 固定为 0。
+        val usesStrength = strengthDriven && state.mode > strengthDisabledThroughMode
+        val active = if (usesStrength) state.intensity > 0 else state.mode > 0
+        val level = if (usesStrength && active) state.intensity else 0
         return bytes(
             0x55,
             command,
@@ -263,10 +277,18 @@ internal sealed class SvakomV2Profile(
     val functions: List<SvakomV2Function>,
     val defaultFunction: SvakomV2Function = functions.first(),
     val writeCurrentStateOnUpdate: Boolean = true,
+    val pairedDualControl: SvakomV2PairedDualControl? = null,
 ) {
     fun functionByType(type: String): SvakomV2Function? =
         functions.firstOrNull { it.type == type }
 }
+
+/** 成对功能区使用 `dual` 时的强度归属与写入间隔。 */
+internal data class SvakomV2PairedDualControl(
+    val internalType: String,
+    val externalType: String,
+    val interFrameDelayMs: Long = 500L,
+)
 
 internal data class SvakomV2Function(
     val code: Int,
@@ -282,9 +304,11 @@ internal data class SvakomV2Function(
      * 因此 isShowStrongSlider()=false，且该路径不 setDefaultStrong，defaultStrong 保持 0，
      * getModeBytes() 里强度字节 = defaultStrong = 0，帧形为 `55 CMD 00 00 <mode> 00 00`，只靠模式驱动、模式=0 即停止；
      * 震动(VIBRATE)、吮吸(SUCK）才 setShowStrongSlider(true)，强度走 0..10 滑杆值。
-     * 注意：level 字节始终为 0，激活与否由“模式是否 > 0”决定，而不是强度。
+     * 无强度滑杆的功能 level 字节始终为 0，激活与否由“模式是否 > 0”决定，而不是强度。
      */
     val strengthDriven: Boolean = true,
+    /** 某些型号在低档模式不显示强度滑杆，命令的强度字节必须固定为 0。 */
+    val strengthDisabledThroughMode: Int = 0,
 )
 
 internal data class SvakomV2FunctionState(
@@ -306,6 +330,11 @@ internal val SvakomV2Heat = SvakomV2Function(5, "heat", "加热", 0x05, modeMax 
 // 舔（LICKING）：官方 AutoV2ModeView case 5 命令字 0x14(=20)，帧仍是通用 55 CMD 00 00 <档> <强> 00。
 // ST462A 官方 case 82 的舔为 setLicking_num(10) + setLicking_strong_max(10)，10 档 + 0..10 强度滑杆。
 internal val SvakomV2Lick = SvakomV2Function(6, "lick", "舔", 0x14, modeMax = 10)
+
+private val svakomV2SuckVibrateDualControl = SvakomV2PairedDualControl(
+    internalType = "constrict",
+    externalType = "vibrate",
+)
 
 /** 多功能协议里加热功能的固定功能码。 */
 const val SvakomV2HeatFunctionCode: Int = 5
@@ -409,7 +438,7 @@ internal object SVAKOM_V2_FLAP : SvakomV2Profile(
 // QH-SX007E（Svakom Alberta）首个接入，后续同类司康沃设备可复用此 profile。
 // 官方 AutoV2ModeView 每个功能是独立 View，selectModeIndex 只发当前功能单帧；
 // 因此这里 writeCurrentStateOnUpdate=false：操作哪个功能就只写该功能帧，
-// 避免每次都把震动+吮吸两帧背靠背连发导致设备只响应第一条、之后卡死。
+// 避免每次都把震动+吮吸两帧背靠背连发导致设备只响应第一条、之后卡死；`dual` 另行插入间隔。
 internal object SVAKOM_V2_VIBRATE_SUCK : SvakomV2Profile(
     status = svakomV2Status(
         id = "svakom_vibrate_suck",
@@ -418,6 +447,7 @@ internal object SVAKOM_V2_VIBRATE_SUCK : SvakomV2Profile(
     ),
     functions = listOf(SvakomV2Vibrate, SvakomV2Suck),
     writeCurrentStateOnUpdate = false,
+    pairedDualControl = svakomV2SuckVibrateDualControl,
 )
 
 // SX119B（波波鸟）：官方 case 45，八档吮吸（强度 0..5）+ 十一档震动（强度 0..10）。
@@ -430,6 +460,7 @@ internal object SVAKOM_V2_SX119B : SvakomV2Profile(
     functions = listOf(SvakomV2Suck8Level5, SvakomV2Vibrate11),
     defaultFunction = SvakomV2Suck8Level5,
     writeCurrentStateOnUpdate = false,
+    pairedDualControl = svakomV2SuckVibrateDualControl,
 )
 
 // SX589A（青提）：官方 case 46 与 case 45（SX119B）fall-through 共用同一功能表，
@@ -443,6 +474,7 @@ internal object SVAKOM_V2_SX589A : SvakomV2Profile(
     functions = listOf(SvakomV2Suck8Level5, SvakomV2Vibrate11),
     defaultFunction = SvakomV2Suck8Level5,
     writeCurrentStateOnUpdate = false,
+    pairedDualControl = svakomV2SuckVibrateDualControl,
 )
 
 // ST462A（口口甜）：官方 case 82，三功能区——舔（10 档 + 强度 0..10）、吮吸（3 档无强度）、震动（10 档 + 强度 0..10）。

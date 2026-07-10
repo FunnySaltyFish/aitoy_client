@@ -30,15 +30,31 @@ class ZemaliaProtocolTest {
         assertEquals(1, suck.size)
         assertEquals("55090000050800", assertIs<BleProtocolOperation.Write>(suck[0]).bytes.hexUpper())
 
-        // 拍打功能码 4，档位 3，强度 6：55 07 00 00 03 06 00。
-        val flap = protocol.commandsFor(ToyControlAction.Combined(mode = 4 * 100 + 3, intensity = 6))
+        // 拍打功能码 4，档位 4，强度 6：55 07 00 00 04 06 00。
+        val flap = protocol.commandsFor(ToyControlAction.Combined(mode = 4 * 100 + 4, intensity = 6))
         assertEquals(1, flap.size)
-        assertEquals("55070000030600", assertIs<BleProtocolOperation.Write>(flap[0]).bytes.hexUpper())
+        assertEquals("55070000040600", assertIs<BleProtocolOperation.Write>(flap[0]).bytes.hexUpper())
 
         // 震动功能码 2，档位 7，强度 10：55 03 00 00 07 0A 00。
         val vibrate = protocol.commandsFor(ToyControlAction.Combined(mode = 2 * 100 + 7, intensity = 10))
         assertEquals(1, vibrate.size)
         assertEquals("55030000070A00", assertIs<BleProtocolOperation.Write>(vibrate[0]).bytes.hexUpper())
+    }
+
+    @Test
+    fun zx650aFirstThreeGearsUseFixedZeroStrengthFrames() {
+        val protocol = BleProtocolRegistry.resolveNative(zemaliaFingerprint(87))
+            ?: error("ZEMALIA ZX650A(87) protocol not resolved")
+
+        // 官方 ZX650A 的吮吸、拍打、震动在 1..3 档关闭强度滑杆，level 必须为 0。
+        val suck = protocol.commandsFor(ToyControlAction.Combined(mode = 3 * 100 + 1, intensity = 10))
+        assertEquals("55090000010000", assertIs<BleProtocolOperation.Write>(suck.single()).bytes.hexUpper())
+
+        val flap = protocol.commandsFor(ToyControlAction.Combined(mode = 4 * 100 + 3, intensity = 10))
+        assertEquals("55070000030000", assertIs<BleProtocolOperation.Write>(flap.single()).bytes.hexUpper())
+
+        val vibrate = protocol.commandsFor(ToyControlAction.Combined(mode = 2 * 100 + 2, intensity = 10))
+        assertEquals("55030000020000", assertIs<BleProtocolOperation.Write>(vibrate.single()).bytes.hexUpper())
     }
 
     @Test

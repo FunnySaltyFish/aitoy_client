@@ -14,17 +14,52 @@ internal val ZemaliaLicking =
 
 // 功能派生：strength=null 表示官方无强度滑杆(isShowStrong=false)，帧强度字节恒 0、靠模式启停；
 // strength=N 表示有强度滑杆，强度 0..N。code 固定保证同一设备内各功能可寻址（session 按 code 存状态）。
-private fun zVib(mode: Int, strength: Int? = null) =
-    SvakomV2Function(2, "vibrate", "震动", 0x03, mode, strength ?: 1, strength != null)
+private fun zVib(mode: Int, strength: Int? = null, strengthDisabledThroughMode: Int = 0) =
+    SvakomV2Function(
+        2,
+        "vibrate",
+        "震动",
+        0x03,
+        mode,
+        strength ?: 1,
+        strength != null,
+        strengthDisabledThroughMode,
+    )
 
-private fun zSuck(mode: Int, strength: Int? = null, label: String = "吮吸") =
-    SvakomV2Function(3, "constrict", label, 0x09, mode, strength ?: 1, strength != null)
+private fun zSuck(
+    mode: Int,
+    strength: Int? = null,
+    label: String = "吮吸",
+    strengthDisabledThroughMode: Int = 0,
+) = SvakomV2Function(
+    3,
+    "constrict",
+    label,
+    0x09,
+    mode,
+    strength ?: 1,
+    strength != null,
+    strengthDisabledThroughMode,
+)
 
 private fun zStretch(mode: Int, strength: Int? = null, label: String = "伸缩") =
     SvakomV2Function(1, "oscillate", label, 0x08, mode, strength ?: 1, strength != null)
 
-private fun zFlap(mode: Int, strength: Int? = null, label: String = "拍打") =
-    SvakomV2Function(4, "flap", label, 0x07, mode, strength ?: 1, strength != null)
+private fun zFlap(
+    mode: Int,
+    strength: Int? = null,
+    label: String = "拍打",
+    strengthDisabledThroughMode: Int = 0,
+) = SvakomV2Function(
+    4,
+    "flap",
+    label,
+    0x07,
+    mode,
+    strength ?: 1,
+    strength != null,
+    strengthDisabledThroughMode,
+)
 
 // ZEMALIA 各型号都走「操作哪个功能就只写该功能单帧」：官方每个功能是独立 View，
 // selectModeIndex 只发当前功能帧，从不连发其它功能帧（连发会让部分设备只响应首帧后卡死）。
@@ -74,8 +109,17 @@ internal fun zemaliaV2Profile(productCode: Int): ZemaliaV2Profile? =
         52 -> ZemaliaV2Profile("zemalia_zx531a", "ZEMALIA 吮吸加热", listOf(zSuck(8), SvakomV2Heat))
         // 舌舔标签的吮吸 + 震动（ZT433A）
         55 -> ZemaliaV2Profile("zemalia_zt433a", "ZEMALIA 舌舔震动", listOf(zSuck(8, 5, "舌舔"), zVib(9, 10)))
+        // ZX650A 的三个功能在 1..3 档都关闭强度滑杆，官方帧强度字节必须固定为 0。
+        87 -> ZemaliaV2Profile(
+            "zemalia_zx650a",
+            "ZEMALIA 吮吸拍打震动",
+            listOf(
+                zSuck(8, 10, strengthDisabledThroughMode = 3),
+                zFlap(8, 10, strengthDisabledThroughMode = 3),
+                zVib(9, 10, strengthDisabledThroughMode = 3),
+            ),
+        )
         // 拍打 + 吮吸 / 舌舔 + 吮吸
-        87 -> ZemaliaV2Profile("zemalia_zx650a", "ZEMALIA 吮吸拍打震动", listOf(zSuck(8, 10), zFlap(8, 10), zVib(9, 10)))
         117 -> ZemaliaV2Profile("zemalia_zt158e", "ZEMALIA 舌舔吮吸", listOf(zFlap(8, label = "舌舔"), zSuck(8)))
         364 -> ZemaliaV2Profile("zemalia_zt784a_2", "ZEMALIA 拍打吮吸", listOf(zFlap(8), zSuck(8)))
         // 单吮吸
