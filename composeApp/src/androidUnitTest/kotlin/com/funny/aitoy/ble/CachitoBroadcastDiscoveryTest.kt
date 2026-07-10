@@ -1,0 +1,80 @@
+package com.funny.aitoy.ble
+
+import kotlin.test.Test
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
+
+class CachitoBroadcastDiscoveryTest {
+    @Test
+    fun recognizesAnonymousDaxiuFromSpacedRawManufacturerRecord() {
+        val matches = BleBroadcastProtocolRegistry.resolveAll(
+            scanRecordDevice("02 01 06 05 FF 71 00 03"),
+        )
+
+        assertTrue(matches.any { it.status.id == "cachito_daxiu_advertise" })
+    }
+
+    @Test
+    fun recognizesKnownPrefixesFromRawRecordForShikongAndTemplates() {
+        val shikongMatches = BleBroadcastProtocolRegistry.resolveAll(
+            scanRecordDevice("02 01 06 05 FF 71 00 0B"),
+        )
+        val touhuanProMatches = BleBroadcastProtocolRegistry.resolveAll(
+            scanRecordDevice("02 01 06 05 FF 71 00 0C"),
+        )
+
+        assertTrue(shikongMatches.any { it.status.id == "cachito_shikong3_advertise" })
+        assertTrue(touhuanProMatches.any { it.status.id == "cachito_touhuan_pro_advertise" })
+    }
+
+    @Test
+    fun rejectsSvakomCollisionBeforeMatchingShikong4() {
+        val matches = BleBroadcastProtocolRegistry.resolveAll(
+            ScannedBleDevice(
+                name = "HJ-002",
+                address = "F5:0C:00:00:03:83",
+                rssi = -55,
+                connectable = true,
+                manufacturerData = "0x27:53 56 41 02 FF, 0x71:17 00 00 00 00 00",
+            ),
+        )
+
+        assertFalse(matches.any { it.status.id == "cachito_shikong4_advertise" })
+    }
+
+    @Test
+    fun keepsUnknownCachitoManufacturerVisibleWithoutEnablingControl() {
+        val device = ScannedBleDevice(
+            name = "未命名设备",
+            address = "AA:BB:CC:DD:EE:FF",
+            rssi = -60,
+            connectable = false,
+            manufacturerData = "0x71:7F 12 34 56",
+        )
+
+        assertTrue(BleBroadcastProtocolRegistry.resolveAll(device).isEmpty())
+        assertTrue(BleBroadcastProtocolRegistry.isUnconfirmedCachitoBroadcastDevice(device))
+        assertFalse(device.controllable)
+    }
+
+    @Test
+    fun doesNotTreatMicrosoftSwiftPairAsCachitoCandidate() {
+        val device = ScannedBleDevice(
+            name = "未命名设备",
+            address = "17:75:34:41:74:3A",
+            rssi = -70,
+            connectable = false,
+            manufacturerData = "0x6:01 09 20 22 74 F1 D6 D6 1A 19 FC 0F 32",
+        )
+
+        assertFalse(BleBroadcastProtocolRegistry.isUnconfirmedCachitoBroadcastDevice(device))
+    }
+
+    private fun scanRecordDevice(scanRecordHex: String) = ScannedBleDevice(
+        name = "未命名设备",
+        address = "AA:BB:CC:DD:EE:FF",
+        rssi = -60,
+        connectable = false,
+        scanRecordHex = scanRecordHex,
+    )
+}

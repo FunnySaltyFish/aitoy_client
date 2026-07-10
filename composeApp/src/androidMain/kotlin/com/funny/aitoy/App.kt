@@ -81,6 +81,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.funny.aitoy.ble.BleBroadcastProtocolRegistry
 import com.funny.aitoy.ble.BleConnectionState
 import com.funny.aitoy.ble.BleProtocolStatus
 import com.funny.aitoy.ble.ProtocolAttemptStatus
@@ -754,6 +755,8 @@ private fun DeviceRow(
     runtimeState: ToyRuntimeState?,
     onConnect: () -> Unit,
 ) {
+    val isUnconfirmedCachitoBroadcast = device.broadcastProtocolName.isBlank() &&
+        BleBroadcastProtocolRegistry.isUnconfirmedCachitoBroadcastDevice(device)
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -786,6 +789,7 @@ private fun DeviceRow(
             )
             val hint = when {
                 device.broadcastProtocolName.isNotBlank() -> "已识别：${device.broadcastProtocolName}"
+                isUnconfirmedCachitoBroadcast -> "发现可能兼容的设备，型号待确认"
                 device.controllable && device.connectable -> "可连接"
                 device.controllable -> "可尝试连接"
                 else -> "暂不支持连接"
@@ -814,6 +818,7 @@ private fun DeviceRow(
                     device.broadcastProtocolName.isNotBlank() -> "连接"
                     device.controllable && device.connectable -> "连接"
                     device.controllable -> "尝试连接"
+                    isUnconfirmedCachitoBroadcast -> "暂未适配"
                     else -> "暂不支持"
                 }
             )

@@ -161,6 +161,15 @@ internal object BleBroadcastProtocolRegistry {
 
     fun resolveFirstName(device: ScannedBleDevice): String =
         resolveAll(device).firstOrNull()?.status?.displayName.orEmpty()
+
+    /**
+     * 已确认 Cachito 厂商广播、但尚未落入已知帧前缀时，只作为扫描提示保留。
+     * 不能把它直接接入控制，避免向同样复用厂商 ID 的其他设备发送错误指令。
+     */
+    fun isUnconfirmedCachitoBroadcastDevice(device: ScannedBleDevice): Boolean =
+        resolveAll(device).isEmpty() &&
+            device.hasCachitoManufacturerSignature() &&
+            !device.hasSvakomManufacturerSignature()
 }
 
 /**
@@ -274,7 +283,7 @@ internal object CachitoShikong2BroadcastProtocol : BleBroadcastProtocol {
         val hasShikong2Name = (compactText.contains("失控2") && !compactText.contains("失控25")) ||
             (compactText.contains("shikong2") && !compactText.contains("shikong25"))
         return hasShikong2Name ||
-            text.contains("710002", ignoreCase = true)
+            device.hasCachitoBroadcastFramePrefix("710002")
     }
 
     override fun commandsFor(action: ToyControlAction): List<BleAdvertiseOperation> =
@@ -366,8 +375,8 @@ internal object CachitoShikong3BroadcastProtocol : BleBroadcastProtocol {
         }.lowercase().replace(" ", "").replace(".", "")
         val hasShikong3Name = compactText.contains("失控3") || compactText.contains("shikong3")
         // 对齐官方 ScanFilter：company 0x0071 + 数据首字节 0x0B（TYPE_SHIKONG3=0x23 机型的广播类型位）。
-        val hasShikong3Manufacturer = device.manufacturerFirstByte(CACHITO_COMPANY_ID) == SHIKONG3_TYPE_BYTE
-        return hasShikong3Name || hasShikong3Manufacturer
+        return hasShikong3Name ||
+            device.hasCachitoBroadcastFramePrefix("71000B")
     }
 
     override fun commandsFor(action: ToyControlAction): List<BleAdvertiseOperation> =
@@ -472,7 +481,7 @@ internal object CachitoShikong25BroadcastProtocol : BleBroadcastProtocol {
         val compactText = text.lowercase().replace(" ", "").replace(".", "")
         return compactText.contains("失控25") ||
             compactText.contains("shikong25") ||
-            text.contains("710007", ignoreCase = true)
+            device.hasCachitoBroadcastFramePrefix("710007")
     }
 
     override fun commandsFor(action: ToyControlAction): List<BleAdvertiseOperation> =
@@ -581,7 +590,10 @@ internal object CachitoShikong4BroadcastProtocol : BleBroadcastProtocol {
         val compactText = text.lowercase().replace(" ", "").replace(".", "")
         return compactText.contains("失控4") ||
             compactText.contains("shikong4") ||
-            text.contains("710017", ignoreCase = true)
+            (
+                !device.hasSvakomManufacturerSignature() &&
+                    device.hasCachitoBroadcastFramePrefix("710017")
+                )
     }
 
     override fun commandsFor(action: ToyControlAction): List<BleAdvertiseOperation> =
@@ -687,7 +699,7 @@ private class CachitoTemplateBroadcastProtocol(
             return false
         }
         return spec.aliases.any { compactText.contains(it.lowercase().replace(" ", "").replace(".", "")) } ||
-            spec.framePrefixes.any { text.contains(it, ignoreCase = true) }
+            spec.framePrefixes.any(device::hasCachitoBroadcastFramePrefix)
     }
 
     override fun commandsFor(action: ToyControlAction): List<BleAdvertiseOperation> =
@@ -767,7 +779,7 @@ internal object CachitoDaxiuBroadcastProtocol : BleBroadcastProtocol {
         }
         return text.contains("大秀", ignoreCase = true) ||
             text.contains("daxiu", ignoreCase = true) ||
-            text.contains("710003", ignoreCase = true)
+            device.hasCachitoBroadcastFramePrefix("710003")
     }
 
     override fun commandsFor(action: ToyControlAction): List<BleAdvertiseOperation> =
@@ -884,8 +896,43 @@ private fun String.normalizedBroadcastDeviceName(): String =
 /** Cachito 玩具广播使用的厂商 company id（官方 `getManufacturerSpecificData().get(0x71)`）。 */
 internal const val CACHITO_COMPANY_ID = 0x71
 
-/** 失控 3.0（`TYPE_SHIKONG3 = 0x23`）在厂商数据首字节上的广播类型位，对齐官方 ScanFilter 的 `71000B` 前缀。 */
-internal const val SHIKONG3_TYPE_BYTE = 0x0B
+/**
+ * 判断扫描结果是否携带 Cachito 官方 7100XX 厂商帧前缀。
+ *
+ * Android 会把同一份广播分别表示为厂商数据、带空格的原始字节或格式化 UUID；
+ * 统一在这里解析，避免业务 matcher 直接查找连续十六进制字符串而漏掉匿名设备。
+ */
+internal fun ScannedBleDevice.hasCachitoBroadcastFramePrefix(prefix: String): Boolean {
+    val normalizedPrefix = prefix.compactHex().uppercase()
+    if (normalizedPrefix.length != 6 || !normalizedPrefix.startsWith("7100")) return false
+    val typeByte = normalizedPrefix.takeLast(2).toIntOrNull(16) ?: return false
+    if (manufacturerFirstByte(CACHITO_COMPANY_ID) == typeByte) return true
+
+    val rawRecord = scanRecordHex.compactHex().uppercase()
+    if (rawRecord.contains("FF$normalizedPrefix")) return true
+
+    return serviceUuids.any { serviceUuid ->
+        serviceUuid.compactHex().uppercase().contains(normalizedPrefix)
+    }
+}
+
+internal fun ScannedBleDevice.hasCachitoManufacturerSignature(): Boolean =
+    manufacturerFirstByte(CACHITO_COMPANY_ID) != null ||
+        scanRecordHex.compactHex().uppercase().contains("FF7100")
+
+/**
+ * HJ-002 等 SVAKOM V2 设备会同时携带 0x0071:17。
+ * 其 SVA 厂商标记足以排除失控 4.0 的广播路由。
+ */
+private fun ScannedBleDevice.hasSvakomManufacturerSignature(): Boolean =
+    name.normalizedBroadcastDeviceName().contains("hj002") ||
+        manufacturerData.compactHex().uppercase().contains("27535641") ||
+        scanRecordHex.compactHex().uppercase().contains("FF2700535641")
+
+private fun String.compactHex(): String =
+    filter { character ->
+        character.isDigit() || character.lowercaseChar() in 'a'..'f'
+    }
 
 /**
  * 解析扫描记录里的厂商数据，返回指定 company id 的首字节。
