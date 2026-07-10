@@ -138,9 +138,19 @@ internal val JISSBON_PRODUCTS: Map<String, JissbonProfileSpec> = listOf(
 
 private val JISSBON_SERVICE_UUID = Uuid.parse("0000ffe0-0000-1000-8000-00805f9b34fb")
 private val JISSBON_WRITE_UUID = Uuid.parse("0000ffe1-0000-1000-8000-00805f9b34fb")
+// 部分杰士邦设备复用司康沃 SVA V2 模组（广播前缀 53 56 41），notify 独立在 FFE2；纯 HM-10 模组则 notify 也在 FFE1。
+private val JISSBON_NOTIFY_FFE2_UUID = Uuid.parse("0000ffe2-0000-1000-8000-00805f9b34fb")
+
+// 官方 wxapp 连接后必先 notifyBLECharacteristicValueChanged 订阅再控制，否则设备不响应写入。
+// 按设备实际暴露的特征自适应选 notify 通道：有 FFE2 用 FFE2，否则回退 FFE1。
+private fun BleGattFingerprint.jissbonNotifyUuid(): Uuid =
+    if (characteristicUuids.contains(JISSBON_NOTIFY_FFE2_UUID)) JISSBON_NOTIFY_FFE2_UUID else JISSBON_WRITE_UUID
 
 // 由一个产品画像生成的可控协议实例：马达数 → 控制风格与通道，命令走还原后的 0x55 帧。
-internal class JissbonProfileProtocol(private val spec: JissbonProfileSpec) : BleDeviceProtocol {
+internal class JissbonProfileProtocol(
+    private val spec: JissbonProfileSpec,
+    private val notifyUuid: Uuid = JISSBON_WRITE_UUID,
+) : BleDeviceProtocol {
     private val motorCount = spec.functionType.size
 
     private fun channelLabels(): List<String> =
@@ -166,6 +176,10 @@ internal class JissbonProfileProtocol(private val spec: JissbonProfileSpec) : Bl
     )
 
     override fun matches(fingerprint: BleGattFingerprint): Boolean = false
+
+    // 还原官方 getBLEDeviceCharacteristics 后立即 notifyBLECharacteristicValueChanged：控制前必先订阅 notify。
+    override fun initialize(fingerprint: BleGattFingerprint): List<BleProtocolOperation> =
+        listOf(BleProtocolOperation.SubscribeNotify(notifyUuid))
 
     // 把控制动作展开成每个马达的强度（长度对齐 functionType）。
     private fun motorValues(action: ToyControlAction): List<Int> =
@@ -219,7 +233,10 @@ internal object JissbonProtocol : BleDeviceProtocol {
         fingerprint.hasJissbonGatt() && fingerprint.jissbonProfileSpec() != null
 
     override fun createInstance(fingerprint: BleGattFingerprint): BleDeviceProtocol =
-        JissbonProfileProtocol(fingerprint.jissbonProfileSpec() ?: JISSBON_FALLBACK_DUAL)
+        JissbonProfileProtocol(
+            fingerprint.jissbonProfileSpec() ?: JISSBON_FALLBACK_DUAL,
+            fingerprint.jissbonNotifyUuid(),
+        )
 
     override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
         JissbonProfileProtocol(JISSBON_FALLBACK_DUAL).commandsFor(action)
@@ -232,6 +249,8 @@ internal class JissbonVariantProtocol(private val spec: JissbonProfileSpec) : Bl
     override val status = delegate.status
     override fun matches(fingerprint: BleGattFingerprint): Boolean =
         fingerprint.hasJissbonGatt() && fingerprint.jissbonProfileSpec() != null
+    override fun createInstance(fingerprint: BleGattFingerprint): BleDeviceProtocol =
+        JissbonProfileProtocol(spec, fingerprint.jissbonNotifyUuid())
     override fun commandsFor(action: ToyControlAction) = delegate.commandsFor(action)
 }
 

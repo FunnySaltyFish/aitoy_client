@@ -65,6 +65,34 @@ class JissbonProtocolTest {
     }
 
     @Test
+    fun svaModuleDeviceSubscribesFfe2NotifyBeforeControl() {
+        // Fancy Remote Vibrator 实机跑在司康沃 SVA V2 模组上，notify 在 FFE2，控制前必须先订阅。
+        val fp = BleGattFingerprint(
+            name = "Fancy Remote Vibrator",
+            address = "FF:25:08:C3:49:AA",
+            manufacturerData = "0x27:53 56 41 02 01 FF 25 08 C3 49 AA FF 32 5A 00 3F A2 22 BB",
+            scanRecordHex = "",
+            serviceUuids = setOf(SERVICE_UUID),
+            characteristicUuids = setOf(WRITE_UUID, NOTIFY_FFE2_UUID),
+        )
+        val protocol = BleProtocolRegistry.resolveNative(fp) ?: error("protocol not resolved")
+        assertEquals("jissbon_fancy_remote", protocol.status.id)
+        val init = protocol.initialize(fp)
+        val subscribe = assertIs<BleProtocolOperation.SubscribeNotify>(init.first())
+        assertEquals(NOTIFY_FFE2_UUID, subscribe.characteristicUuid)
+    }
+
+    @Test
+    fun hm10ModuleFallsBackToFfe1Notify() {
+        // 纯 HM-10 模组只有 FFE1，notify 回退到 FFE1。
+        val protocol = BleProtocolRegistry.resolveNative(fingerprint("Crush Vibrating Egg"))!!
+        val subscribe = assertIs<BleProtocolOperation.SubscribeNotify>(
+            protocol.initialize(fingerprint("Crush Vibrating Egg")).first(),
+        )
+        assertEquals(WRITE_UUID, subscribe.characteristicUuid)
+    }
+
+    @Test
     fun unknownJissbonNameFallsBackToDual() {
         val protocol = BleProtocolRegistry.resolveNative(fingerprint("Jissbon Mystery"))!!
         assertEquals("jissbon_generic_dual", protocol.status.id)
@@ -106,5 +134,6 @@ class JissbonProtocolTest {
     private companion object {
         val SERVICE_UUID: Uuid = Uuid.parse("0000ffe0-0000-1000-8000-00805f9b34fb")
         val WRITE_UUID: Uuid = Uuid.parse("0000ffe1-0000-1000-8000-00805f9b34fb")
+        val NOTIFY_FFE2_UUID: Uuid = Uuid.parse("0000ffe2-0000-1000-8000-00805f9b34fb")
     }
 }
