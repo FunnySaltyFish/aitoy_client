@@ -100,13 +100,15 @@ internal object BleProtocolRegistry {
                     SvakomSt419Protocol,
                     SvakomQhSx045Protocol,
                     ChokerMiyinProtocol,
+                    JissbonProtocol,
                     MizzzeeXhtkjProtocol,
                     SenseeCcpa10S2Protocol,
                     OhMiBodEsca2Protocol,
                     XiuxiudaOfficialProtocol,
                     PinkPunchProtocol,
                     LovenutsProtocol,
-                )
+                ) +
+                jissbonVariantProtocols
 
     suspend fun resolve(fingerprint: BleGattFingerprint): BleDeviceProtocol? =
         resolveAll(fingerprint).firstOrNull()
