@@ -2,6 +2,7 @@ package com.funny.aitoy.ble
 
 import com.funny.aitoy.core.prefs.DataSaverUtils
 import kotlin.random.Random
+import kotlin.math.roundToInt
 
 internal data class BleAdvertiseOperation(
     val serviceUuid: String = "",
@@ -238,9 +239,9 @@ internal object AnkniQd1BroadcastProtocol : BleBroadcastProtocol {
 
 /**
  * Cachito 反编译来源：
- * - com/cs/cachito/utils/ble/BleAdvertiser.smali
- * - com/cs/cachito/ext/CommandExtKt.smali
- * - com/cs/cachito/base/DeviceType.smali
+ * - com/cs/cachito/utils/ble/BleAdvertiser.java
+ * - com/cs/cachito/ext/CommandExtKt.java
+ * - com/cs/cachito/base/DeviceType.java
  *
  * 控制方式是把 36 字符 UUID 放进 BLE legacy advertisement 的 Service UUID，
  * 不是连接 GATT 后写 characteristic。
@@ -553,12 +554,13 @@ internal object CachitoShikong25BroadcastProtocol : BleBroadcastProtocol {
  */
 internal object CachitoShikong4BroadcastProtocol : BleBroadcastProtocol {
     private val modeTemplates = listOf(
-        CachitoShikong4Mode("小号脉冲", 0x34),
-        CachitoShikong4Mode("震动", 0x35),
-        CachitoShikong4Mode("拍打", 0x36),
-        CachitoShikong4Mode("抠动", 0x37),
-        CachitoShikong4Mode("蠕动", 0x38),
-        CachitoShikong4Mode("大号脉冲", 0x39),
+        CachitoShikong4Mode("基础强度", null),
+        CachitoShikong4Mode("小号脉冲", 52),
+        CachitoShikong4Mode("震动", 53),
+        CachitoShikong4Mode("拍打", 54),
+        CachitoShikong4Mode("抠动", 55),
+        CachitoShikong4Mode("蠕动", 56),
+        CachitoShikong4Mode("大号脉冲", 57),
     )
 
     private var selectedMode = 1
@@ -571,7 +573,7 @@ internal object CachitoShikong4BroadcastProtocol : BleBroadcastProtocol {
         supportsMode = true,
         modeMax = modeTemplates.size,
         controlStyle = ToyControlStyle.CombinedPatternAndIntensity,
-        modeLabel = "模式",
+        modeLabel = "功能",
         modeNames = modeTemplates.map { it.name },
         intensityLabel = "强度",
         automatic = true,
@@ -608,30 +610,48 @@ internal object CachitoShikong4BroadcastProtocol : BleBroadcastProtocol {
     private fun control(mode: Int, intensity: Int): List<BleAdvertiseOperation> {
         selectedMode = mode.coerceIn(1, modeTemplates.size)
         val selected = modeTemplates[selectedMode - 1]
+        val template = selected.pulseType?.let { pulseCommandTemplate(it, intensity.coerceIn(0, 100)) }
+            ?: baseCommandTemplate(intensity.coerceIn(0, 100))
         return listOf(
             BleAdvertiseOperation(
-                CachitoBroadcastCodec.finalUuid(commandTemplate(selected.pulseType, intensity.coerceIn(0, 100)))
+                CachitoBroadcastCodec.finalUuid(template)
             )
         )
     }
 
-    private fun stop(): List<BleAdvertiseOperation> =
-        listOf(
-            BleAdvertiseOperation(CachitoBroadcastCodec.finalUuid("710017**-0F00-####-0100-6400000002")),
-        )
+    private fun stop(): List<BleAdvertiseOperation> {
+        val selectedPulseStop = modeTemplates.getOrNull(selectedMode - 1)
+            ?.pulseType
+            ?.let(::pulseStopTemplate)
+        return listOfNotNull(
+            baseStopTemplate(),
+            "710017**-0F00-####-0100-6400000002",
+            selectedPulseStop,
+        ).distinct().map { template ->
+            BleAdvertiseOperation(CachitoBroadcastCodec.finalUuid(template))
+        }
+    }
 
-    private fun commandTemplate(pulseType: Int, progress: Int): String {
-        if (progress <= 0) {
-            return "710017**-${pulseType}00-####-0100-6400000002"
+    private fun baseCommandTemplate(progress: Int): String {
+        if (progress < 2) return baseStopTemplate()
+        return "710017**-5100-####-0100-640000" + cachitoScaled50(progress) + "02"
+    }
+
+    private fun baseStopTemplate(): String =
+        "710017**-0100-####-0100-6400000002"
+
+    private fun pulseCommandTemplate(pulseType: Int, progress: Int): String {
+        if (progress < 2) {
+            return pulseStopTemplate(pulseType)
         }
         return when (pulseType) {
-            0x34, 0x39 -> {
+            52, 57 -> {
                 val value = CachitoBroadcastCodec.toHex(0x66 - progress.coerceIn(0, 100))
                 "710017**-${pulseType}00-####-0100-2d${value}150002"
             }
-            0x35 -> strengthTemplate(pulseType, progress, 0.8, 20)
-            0x36 -> strengthTemplate(pulseType, progress, 0.65, 25)
-            0x38 -> strengthTemplate(pulseType, progress, 0.7, 30)
+            53 -> shikong4StrengthTemplate(pulseType, progress, 0.8, 20)
+            54 -> shikong4StrengthTemplate(pulseType, progress, 0.65, 25)
+            56 -> shikong4StrengthTemplate(pulseType, progress, 0.7, 30)
             else -> {
                 val value = CachitoBroadcastCodec.toHex(progress.coerceIn(0, 100))
                 "710017**-${pulseType}00-####-0100-640000${value}02"
@@ -639,14 +659,19 @@ internal object CachitoShikong4BroadcastProtocol : BleBroadcastProtocol {
         }
     }
 
-    private fun strengthTemplate(pulseType: Int, progress: Int, multiplier: Double, offset: Int): String {
+    private fun pulseStopTemplate(pulseType: Int): String {
+        val stopType = CachitoBroadcastCodec.toHex((pulseType - 50).coerceIn(0, 255))
+        return "710017**-${stopType}00-####-0100-6400000002"
+    }
+
+    private fun shikong4StrengthTemplate(pulseType: Int, progress: Int, multiplier: Double, offset: Int): String {
         val value = CachitoBroadcastCodec.toHex((progress.coerceIn(0, 100) * multiplier + offset).toInt())
         return "710017**-${pulseType}00-####-0100-640000${value}02"
     }
 
     private data class CachitoShikong4Mode(
         val name: String,
-        val pulseType: Int,
+        val pulseType: Int?,
     )
 }
 
@@ -749,9 +774,9 @@ internal object CachitoDaxiuBroadcastProtocol : BleBroadcastProtocol {
     )
 
     private var selectedMode = 1
-    private var depth = 36
-    private var extendSpeed = 8
-    private var retractSpeed = 8
+    private var depthProgress = 50
+    private var extendSpeedProgress = 50
+    private var retractSpeedProgress = 50
 
     override val status = BleProtocolStatus(
         id = "cachito_daxiu_advertise",
@@ -797,18 +822,18 @@ internal object CachitoDaxiuBroadcastProtocol : BleBroadcastProtocol {
         val progress = intensity.coerceIn(0, 100)
         val template = when (selected.function) {
             CachitoDaxiuFunction.Depth -> {
-                depth = progress.coerceIn(0, 72)
+                depthProgress = progress
                 thrustTemplate()
             }
             CachitoDaxiuFunction.ExtendSpeed -> {
-                extendSpeed = progress.coerceIn(0, 15)
+                extendSpeedProgress = progress
                 thrustTemplate()
             }
             CachitoDaxiuFunction.RetractSpeed -> {
-                retractSpeed = progress.coerceIn(0, 15)
+                retractSpeedProgress = progress
                 thrustTemplate()
             }
-            CachitoDaxiuFunction.EnterStrength -> strengthTemplate(progress)
+            CachitoDaxiuFunction.EnterStrength -> enterStrengthTemplate(progress)
             CachitoDaxiuFunction.Temperature -> temperatureTemplate(progress)
         }
         return listOf(BleAdvertiseOperation(CachitoBroadcastCodec.finalUuid(template)))
@@ -817,28 +842,48 @@ internal object CachitoDaxiuBroadcastProtocol : BleBroadcastProtocol {
     private fun stop(): List<BleAdvertiseOperation> =
         listOf(
             BleAdvertiseOperation(CachitoBroadcastCodec.finalUuid(thrustStopTemplate())),
-            BleAdvertiseOperation(CachitoBroadcastCodec.finalUuid(strengthTemplate(0))),
+            BleAdvertiseOperation(CachitoBroadcastCodec.finalUuid(enterStrengthStopTemplate())),
             BleAdvertiseOperation(CachitoBroadcastCodec.finalUuid(temperatureStopTemplate())),
         )
 
     private fun thrustTemplate(): String =
         "710003**-8800-####-0000-" +
-            CachitoBroadcastCodec.toHex(depth.coerceIn(0, 72)) +
-            CachitoBroadcastCodec.toHex(extendSpeed.coerceIn(0, 15)) +
-            CachitoBroadcastCodec.toHex(retractSpeed.coerceIn(0, 15)) +
+            CachitoBroadcastCodec.toHex(daxiuDepthByte(depthProgress)) +
+            CachitoBroadcastCodec.toHex(daxiuSpeedByte(extendSpeedProgress)) +
+            CachitoBroadcastCodec.toHex(daxiuSpeedByte(retractSpeedProgress)) +
             "0000"
 
     private fun thrustStopTemplate(): String =
         "710003**-8800-####-0000-0000000000"
 
-    private fun strengthTemplate(strength: Int): String =
-        "710003**-0400-####-050A-" + CachitoBroadcastCodec.toHex(strength.coerceIn(0, 100)) + "00000000"
+    private fun enterStrengthTemplate(progress: Int): String {
+        if (progress < 2) return enterStrengthStopTemplate()
+        val value = (progress.coerceIn(0, 100) * 0.85 + 15).roundToInt()
+        return "710003**-8200-####-0100-640000" + CachitoBroadcastCodec.toHex(value) + "02"
+    }
 
-    private fun temperatureTemplate(progress: Int): String =
-        "710003**-1F00-####-0000-" + CachitoBroadcastCodec.toHex(progress.coerceIn(0, 60)) + "00000000"
+    private fun enterStrengthStopTemplate(): String =
+        "710003**-0200-####-0100-0000000002"
+
+    private fun temperatureTemplate(progress: Int): String {
+        if (progress < 2) return temperatureStopTemplate()
+        val value = ((progress.coerceIn(0, 100) * 30) / 100) + 30
+        return "710003**-9000-####-0000-" + CachitoBroadcastCodec.toHex(value) + "00000000"
+    }
 
     private fun temperatureStopTemplate(): String =
         "710003**-1F00-####-0000-0000000000"
+
+    private fun daxiuDepthByte(progress: Int): Int {
+        val coerced = progress.coerceIn(0, 100)
+        if (coerced <= 0) return 0
+        return ((((coerced - 1) * 58) / 99.0f) + 14).roundToInt()
+    }
+
+    private fun daxiuSpeedByte(progress: Int): Int {
+        val value = (progress.coerceIn(0, 100) * 0.15f).roundToInt()
+        return if (value > 0) value else 2
+    }
 
     private data class CachitoDaxiuMode(
         val name: String,
@@ -874,11 +919,14 @@ private object CachitoBroadcastCodec {
     private fun newCommandId(): String = toHex(Random.nextInt(100, 256))
 
     private fun loadDeviceId(): String {
-        val saved = DataSaverUtils.readData(CONTROL_DEVICE_ID_KEY, "")
+        val saved = runCatching { DataSaverUtils.readData(CONTROL_DEVICE_ID_KEY, "") }
+            .getOrDefault("")
             .uppercase()
             .filter { it in '0'..'9' || it in 'A'..'F' }
         if (saved.length == 4) return saved
-        return newDeviceId().also { DataSaverUtils.saveData(CONTROL_DEVICE_ID_KEY, it) }
+        return newDeviceId().also { id ->
+            runCatching { DataSaverUtils.saveData(CONTROL_DEVICE_ID_KEY, id) }
+        }
     }
 
     private fun newDeviceId(): String =

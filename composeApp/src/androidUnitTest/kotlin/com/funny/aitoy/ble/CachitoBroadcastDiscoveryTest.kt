@@ -1,6 +1,7 @@
 package com.funny.aitoy.ble
 
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -43,6 +44,47 @@ class CachitoBroadcastDiscoveryTest {
     }
 
     @Test
+    fun shikong4UsesOfficialBaseAndPulseBroadcastFrames() {
+        val protocol = CachitoShikong4BroadcastProtocol
+
+        assertEquals(7, protocol.status.modeMax)
+        assertEquals("基础强度", protocol.status.modeNames.first())
+
+        val base = protocol.commandsFor(ToyControlAction.Combined(mode = 1, intensity = 40)).single().serviceUuid
+        assertTrue(base.matchesUuidBody("-5100-", "-0100-6400004602"))
+
+        val pulse = protocol.commandsFor(ToyControlAction.Combined(mode = 2, intensity = 40)).single().serviceUuid
+        assertTrue(pulse.matchesUuidBody("-5200-", "-0100-2D3E150002"))
+
+        val pulseStop = protocol.commandsFor(ToyControlAction.Combined(mode = 2, intensity = 0)).single().serviceUuid
+        assertTrue(pulseStop.matchesUuidBody("-0200-", "-0100-6400000002"))
+
+        val stopFrames = protocol.commandsFor(ToyControlAction.Stop).map { it.serviceUuid }
+        assertTrue(stopFrames.any { it.matchesUuidBody("-0100-", "-0100-6400000002") })
+        assertTrue(stopFrames.any { it.matchesUuidBody("-0F00-", "-0100-6400000002") })
+        assertTrue(stopFrames.any { it.matchesUuidBody("-0200-", "-0100-6400000002") })
+    }
+
+    @Test
+    fun daxiuUsesOfficialMotionRtdHeatAndStopFrames() {
+        val protocol = CachitoDaxiuBroadcastProtocol
+
+        val thrust = protocol.commandsFor(ToyControlAction.Combined(mode = 1, intensity = 50)).single().serviceUuid
+        assertTrue(thrust.matchesUuidBody("-8800-", "-0000-2B08080000"))
+
+        val enterStrength = protocol.commandsFor(ToyControlAction.Combined(mode = 4, intensity = 40)).single().serviceUuid
+        assertTrue(enterStrength.matchesUuidBody("-8200-", "-0100-6400003102"))
+
+        val heat = protocol.commandsFor(ToyControlAction.Combined(mode = 5, intensity = 50)).single().serviceUuid
+        assertTrue(heat.matchesUuidBody("-9000-", "-0000-2D00000000"))
+
+        val stopFrames = protocol.commandsFor(ToyControlAction.Stop).map { it.serviceUuid }
+        assertTrue(stopFrames.any { it.matchesUuidBody("-8800-", "-0000-0000000000") })
+        assertTrue(stopFrames.any { it.matchesUuidBody("-0200-", "-0100-0000000002") })
+        assertTrue(stopFrames.any { it.matchesUuidBody("-1F00-", "-0000-0000000000") })
+    }
+
+    @Test
     fun keepsUnknownCachitoManufacturerVisibleWithoutEnablingControl() {
         val device = ScannedBleDevice(
             name = "未命名设备",
@@ -77,4 +119,12 @@ class CachitoBroadcastDiscoveryTest {
         connectable = false,
         scanRecordHex = scanRecordHex,
     )
+
+    private fun String.matchesUuidBody(commandPart: String, payloadPart: String): Boolean {
+        val upper = uppercase()
+        return upper.startsWith("7100") &&
+            upper.contains(commandPart) &&
+            upper.contains(payloadPart) &&
+            upper.length == 36
+    }
 }
