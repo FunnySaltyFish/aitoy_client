@@ -169,8 +169,7 @@ internal object BleBroadcastProtocolRegistry {
      */
     fun isUnconfirmedCachitoBroadcastDevice(device: ScannedBleDevice): Boolean =
         resolveAll(device).isEmpty() &&
-            device.hasCachitoManufacturerSignature() &&
-            !device.hasSvakomManufacturerSignature()
+            device.hasCachitoManufacturerSignature()
 }
 
 /**
@@ -590,12 +589,12 @@ internal object CachitoShikong4BroadcastProtocol : BleBroadcastProtocol {
             append(device.scanRecordHex)
         }
         val compactText = text.lowercase().replace(" ", "").replace(".", "")
+        // 官方失控 4.0 控制页仅按 company 0x0071 + 首字节 0x17 扫描识别
+        // （ControlShikong4Fragment 的 setManufacturerData(113, {23})），不校验设备名或其他厂商标记。
+        // HJ-002 等双品牌 OEM 设备会同时带 SVA(0x27) 标记，但控制通道仍是失控 4.0 广播，不能因 SVA 标记排除。
         return compactText.contains("失控4") ||
             compactText.contains("shikong4") ||
-            (
-                !device.hasSvakomManufacturerSignature() &&
-                    device.hasCachitoBroadcastFramePrefix("710017")
-                )
+            device.hasCachitoBroadcastFramePrefix("710017")
     }
 
     override fun commandsFor(action: ToyControlAction): List<BleAdvertiseOperation> =
@@ -967,15 +966,6 @@ internal fun ScannedBleDevice.hasCachitoBroadcastFramePrefix(prefix: String): Bo
 internal fun ScannedBleDevice.hasCachitoManufacturerSignature(): Boolean =
     manufacturerFirstByte(CACHITO_COMPANY_ID) != null ||
         scanRecordHex.compactHex().uppercase().contains("FF7100")
-
-/**
- * HJ-002 等 SVAKOM V2 设备会同时携带 0x0071:17。
- * 其 SVA 厂商标记足以排除失控 4.0 的广播路由。
- */
-private fun ScannedBleDevice.hasSvakomManufacturerSignature(): Boolean =
-    name.normalizedBroadcastDeviceName().contains("hj002") ||
-        manufacturerData.compactHex().uppercase().contains("27535641") ||
-        scanRecordHex.compactHex().uppercase().contains("FF2700535641")
 
 private fun String.compactHex(): String =
     filter { character ->

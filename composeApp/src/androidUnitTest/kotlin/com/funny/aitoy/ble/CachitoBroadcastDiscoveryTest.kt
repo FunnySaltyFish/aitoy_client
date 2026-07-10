@@ -29,7 +29,9 @@ class CachitoBroadcastDiscoveryTest {
     }
 
     @Test
-    fun rejectsSvakomCollisionBeforeMatchingShikong4() {
+    fun matchesShikong4ForHj002CarryingBothSvakomAndCachitoMarkers() {
+        // HJ-002 是司康沃/失控双品牌 OEM 设备，广播同时带 SVA(0x27) 与 Cachito(0x71:17) 标记，
+        // 但控制通道是失控 4.0 广播；官方仅按 company 0x0071 + 首字节 0x17 识别，不能因 SVA 标记排除。
         val matches = BleBroadcastProtocolRegistry.resolveAll(
             ScannedBleDevice(
                 name = "HJ-002",
@@ -40,7 +42,7 @@ class CachitoBroadcastDiscoveryTest {
             ),
         )
 
-        assertFalse(matches.any { it.status.id == "cachito_shikong4_advertise" })
+        assertTrue(matches.any { it.status.id == "cachito_shikong4_advertise" })
     }
 
     @Test
