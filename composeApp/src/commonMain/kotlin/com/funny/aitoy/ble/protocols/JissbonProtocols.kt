@@ -75,6 +75,7 @@ internal data class JissbonProfileSpec(
     val displayName: String,
     val canonicalName: String,
     val functionType: List<Int>,
+    val productType: String = "jsb",
     val isOld: Boolean = false,
 )
 
@@ -106,10 +107,10 @@ internal val JISSBON_PRODUCTS: Map<String, JissbonProfileSpec> = listOf(
     JissbonProfileSpec("jissbon_fancy_wear", "杰士邦 穿戴跳蛋", "Fancy Wearable Vibrating Egg", listOf(1), isOld = true),
     JissbonProfileSpec("jissbon_jsb2642", "杰士邦 单震动跳蛋", "JSB26_42", listOf(1)),
     JissbonProfileSpec("jissbon_candy_max", "杰士邦 Candy Max", "Candy max Remote Vibrator", listOf(2)),
-    JissbonProfileSpec("jissbon_adopt_cat", "杰士邦 领养一只猫", "Adopt A Cat Vibrator", listOf(1, 2, 3)),
+    JissbonProfileSpec("jissbon_adopt_cat", "杰士邦 领养一只猫", "Adopt A Cat Vibrator", listOf(1, 2, 3), productType = "xfb"),
     JissbonProfileSpec("jissbon_crush_egg", "杰士邦 双头跳蛋", "Crush Vibrating Egg", listOf(1, 2)),
-    JissbonProfileSpec("jissbon_fancy_remote", "杰士邦 双震动跳蛋", "Fancy Remote Vibrator", listOf(1, 2)),
-    JissbonProfileSpec("jissbon_mls1557c", "杰士邦 双震动跳蛋", "MLS-15-57C", listOf(1, 2)),
+    JissbonProfileSpec("jissbon_fancy_remote", "杰士邦 双震动跳蛋", "Fancy Remote Vibrator", listOf(1, 2), productType = "xfb"),
+    JissbonProfileSpec("jissbon_mls1557c", "杰士邦 双震动跳蛋", "MLS-15-57C", listOf(1, 2), productType = "xfb"),
     JissbonProfileSpec("jissbon_jsb_ht", "杰士邦 三震动跳蛋", "JSB_HT", listOf(1, 2, 3)),
     JissbonProfileSpec("jissbon_master_remote", "杰士邦 三震动跳蛋", "Master Remote Vibrator", listOf(1, 2, 3)),
     JissbonProfileSpec("jissbon_master_wave", "杰士邦 波浪三震动", "Master Wave Remote Vibrator", listOf(1, 2, 3)),
@@ -140,6 +141,8 @@ private val JISSBON_SERVICE_UUID = Uuid.parse("0000ffe0-0000-1000-8000-00805f9b3
 private val JISSBON_WRITE_UUID = Uuid.parse("0000ffe1-0000-1000-8000-00805f9b34fb")
 // 部分杰士邦设备复用司康沃 SVA V2 模组（广播前缀 53 56 41），notify 独立在 FFE2；纯 HM-10 模组则 notify 也在 FFE1。
 private val JISSBON_NOTIFY_FFE2_UUID = Uuid.parse("0000ffe2-0000-1000-8000-00805f9b34fb")
+private val JISSBON_XFB_BATTERY_QUERY = byteArrayOf(0x55, 0x04)
+private val JISSBON_STATUS_QUERY = byteArrayOf(0x55, 0x0b)
 
 // 官方 wxapp 连接后必先 notifyBLECharacteristicValueChanged 订阅再控制，否则设备不响应写入。
 // 按设备实际暴露的特征自适应选 notify 通道：有 FFE2 用 FFE2，否则回退 FFE1。
@@ -179,7 +182,13 @@ internal class JissbonProfileProtocol(
 
     // 还原官方 getBLEDeviceCharacteristics 后立即 notifyBLECharacteristicValueChanged：控制前必先订阅 notify。
     override fun initialize(fingerprint: BleGattFingerprint): List<BleProtocolOperation> =
-        listOf(BleProtocolOperation.SubscribeNotify(notifyUuid))
+        buildList {
+            add(BleProtocolOperation.SubscribeNotify(notifyUuid))
+            if (spec.productType == "xfb") {
+                add(BleProtocolOperation.Write(JISSBON_WRITE_UUID, JISSBON_XFB_BATTERY_QUERY, withResponse = false))
+                add(BleProtocolOperation.Write(JISSBON_WRITE_UUID, JISSBON_STATUS_QUERY, withResponse = false))
+            }
+        }
 
     // 把控制动作展开成每个马达的强度（长度对齐 functionType）。
     private fun motorValues(action: ToyControlAction): List<Int> =
@@ -250,7 +259,7 @@ internal class JissbonVariantProtocol(private val spec: JissbonProfileSpec) : Bl
     override fun matches(fingerprint: BleGattFingerprint): Boolean =
         fingerprint.hasJissbonGatt() && fingerprint.jissbonProfileSpec() != null
     override fun createInstance(fingerprint: BleGattFingerprint): BleDeviceProtocol =
-        JissbonProfileProtocol(spec, fingerprint.jissbonNotifyUuid())
+        JissbonProfileProtocol(spec.withDeviceProductType(fingerprint), fingerprint.jissbonNotifyUuid())
     override fun commandsFor(action: ToyControlAction) = delegate.commandsFor(action)
 }
 
@@ -260,3 +269,8 @@ internal val jissbonVariantProtocols: List<JissbonVariantProtocol> = listOf(
     JissbonProfileSpec("jissbon_variant_14", "杰士邦 双区 1+4（备选）", "Jissbon Variant 14", listOf(1, 4)),
     JissbonProfileSpec("jissbon_variant_16", "杰士邦 双区 1+6（备选）", "Jissbon Variant 16", listOf(1, 6)),
 ).map { JissbonVariantProtocol(it) }
+
+private fun JissbonProfileSpec.withDeviceProductType(fingerprint: BleGattFingerprint): JissbonProfileSpec {
+    val deviceProductType = fingerprint.jissbonProfileSpec()?.productType
+    return if (deviceProductType == "xfb" && productType != "xfb") copy(productType = "xfb") else this
+}

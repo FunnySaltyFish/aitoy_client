@@ -66,7 +66,7 @@ class JissbonProtocolTest {
 
     @Test
     fun svaModuleDeviceSubscribesFfe2NotifyBeforeControl() {
-        // Fancy Remote Vibrator 实机跑在司康沃 SVA V2 模组上，notify 在 FFE2，控制前必须先订阅。
+        // Fancy Remote Vibrator 实机跑在司康沃 SVA V2 模组上，notify 在 FFE2，且属于官方 xfb 小粉饼分支。
         val fp = BleGattFingerprint(
             name = "Fancy Remote Vibrator",
             address = "FF:25:08:C3:49:AA",
@@ -80,6 +80,8 @@ class JissbonProtocolTest {
         val init = protocol.initialize(fp)
         val subscribe = assertIs<BleProtocolOperation.SubscribeNotify>(init.first())
         assertEquals(NOTIFY_FFE2_UUID, subscribe.characteristicUuid)
+        assertEquals("5504", assertIs<BleProtocolOperation.Write>(init[1]).bytes.hexUpper())
+        assertEquals("550B", assertIs<BleProtocolOperation.Write>(init[2]).bytes.hexUpper())
     }
 
     @Test
@@ -90,6 +92,18 @@ class JissbonProtocolTest {
             protocol.initialize(fingerprint("Crush Vibrating Egg")).first(),
         )
         assertEquals(WRITE_UUID, subscribe.characteristicUuid)
+        assertEquals(1, protocol.initialize(fingerprint("Crush Vibrating Egg")).size)
+    }
+
+    @Test
+    fun xfbCommandShapeFallbackKeepsOfficialProbe() {
+        val fp = fingerprint("Fancy Remote Vibrator")
+        val fallback = BleProtocolRegistry.resolveNativeAll(fp)
+            .first { it.status.id == "jissbon_variant_single" }
+
+        val init = fallback.initialize(fp)
+        assertEquals("5504", assertIs<BleProtocolOperation.Write>(init[1]).bytes.hexUpper())
+        assertEquals("550B", assertIs<BleProtocolOperation.Write>(init[2]).bytes.hexUpper())
     }
 
     @Test
