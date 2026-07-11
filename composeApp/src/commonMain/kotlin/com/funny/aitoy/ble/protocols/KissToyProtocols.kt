@@ -437,9 +437,9 @@ private const val KISS_TOY_TUTU_PACKET_PREFIX: Byte = 0x58
 private const val KISS_TOY_TUTU_PACKET_SIZE = 13
 private const val KISS_TOY_TUTU_AUTH_TIMEOUT_MS = 4_000L
 private const val KISS_TOY_TUTU_AUTH_SETTLE_MS = 1_000L
-internal val KISS_TOY_HISTORICAL_GATT_SERVICE_UUID = Uuid.parse("00001000-0000-1000-8000-00805f9b34fb")
-internal val KISS_TOY_HISTORICAL_GATT_WRITE_UUID = Uuid.parse("00001001-0000-1000-8000-00805f9b34fb")
-internal val KISS_TOY_HISTORICAL_GATT_NOTIFY_UUID = Uuid.parse("00001002-0000-1000-8000-00805f9b34fb")
+internal val KISS_TOY_HISTORICAL_GATT_SERVICE_UUID = LoyoEncryptedFrameCodec.serviceUuid
+internal val KISS_TOY_HISTORICAL_GATT_WRITE_UUID = LoyoEncryptedFrameCodec.writeUuid
+internal val KISS_TOY_HISTORICAL_GATT_NOTIFY_UUID = LoyoEncryptedFrameCodec.notifyUuid
 internal val KISS_TOY_OFFICIAL_V2_AE3A_SERVICE_UUID = Uuid.parse("0000ae3a-0000-1000-8000-00805f9b34fb")
 internal val KISS_TOY_OFFICIAL_V2_AE3A_WRITE_UUID = Uuid.parse("0000ae3b-0000-1000-8000-00805f9b34fb")
 internal val KISS_TOY_OFFICIAL_V2_AE3A_NOTIFY_UUID = Uuid.parse("0000ae3c-0000-1000-8000-00805f9b34fb")
@@ -551,6 +551,7 @@ internal object KissToyProtocol : BleDeviceProtocol {
 
     override fun matches(fingerprint: BleGattFingerprint): Boolean {
         if (fingerprint.kissToyOfficialV2Profile()?.usesDedicatedTutuRoute == true) return false
+        if (fingerprint.loyoProfile() != null) return false
         if (!fingerprint.hasKissToyHistoricalGattRoute()) return false
         val knownName = knownNames.any { it.equals(fingerprint.name, ignoreCase = true) }
         val hasNotify = fingerprint.characteristicUuids.contains(KISS_TOY_HISTORICAL_GATT_NOTIFY_UUID)
@@ -668,53 +669,15 @@ internal fun BleGattFingerprint.hasKissToyHistoricalGattRoute(): Boolean =
         characteristicUuids.contains(KISS_TOY_HISTORICAL_GATT_WRITE_UUID)
 
 internal fun kissToyHistoricalCommand(command: Int, first: Int, second: Int = 0): BleProtocolOperation.Write =
-    BleProtocolOperation.Write(
-        characteristicUuid = KISS_TOY_HISTORICAL_GATT_WRITE_UUID,
-        bytes = kissToyHistoricalEncrypt(kissToyHistoricalPayload(command, first, second)),
-        withResponse = true,
-    )
+    LoyoEncryptedFrameCodec.command(command, first, second)
 
 internal fun kissToyHistoricalPayload(command: Int, first: Int, second: Int = 0): ByteArray =
-    byteArrayOf(
-        0x5A,
-        0x00,
-        0x00,
-        0x01,
-        command.toByte(),
-        if (command == 0x40) 0x03 else first.toByte(),
-        if (command == 0x40) first.toByte() else second.toByte(),
-        if (command == 0x40) second.toByte() else 0x00,
-        0x00,
-        0x00,
-    )
+    LoyoEncryptedFrameCodec.payload(command, first, second)
 
-internal fun kissToyHistoricalEncrypt(payload: ByteArray): ByteArray {
-    val plain = ByteArray(12)
-    plain[0] = 0x23
-    payload.copyInto(
-        plain,
-        destinationOffset = 1,
-        startIndex = 0,
-        endIndex = payload.size.coerceAtMost(10)
-    )
-    plain[11] = plain.take(11).sumOf { it.toInt() }.toByte()
-    val encrypted = ByteArray(12)
-    val seed = plain[0]
-    encrypted[0] = seed
-    for (index in 1 until encrypted.size) {
-        val key = kissToyHistoricalKey(encrypted[index - 1], index)
-        encrypted[index] =
-            (((key.toInt() xor seed.toInt()) xor plain[index].toInt()) + key).toByte()
-    }
-    return encrypted
-}
+internal fun kissToyHistoricalEncrypt(payload: ByteArray): ByteArray =
+    LoyoEncryptedFrameCodec.encrypt(payload)
 
 internal fun kissToyHistoricalKey(previous: Byte, index: Int): Byte =
-    KISS_TOY_HISTORICAL_KEY_TAB[previous.toInt() and 0x03][index]
+    LoyoEncryptedFrameCodec.key(previous.toInt(), index).toByte()
 
-internal val KISS_TOY_HISTORICAL_KEY_TAB = arrayOf(
-    byteArrayOf(0, 24, -104, -9, -91, 61, 13, 41, 37, 80, 68, 70),
-    byteArrayOf(0, 69, 110, 106, 111, 120, 32, 83, 45, 49, 46, 55),
-    byteArrayOf(0, 101, 120, 32, 84, 111, 121, 115, 10, -114, -99, -93),
-    byteArrayOf(0, -59, -42, -25, -8, 10, 50, 32, 111, 98, 13, 10),
-)
+internal val KISS_TOY_HISTORICAL_KEY_TAB: Array<IntArray> = LoyoEncryptedFrameCodec.keyTab
