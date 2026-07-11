@@ -342,8 +342,8 @@ internal object CachitoShikong2BroadcastProtocol : BleBroadcastProtocol {
 }
 
 /**
- * 失控 3.0 对应官方 App `TYPE_SHIKONG3 = 0x23`。
- * 该机型仍使用 Service UUID 广播控制，但命令前缀是 `71000B`，不能复用 2.0 的 `710002` 帧。
+ * 失控 3.0 对应官方 App `TYPE_SHIKONG3 = 35`。
+ * 该机型仍使用 Service UUID 广播控制，命令前缀是 `71000B`，不能复用 2.0 的 `710002` 帧。
  */
 internal object CachitoShikong3BroadcastProtocol : BleBroadcastProtocol {
     private val modeTemplates = listOf(
@@ -368,15 +368,9 @@ internal object CachitoShikong3BroadcastProtocol : BleBroadcastProtocol {
     )
 
     override fun matches(device: ScannedBleDevice): Boolean {
-        val compactText = buildString {
-            append(device.name)
-            append(' ')
-            append(device.broadcastProtocolName)
-        }.lowercase().replace(" ", "").replace(".", "")
-        val hasShikong3Name = compactText.contains("失控3") || compactText.contains("shikong3")
-        // 对齐官方 ScanFilter：company 0x0071 + 数据首字节 0x0B（TYPE_SHIKONG3=0x23 机型的广播类型位）。
-        return hasShikong3Name ||
-            device.hasCachitoBroadcastFramePrefix("71000B")
+        // 线上控制帧使用 0x0B；若真机广播产品类型，则官方 DeviceType.TYPE_SHIKONG3 为 35(0x23)。
+        return device.hasCachitoBroadcastFramePrefix("71000B") ||
+            device.hasCachitoManufacturerTypeByte(0x23)
     }
 
     override fun commandsFor(action: ToyControlAction): List<BleAdvertiseOperation> =
@@ -794,18 +788,9 @@ internal object CachitoDaxiuBroadcastProtocol : BleBroadcastProtocol {
     )
 
     override fun matches(device: ScannedBleDevice): Boolean {
-        val text = buildString {
-            append(device.name)
-            append(' ')
-            append(device.serviceUuids.joinToString())
-            append(' ')
-            append(device.manufacturerData)
-            append(' ')
-            append(device.scanRecordHex)
-        }
-        return text.contains("大秀", ignoreCase = true) ||
-            text.contains("daxiu", ignoreCase = true) ||
-            device.hasCachitoBroadcastFramePrefix("710003")
+        // 控制帧使用 0x03；若真机广播产品类型，则官方 DeviceType.TYPE_DAXIU 为 14(0x0E)。
+        return device.hasCachitoBroadcastFramePrefix("710003") ||
+            device.hasCachitoManufacturerTypeByte(0x0E)
     }
 
     override fun commandsFor(action: ToyControlAction): List<BleAdvertiseOperation> =
@@ -955,7 +940,7 @@ internal fun ScannedBleDevice.hasCachitoBroadcastFramePrefix(prefix: String): Bo
     val normalizedPrefix = prefix.compactHex().uppercase()
     if (normalizedPrefix.length != 6 || !normalizedPrefix.startsWith("7100")) return false
     val typeByte = normalizedPrefix.takeLast(2).toIntOrNull(16) ?: return false
-    if (manufacturerFirstByte(CACHITO_COMPANY_ID) == typeByte) return true
+    if (hasCachitoManufacturerTypeByte(typeByte)) return true
 
     val rawRecord = scanRecordHex.compactHex().uppercase()
     if (rawRecord.contains("FF$normalizedPrefix")) return true
@@ -965,9 +950,21 @@ internal fun ScannedBleDevice.hasCachitoBroadcastFramePrefix(prefix: String): Bo
     }
 }
 
+internal fun ScannedBleDevice.hasCachitoManufacturerTypeByte(typeByte: Int): Boolean {
+    val normalizedType = CachitoBroadcastCodec.toHex(typeByte)
+    if (manufacturerFirstByte(CACHITO_COMPANY_ID) == typeByte.coerceIn(0, 255)) return true
+
+    val rawRecord = scanRecordHex.compactHex().uppercase()
+    if (rawRecord.contains("FF7100$normalizedType")) return true
+
+    val manufacturerText = manufacturerData.compactHex().uppercase()
+    return manufacturerText.startsWith("7100$normalizedType")
+}
+
 internal fun ScannedBleDevice.hasCachitoManufacturerSignature(): Boolean =
     manufacturerFirstByte(CACHITO_COMPANY_ID) != null ||
-        scanRecordHex.compactHex().uppercase().contains("FF7100")
+        scanRecordHex.compactHex().uppercase().contains("FF7100") ||
+        manufacturerData.compactHex().uppercase().startsWith("7100")
 
 private fun String.compactHex(): String =
     filter { character ->
@@ -984,7 +981,7 @@ private fun String.compactHex(): String =
 internal fun ScannedBleDevice.manufacturerFirstByte(companyId: Int): Int? =
     manufacturerData.split(",").firstNotNullOfOrNull { entry ->
         val idText = entry.substringBefore(':', missingDelimiterValue = "").trim()
-        val id = idText.removePrefix("0x").removePrefix("0X").toIntOrNull(16)
+        val id = parseManufacturerId(idText)
         if (id != companyId) return@firstNotNullOfOrNull null
         entry.substringAfter(':', missingDelimiterValue = "")
             .trim()
@@ -993,3 +990,12 @@ internal fun ScannedBleDevice.manufacturerFirstByte(companyId: Int): Int? =
             ?.takeIf { it.length in 1..2 && it.all { ch -> ch.isDigit() || ch.lowercaseChar() in 'a'..'f' } }
             ?.toIntOrNull(16)
     }
+
+private fun parseManufacturerId(text: String): Int? {
+    val trimmed = text.trim()
+    if (trimmed.startsWith("0x", ignoreCase = true)) {
+        return trimmed.drop(2).toIntOrNull(16)
+    }
+    return trimmed.toIntOrNull(10)?.takeIf { it == CACHITO_COMPANY_ID }
+        ?: trimmed.toIntOrNull(16)
+}

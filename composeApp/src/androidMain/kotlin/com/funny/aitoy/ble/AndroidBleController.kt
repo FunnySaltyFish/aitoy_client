@@ -11,6 +11,7 @@ import android.bluetooth.BluetoothProfile
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanRecord
 import android.bluetooth.le.ScanResult
+import android.bluetooth.le.ScanSettings
 import android.content.Context
 import android.os.Build
 import android.os.Handler
@@ -316,7 +317,11 @@ class AndroidBleController(
         }
         trace("开始扫描 BLE 设备")
         scanSignatures.clear()
-        adapter.bluetoothLeScanner?.startScan(scanCallback)
+        val settings = ScanSettings.Builder()
+            .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+            .setReportDelay(0L)
+            .build()
+        adapter.bluetoothLeScanner?.startScan(null, settings, scanCallback)
     }
 
     fun stopScan() {

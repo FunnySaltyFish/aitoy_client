@@ -27,8 +27,20 @@ data class ScannedBleDevice(
             return hasAppleManufacturerData
         }
 
+    val isLikelyMicrosoftSwiftPairDevice: Boolean
+        get() {
+            val normalizedManufacturer = manufacturerData.trim().lowercase()
+            if (normalizedManufacturer.startsWith("0x6:") || normalizedManufacturer.startsWith("0x06:")) {
+                return true
+            }
+            return scanRecordHex.filter { it.isDigit() || it.lowercaseChar() in 'a'..'f' }
+                .uppercase()
+                .contains("FF0600")
+        }
+
     val isLikelySystemPeripheral: Boolean
         get() = isLikelyAppleContinuityDevice ||
+                isLikelyMicrosoftSwiftPairDevice ||
                 name.equals("Windows Device", ignoreCase = true)
 
     private companion object {

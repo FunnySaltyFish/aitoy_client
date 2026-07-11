@@ -29,6 +29,46 @@ class CachitoBroadcastDiscoveryTest {
     }
 
     @Test
+    fun recognizesDaxiuAndShikong3FromOfficialProductTypeBytes() {
+        val daxiuMatches = BleBroadcastProtocolRegistry.resolveAll(
+            ScannedBleDevice(
+                name = "未命名设备",
+                address = "AA:BB:CC:DD:EE:01",
+                rssi = -60,
+                connectable = false,
+                manufacturerData = "0x71:0E 00",
+            ),
+        )
+        val shikong3Matches = BleBroadcastProtocolRegistry.resolveAll(
+            ScannedBleDevice(
+                name = "未命名设备",
+                address = "AA:BB:CC:DD:EE:02",
+                rssi = -60,
+                connectable = false,
+                manufacturerData = "113:23 00",
+            ),
+        )
+
+        assertTrue(daxiuMatches.any { it.status.id == "cachito_daxiu_advertise" })
+        assertTrue(shikong3Matches.any { it.status.id == "cachito_shikong3_advertise" })
+    }
+
+    @Test
+    fun recognizesOfficialParsedManufacturerFrameText() {
+        val matches = BleBroadcastProtocolRegistry.resolveAll(
+            ScannedBleDevice(
+                name = "未命名设备",
+                address = "AA:BB:CC:DD:EE:03",
+                rssi = -60,
+                connectable = false,
+                manufacturerData = "71000B0000",
+            ),
+        )
+
+        assertTrue(matches.any { it.status.id == "cachito_shikong3_advertise" })
+    }
+
+    @Test
     fun matchesShikong4ForHj002CarryingBothSvakomAndCachitoMarkers() {
         // HJ-002 是司康沃/失控双品牌 OEM 设备，广播同时带 SVA(0x27) 与 Cachito(0x71:17) 标记，
         // 但控制通道是失控 4.0 广播；官方仅按 company 0x0071 + 首字节 0x17 识别，不能因 SVA 标记排除。
@@ -126,9 +166,11 @@ class CachitoBroadcastDiscoveryTest {
             rssi = -70,
             connectable = false,
             manufacturerData = "0x6:01 09 20 22 74 F1 D6 D6 1A 19 FC 0F 32",
+            scanRecordHex = "1A FF 06 00 01 09 20 22 74 F1 D6 D6 1A 19 FC 0F 32",
         )
 
         assertFalse(BleBroadcastProtocolRegistry.isUnconfirmedCachitoBroadcastDevice(device))
+        assertFalse(device.controllable)
     }
 
     @Test
