@@ -101,6 +101,7 @@ internal object BleProtocolRegistry {
                     SvakomQhSx045Protocol,
                     ChokerMiyinProtocol,
                     JissbonProtocol,
+                    SosexyBoboBeiProtocol,
                     MizzzeeXhtkjProtocol,
                     SenseeCcpa10S2Protocol,
                     OhMiBodEsca2Protocol,

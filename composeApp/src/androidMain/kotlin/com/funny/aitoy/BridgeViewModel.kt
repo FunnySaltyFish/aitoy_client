@@ -22,10 +22,10 @@ import com.funny.aitoy.ble.ProtocolTemplate
 import com.funny.aitoy.ble.ScannedBleDevice
 import com.funny.aitoy.ble.ToyControlAction
 import com.funny.aitoy.ble.ToyControlStyle
+import com.funny.aitoy.ble.independentFunctionCode
+import com.funny.aitoy.ble.independentFunctionModeMax
 import com.funny.aitoy.ble.svakomSl278PairIdentity
 import com.funny.aitoy.ble.svakomStableIdentity
-import com.funny.aitoy.ble.svakomV2FunctionCode
-import com.funny.aitoy.ble.svakomV2FunctionModeMax
 import com.funny.aitoy.chat.ToyTool
 import com.funny.aitoy.chat.ToyToolResult
 import com.funny.aitoy.core.kmp.ToastType
@@ -1773,8 +1773,8 @@ class BridgeViewModel : ViewModel() {
         val feature = status.features.getOrNull(step.featureIndex)
             ?: status.features.firstOrNull()
             ?: return ToyControlAction.Intensity(mappedIntensity)
-        val functionCode = svakomV2FunctionCode(feature.type).coerceIn(1, 9)
-        val safeMode = step.mode.coerceIn(0, svakomV2FunctionModeMax(feature.type).coerceAtLeast(1))
+        val functionCode = status.independentFunctionCode(feature).coerceIn(1, 9)
+        val safeMode = step.mode.coerceIn(0, status.independentFunctionModeMax(feature).coerceAtLeast(1))
         return ToyControlAction.Combined(
             mode = functionCode * 100 + safeMode,
             intensity = mappedIntensity,

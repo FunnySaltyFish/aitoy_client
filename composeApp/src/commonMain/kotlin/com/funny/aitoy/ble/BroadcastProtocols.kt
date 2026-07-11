@@ -592,7 +592,9 @@ internal object CachitoShikong4BroadcastProtocol : BleBroadcastProtocol {
         // 官方失控 4.0 控制页仅按 company 0x0071 + 首字节 0x17 扫描识别
         // （ControlShikong4Fragment 的 setManufacturerData(113, {23})），不校验设备名或其他厂商标记。
         // HJ-002 等双品牌 OEM 设备会同时带 SVA(0x27) 标记，但控制通道仍是失控 4.0 广播，不能因 SVA 标记排除。
-        return compactText.contains("失控4") ||
+        val normalizedName = device.name.normalizedBroadcastDeviceName()
+        return normalizedName == "hj002" ||
+            compactText.contains("失控4") ||
             compactText.contains("shikong4") ||
             device.hasCachitoBroadcastFramePrefix("710017")
     }

@@ -86,10 +86,10 @@ import com.funny.aitoy.ble.BleConnectionState
 import com.funny.aitoy.ble.BleProtocolStatus
 import com.funny.aitoy.ble.ProtocolAttemptStatus
 import com.funny.aitoy.ble.SvakomV2HeatFunctionCode
-import com.funny.aitoy.ble.svakomV2FunctionCode
-import com.funny.aitoy.ble.svakomV2FunctionModeMax
 import com.funny.aitoy.ble.ScannedBleDevice
 import com.funny.aitoy.ble.ToyControlStyle
+import com.funny.aitoy.ble.independentFunctionCode
+import com.funny.aitoy.ble.independentFunctionModeMax
 import com.funny.aitoy.chat.ChatScreen
 import com.funny.aitoy.chat.ChatViewModel
 import kotlinx.coroutines.launch
@@ -1114,8 +1114,8 @@ private fun MultiFunctionControl(
                 address = address,
                 status = status,
                 title = feature.label.ifBlank { feature.type },
-                functionCode = svakomV2FunctionCode(feature.type),
-                modeMax = svakomV2FunctionModeMax(feature.type),
+                functionCode = status.independentFunctionCode(feature),
+                modeMax = status.independentFunctionModeMax(feature),
                 maxIntensity = feature.max.coerceAtLeast(1),
             )
         }

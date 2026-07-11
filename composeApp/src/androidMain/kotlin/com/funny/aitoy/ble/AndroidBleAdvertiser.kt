@@ -127,7 +127,7 @@ internal class AndroidBleAdvertiser(
             AdvertisingSetParameters.Builder()
                 .setLegacyMode(true)
                 .setInterval(AdvertisingSetParameters.INTERVAL_HIGH)
-                .setTxPowerLevel(AdvertisingSetParameters.TX_POWER_MEDIUM)
+                .setTxPowerLevel(AdvertisingSetParameters.TX_POWER_HIGH)
                 .setConnectable(false)
                 .setScannable(false)
                 .build(),
@@ -161,7 +161,7 @@ internal class AndroidBleAdvertiser(
                 .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
                 .setConnectable(false)
                 .setTimeout(0)
-                .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_MEDIUM)
+                .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH)
                 .build(),
             data,
             callback,

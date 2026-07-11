@@ -46,6 +46,23 @@ class CachitoBroadcastDiscoveryTest {
     }
 
     @Test
+    fun matchesShikong4ForHj002WhenSelectedRecordOnlyKeepsSvakomManufacturer() {
+        // 线上 Trace 出现过同一台 HJ-002 的扫描帧带 0x71:17，但点击连接时仅保留 SVA(0x27) 厂商数据。
+        // 这种情况下仍应走失控 4.0 广播，避免被 Svakom Iker GATT 路由抢走。
+        val matches = BleBroadcastProtocolRegistry.resolveAll(
+            ScannedBleDevice(
+                name = "HJ-002",
+                address = "F5:0C:00:00:09:47",
+                rssi = -49,
+                connectable = true,
+                manufacturerData = "0x27:53 56 41 02 FF 50 0C 00 00 09 47 FF 50 00 00 0D 19 30 BB 00 01",
+            ),
+        )
+
+        assertTrue(matches.any { it.status.id == "cachito_shikong4_advertise" })
+    }
+
+    @Test
     fun shikong4UsesOfficialBaseAndPulseBroadcastFrames() {
         val protocol = CachitoShikong4BroadcastProtocol
 
