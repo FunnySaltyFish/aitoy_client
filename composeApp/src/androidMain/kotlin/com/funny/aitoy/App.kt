@@ -31,11 +31,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Autorenew
 import androidx.compose.material.icons.outlined.BluetoothSearching
-import androidx.compose.material.icons.outlined.Chat
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Favorite
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.KeyboardArrowUp
+import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.SettingsRemote
 import androidx.compose.material.icons.outlined.StopCircle
 import androidx.compose.material3.AlertDialog
@@ -76,6 +76,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -90,8 +91,6 @@ import com.funny.aitoy.ble.ScannedBleDevice
 import com.funny.aitoy.ble.ToyControlStyle
 import com.funny.aitoy.ble.independentFunctionCode
 import com.funny.aitoy.ble.independentFunctionModeMax
-import com.funny.aitoy.chat.ChatScreen
-import com.funny.aitoy.chat.ChatViewModel
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -110,7 +109,6 @@ internal val Danger = Color(0xFFFF5E76)
 @Composable
 fun App() {
     val vm = viewModel { BridgeViewModel() }
-    val chatVm = viewModel { ChatViewModel(vm) }
     var selectedTab by remember { mutableIntStateOf(0) }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         vm.resumeRelay()
@@ -139,8 +137,8 @@ fun App() {
                     NavigationBarItem(
                         selected = selectedTab == 1,
                         onClick = { selectedTab = 1 },
-                        icon = { Icon(Icons.Outlined.Chat, null) },
-                        label = { Text("对话") },
+                        icon = { Icon(Icons.Outlined.Link, null) },
+                        label = { Text("教程") },
                     )
                 }
             },
@@ -151,10 +149,57 @@ fun App() {
                 if (selectedTab == 0) {
                     DeviceHome(vm)
                 } else {
-                    ChatScreen(vm = chatVm, bridgeVm = vm)
+                    McpGuideScreen(vm)
                 }
             }
             UpdateDialog(vm)
+        }
+    }
+}
+
+@Composable
+private fun McpGuideScreen(vm: BridgeViewModel) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .statusBarsPadding()
+            .padding(horizontal = 24.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Icon(
+                imageVector = Icons.Outlined.Link,
+                contentDescription = null,
+                tint = Rose,
+                modifier = Modifier
+                    .background(Color(0x332A0F1A), CircleShape)
+                    .padding(12.dp),
+            )
+            Text(
+                text = "请前往任意支持 MCP 的软件使用，可查看如下教程",
+                color = TextMain,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+            )
+            Button(
+                onClick = vm::openTutorialDocument,
+                colors = ButtonDefaults.buttonColors(containerColor = Rose, contentColor = Ink),
+            ) {
+                Icon(Icons.Outlined.Link, null)
+                Spacer(Modifier.width(8.dp))
+                Text("查看教程")
+            }
+            Text(
+                text = "为保证连接稳定，请将此应用的后台电池设置为无限制，在最近任务中锁定应用，并打开通知权限。",
+                color = TextSoft,
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = TextAlign.Center,
+            )
         }
     }
 }
@@ -322,11 +367,15 @@ private fun DeviceHeader(vm: BridgeViewModel) {
             )
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
-                Text(
-                    "AI Toy",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Black,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "AI Toy",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Black,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    VersionBadge(BridgeViewModel.APP_VERSION_NAME)
+                }
                 Text(
                     "把小玩具交给你的 AI 伙伴",
                     color = TextSoft,
@@ -355,6 +404,21 @@ private fun DeviceHeader(vm: BridgeViewModel) {
             }
         }
     }
+}
+
+@Composable
+private fun VersionBadge(versionName: String) {
+    if (versionName.isBlank()) return
+    Text(
+        text = "v$versionName",
+        color = Honey,
+        modifier = Modifier
+            .background(Honey.copy(alpha = 0.12f), RoundedCornerShape(50))
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        style = MaterialTheme.typography.labelSmall,
+        fontWeight = FontWeight.Bold,
+        maxLines = 1,
+    )
 }
 
 private fun headerStatus(vm: BridgeViewModel): HeaderStatus {

@@ -28,9 +28,6 @@ kotlin {
             implementation(libs.androidx.activity.compose)
             implementation(libs.androidx.core.ktx)
             implementation(libs.squareup.okhttp)
-            implementation(libs.mikepenz.markdown.renderer)
-            implementation(libs.mikepenz.markdown.renderer.m3)
-            implementation(libs.openai.java)
         }
         commonMain.dependencies {
             implementation(projects.core)

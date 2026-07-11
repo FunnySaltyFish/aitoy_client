@@ -26,8 +26,6 @@ import com.funny.aitoy.ble.independentFunctionCode
 import com.funny.aitoy.ble.independentFunctionModeMax
 import com.funny.aitoy.ble.svakomSl278PairIdentity
 import com.funny.aitoy.ble.svakomStableIdentity
-import com.funny.aitoy.chat.ToyTool
-import com.funny.aitoy.chat.ToyToolResult
 import com.funny.aitoy.core.kmp.ToastType
 import com.funny.aitoy.core.kmp.appCtx
 import com.funny.aitoy.core.kmp.openUrl
@@ -294,29 +292,6 @@ class BridgeViewModel : ViewModel() {
                     .thenByDescending { it.lastSeenKey(saved) }
             )
         }
-
-    val builtInTools = listOf(
-        ToyTool(
-            name = "get_toy_status",
-            title = "查看设备状态",
-            description = "读取当前连接状态、设备名称、协议、强度和节奏。",
-        ),
-        ToyTool(
-            name = "set_toy_vibration",
-            title = "调节设备",
-            description = "按指定时间调节强度和节奏。",
-        ),
-        ToyTool(
-            name = "stop_toy",
-            title = "立即停止",
-            description = "停止当前已连接的设备。",
-        ),
-        ToyTool(
-            name = "stop_all_toys",
-            title = "全部停止",
-            description = "停止当前应用管理的所有设备。",
-        ),
-    )
 
     private val scanController = AndroidBleController(
         onDevice = ::onDeviceFound,
@@ -798,41 +773,6 @@ class BridgeViewModel : ViewModel() {
         editingRemarkProtocolName = ""
         busyHint = "已保存到我的设备"
         toast("已保存，手机正在上线", ToastType.Success)
-    }
-
-    fun getToyStatusForChat(): ToyToolResult = ToyToolResult(
-        ok = true,
-        message = buildString {
-            append("设备状态：${connectionState.label}")
-            if (selectedName.isNotBlank()) append("；设备：$selectedName")
-            append("；协议：${protocolStatus.displayName}")
-            append("；当前强度：$intensity")
-            if (protocolStatus.supportsMode) append("；当前节奏：$mode")
-            append("；可控制：${if (protocolStatus.controllable) "是" else "否"}")
-        },
-    )
-
-    fun setToyVibrationForChat(
-        intensityPercent: Int,
-        mode: Int,
-        durationSec: Int,
-    ): ToyToolResult = runCatching {
-        val safeDuration = durationSec.coerceIn(1, 15)
-        sendToySet(
-            intensityPercent = intensityPercent.coerceIn(0, 100),
-            requestedMode = mode.coerceAtLeast(1),
-            autoStopSec = safeDuration,
-        )
-        ToyToolResult(true, "已调节设备，持续 $safeDuration 秒。")
-    }.getOrElse {
-        ToyToolResult(false, it.message ?: "操作没有完成。")
-    }
-
-    fun stopToyForChat(all: Boolean = false): ToyToolResult = runCatching {
-        sendToyStop(all = all)
-        ToyToolResult(true, if (all) "已全部停止。" else "已停止。")
-    }.getOrElse {
-        ToyToolResult(false, it.message ?: "操作没有完成。")
     }
 
     fun connectRelay() {
