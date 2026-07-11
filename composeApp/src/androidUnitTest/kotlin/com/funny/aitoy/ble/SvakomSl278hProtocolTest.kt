@@ -114,6 +114,42 @@ class SvakomSl278hProtocolTest {
     }
 
     @Test
+    fun sl278bAppVersionCodeUsesAppPairProfileAndWritesOnlySelectedFunction() {
+        val protocol = BleProtocolRegistry.resolveNative(
+            svakomFingerprint(
+                productCode = 0xf0,
+                name = "SL278B",
+                manufacturerData = "0x101:53 56 41 14 F0 FF FF 11 D0 86 C5 30 A1",
+            ),
+        ) ?: error("SL278B app profile did not resolve")
+
+        assertEquals("svakom_sl278_app_pair", protocol.status.id)
+        assertEquals("SVAKOM 分欣 App 版", protocol.status.displayName)
+        assertEquals(listOf("伸缩", "震动", "吮吸"), protocol.status.channelNames)
+
+        val stretch = protocol.commandsFor(ToyControlAction.Combined(mode = 102, intensity = 1))
+        assertEquals(1, stretch.size)
+        assertEquals("55080000020000", assertIs<BleProtocolOperation.Write>(stretch.single()).bytes.hexUpper())
+
+        val suction = protocol.commandsFor(ToyControlAction.Combined(mode = 303, intensity = 8))
+        assertEquals(1, suction.size)
+        assertEquals("55090000030800", assertIs<BleProtocolOperation.Write>(suction.single()).bytes.hexUpper())
+    }
+
+    @Test
+    fun sl278NameFallbackDoesNotOverrideUnknownSvakomProductCode() {
+        val protocol = BleProtocolRegistry.resolveNative(
+            svakomFingerprint(
+                productCode = 0xee,
+                name = "SL278B",
+                manufacturerData = "0x101:53 56 41 14 EE FF FF 11 D0 86 C5 30 A1",
+            ),
+        )
+
+        assertEquals(null, protocol)
+    }
+
+    @Test
     fun sl278kPairSupportsVibrateSuctionAndHeatOverOneConnection() {
         val protocol = BleProtocolRegistry.resolveNative(svakomFingerprint(productCode = 0x80, name = "SL278K"))
             ?: error("SL278K vibration stick protocol not resolved")

@@ -91,7 +91,7 @@ internal object SvakomV2MultiFunctionProtocol : BleDeviceProtocol {
                 fingerprint.characteristicUuids.contains(notifyUuid)
         val productCode = fingerprint.svakomProductCode()
         val isSl278h = productCode in SL278_PLUS_PRODUCT_CODES ||
-                SL278_PLUS_NAMES.any { name.contains(it) }
+                productCode == null && SL278_PLUS_NAMES.any { name.contains(it) }
         return isSl278h && hasSvakomGatt && fingerprint.hasSvakomManufacturerData()
     }
 
@@ -100,7 +100,7 @@ internal object SvakomV2MultiFunctionProtocol : BleDeviceProtocol {
 
     override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> = emptyList()
 
-    private val SL278_PLUS_PRODUCT_CODES = setOf(100, 101, 107, 108, 110, 111, 121, 128, 129, 145, 328, 329)
+    private val SL278_PLUS_PRODUCT_CODES = setOf(100, 101, 107, 108, 110, 111, 121, 128, 129, 145, 240, 328, 329)
     private val SL278_PLUS_NAMES = listOf("sl278b", "sl278f", "sl278h", "sl278i", "sl278j", "sl278k", "sl278u")
 }
 
@@ -416,6 +416,16 @@ internal object SVAKOM_V2_SL278B_PAIR : SvakomV2Profile(
     writeCurrentStateOnUpdate = false,
 )
 
+internal object SVAKOM_V2_SL278_APP_PAIR : SvakomV2Profile(
+    status = svakomV2Status(
+        id = "svakom_sl278_app_pair",
+        displayName = "SVAKOM 分欣 App 版",
+        functions = listOf(SvakomV2Stretch, SvakomV2Vibrate, SvakomV2Suck, SvakomV2Heat),
+    ),
+    functions = listOf(SvakomV2Stretch, SvakomV2Vibrate, SvakomV2Suck, SvakomV2Heat),
+    writeCurrentStateOnUpdate = false,
+)
+
 internal object SVAKOM_V2_SL278K_PAIR : SvakomV2Profile(
     status = svakomV2Status(
         id = "svakom_sl278_plus_pair",
@@ -496,6 +506,7 @@ internal fun Int?.svakomV2Profile(): SvakomV2Profile =
         129 -> SVAKOM_V2_SUCK
         108 -> SVAKOM_V2_SL278B_PAIR
         107 -> SVAKOM_V2_SL278B_SUCK
+        240 -> SVAKOM_V2_SL278_APP_PAIR
         101, 111, 145, 328 -> SVAKOM_V2_FLAP
         121 -> SVAKOM_V2_SUCK
         else -> SVAKOM_V2_STRETCH_VIBRATE

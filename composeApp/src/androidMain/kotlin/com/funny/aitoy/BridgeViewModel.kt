@@ -1006,6 +1006,7 @@ class BridgeViewModel : ViewModel() {
     private val SVAKOM_SL278_PAIR_PROTOCOL_IDS = setOf(
         "svakom_sl278_plus_pair",
         "svakom_sl278_ai_pair",
+        "svakom_sl278_app_pair",
     )
 
     private fun manufacturerDataForAddress(address: String): String =
