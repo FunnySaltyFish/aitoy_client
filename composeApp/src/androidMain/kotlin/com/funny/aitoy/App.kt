@@ -791,7 +791,7 @@ private fun DeviceRow(
                 device.broadcastProtocolName.isNotBlank() -> "已识别：${device.broadcastProtocolName}"
                 isUnconfirmedCachitoBroadcast -> "发现可能兼容的设备，型号待确认"
                 device.controllable && device.connectable -> "可连接"
-                device.controllable -> "可尝试连接"
+                device.controllable -> "可尝试识别"
                 else -> "暂不支持连接"
             }
             Text(
@@ -817,8 +817,8 @@ private fun DeviceRow(
                     runtimeState == ToyRuntimeState.Connecting -> "连接中"
                     device.broadcastProtocolName.isNotBlank() -> "连接"
                     device.controllable && device.connectable -> "连接"
-                    device.controllable -> "尝试连接"
-                    isUnconfirmedCachitoBroadcast -> "暂未适配"
+                    device.controllable -> "尝试识别"
+                    isUnconfirmedCachitoBroadcast -> "尝试识别"
                     else -> "暂不支持"
                 }
             )

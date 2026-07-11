@@ -399,7 +399,26 @@ class AndroidBleController(
             )
         }
         if (!device.connectable) {
-            trace("扫描结果显示不可连接，仍尝试读取设备能力 address=${device.address}")
+            updateProtocolAttempt(
+                ProtocolAttemptStatus(
+                    active = false,
+                    success = false,
+                    title = "暂时还不能控制这个设备",
+                    message = "已记录设备信息，后续可以继续适配",
+                    exhausted = true,
+                ),
+            )
+            trace(
+                "未识别的不可连接广播 name=${device.name} address=${device.address} " +
+                    "services=${device.serviceUuids.joinToString().ifBlank { "<none>" }} " +
+                    "manufacturer=${device.manufacturerData.ifBlank { "<none>" }} " +
+                    "record=${device.scanRecordHex.ifBlank { "<none>" }}",
+                type = "ble_unrecognized_broadcast",
+                uploadPolicy = AiToyTraceUploadPolicy.Always,
+                key = "ble_unrecognized_broadcast:$operationId",
+            )
+            updateState(BleConnectionState.Error)
+            return
         }
         updateState(BleConnectionState.Connecting)
         val remoteDevice = adapter?.getRemoteDevice(device.address)

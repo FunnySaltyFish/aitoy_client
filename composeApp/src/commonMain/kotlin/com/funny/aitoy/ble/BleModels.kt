@@ -12,7 +12,11 @@ data class ScannedBleDevice(
 ) {
     val controllable: Boolean
         get() = !isLikelySystemPeripheral &&
-                (connectable || broadcastProtocolName.isNotBlank() || serviceUuids.isNotEmpty())
+                (connectable || broadcastProtocolName.isNotBlank() || serviceUuids.isNotEmpty() || isPotentialBroadcastAdvertisement)
+
+    val isPotentialBroadcastAdvertisement: Boolean
+        get() = !connectable &&
+                (manufacturerData.isNotBlank() || scanRecordHex.isNotBlank())
 
     val isLikelyAppleContinuityDevice: Boolean
         get() {

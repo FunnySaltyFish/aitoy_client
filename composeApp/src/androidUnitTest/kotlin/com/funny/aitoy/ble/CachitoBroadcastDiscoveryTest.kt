@@ -115,7 +115,7 @@ class CachitoBroadcastDiscoveryTest {
 
         assertTrue(BleBroadcastProtocolRegistry.resolveAll(device).isEmpty())
         assertTrue(BleBroadcastProtocolRegistry.isUnconfirmedCachitoBroadcastDevice(device))
-        assertFalse(device.controllable)
+        assertTrue(device.controllable)
     }
 
     @Test
@@ -129,6 +129,28 @@ class CachitoBroadcastDiscoveryTest {
         )
 
         assertFalse(BleBroadcastProtocolRegistry.isUnconfirmedCachitoBroadcastDevice(device))
+    }
+
+    @Test
+    fun allowsUnrecognizedNonConnectableBroadcastToBeTriedWithoutSystemPeripherals() {
+        val rawOnlyBroadcast = ScannedBleDevice(
+            name = "未命名设备",
+            address = "AA:BB:CC:DD:EE:FF",
+            rssi = -70,
+            connectable = false,
+            scanRecordHex = "17 2B 01 00 30 D7 4C B9",
+        )
+        val appleBroadcast = ScannedBleDevice(
+            name = "未命名设备",
+            address = "11:22:33:44:55:66",
+            rssi = -50,
+            connectable = false,
+            manufacturerData = "0x4c:12 02 00 01",
+            scanRecordHex = "07 FF 4C 00 12 02 00 01",
+        )
+
+        assertTrue(rawOnlyBroadcast.controllable)
+        assertFalse(appleBroadcast.controllable)
     }
 
     private fun scanRecordDevice(scanRecordHex: String) = ScannedBleDevice(
