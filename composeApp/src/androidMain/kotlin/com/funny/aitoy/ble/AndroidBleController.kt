@@ -37,7 +37,7 @@ class AndroidBleController(
     private val onBatteryPercent: (Int?) -> Unit = {},
     private val onLog: (String) -> Unit,
     private val onTrace: (AiToyTraceEvent) -> Unit,
-) {
+) : BleController {
     private val context: Context = AndroidPlatformInit.appContext
     private val adapter = context.getSystemService(BluetoothManager::class.java).adapter
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -306,7 +306,7 @@ class AndroidBleController(
         }
     }
 
-    fun startScan() {
+    override fun startScan() {
         if (adapter == null) {
             trace("当前手机不支持蓝牙", error = true)
             return
@@ -324,12 +324,12 @@ class AndroidBleController(
         adapter.bluetoothLeScanner?.startScan(null, settings, scanCallback)
     }
 
-    fun stopScan() {
+    override fun stopScan() {
         runCatching { adapter?.bluetoothLeScanner?.stopScan(scanCallback) }
         trace("停止扫描")
     }
 
-    fun connect(device: ScannedBleDevice, protocolTemplate: ProtocolTemplate) {
+    override fun connect(device: ScannedBleDevice, protocolTemplate: ProtocolTemplate) {
         stopScan()
         // 关键：发起新连接前，把本控制器上一条 GATT 彻底 close()（而非 disconnect()）。
         // pending 连接只 disconnect() 会被 Android 以 status=22 本地终止并泄漏 client 槽，
@@ -436,7 +436,7 @@ class AndroidBleController(
         }
     }
 
-    fun sendAction(action: ToyControlAction) {
+    override fun sendAction(action: ToyControlAction) {
         activeBroadcastProtocol?.let { protocol ->
             val commands = protocol.commandsFor(action)
             trace(
@@ -488,11 +488,11 @@ class AndroidBleController(
         enqueueControl(protocol, action, commands)
     }
 
-    fun stopDevice() = sendAction(ToyControlAction.Stop)
+    override fun stopDevice() = sendAction(ToyControlAction.Stop)
 
-    fun controlWarmupMs(): Long = gattControlWarmupMs()
+    override fun controlWarmupMs(): Long = gattControlWarmupMs()
 
-    fun reportCurrentProtocolNoResponse(): ProtocolFallbackResult? {
+    override fun reportCurrentProtocolNoResponse(): ProtocolFallbackResult? {
         val failed = activeProtocol?.status ?: activeBroadcastProtocol?.status ?: return null
         failed.displayName
             .takeIf { it.isNotBlank() && it !in failedProtocolNames }
@@ -652,7 +652,7 @@ class AndroidBleController(
         }
     }
 
-    fun disconnect() {
+    override fun disconnect() {
         advertiser.stop()
         cancelProtocolKeepalive()
         cancelProtocolReadyWait()
@@ -715,7 +715,7 @@ class AndroidBleController(
         connectWatchdogRunnable = null
     }
 
-    fun close() {
+    override fun close() {
         stopScan()
         advertiser.stop()
         cancelProtocolKeepalive()

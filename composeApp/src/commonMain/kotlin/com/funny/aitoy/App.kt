@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -45,7 +46,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -82,16 +82,24 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation3.runtime.NavKey
 import com.funny.aitoy.ble.BleBroadcastProtocolRegistry
 import com.funny.aitoy.ble.BleConnectionState
 import com.funny.aitoy.ble.BleProtocolStatus
 import com.funny.aitoy.ble.ProtocolAttemptStatus
-import com.funny.aitoy.ble.SvakomV2HeatFunctionCode
 import com.funny.aitoy.ble.ScannedBleDevice
+import com.funny.aitoy.ble.SvakomV2HeatFunctionCode
 import com.funny.aitoy.ble.ToyControlStyle
 import com.funny.aitoy.ble.independentFunctionCode
 import com.funny.aitoy.ble.independentFunctionModeMax
+import com.funny.aitoy.core.navigation.Navigator
+import com.funny.aitoy.core.navigation.NavigatorProvider
+import com.funny.aitoy.core.navigation.rememberNavigator
+import com.funny.aitoy.model.ManagedToy
+import com.funny.aitoy.model.RememberedToy
+import com.funny.aitoy.model.ToyRuntimeState
 import kotlinx.coroutines.launch
+import kotlinx.serialization.Serializable
 import kotlin.math.roundToInt
 
 internal val Ink = Color(0xFF110D12)
@@ -106,10 +114,23 @@ internal val TextSoft = Color(0xFFD7C2CA)
 internal val Line = Color(0xFF41323D)
 internal val Danger = Color(0xFFFF5E76)
 
+@Serializable
+private sealed interface AiToyRoute : NavKey {
+    @Serializable
+    data object Device : AiToyRoute
+
+    @Serializable
+    data object Guide : AiToyRoute
+
+    @Serializable
+    data object Account : AiToyRoute
+}
+
 @Composable
 fun App() {
     val vm = viewModel { BridgeViewModel() }
-    var selectedTab by remember { mutableIntStateOf(0) }
+    val navigator = rememberNavigator(AiToyRoute.Device)
+    val currentRoute = navigator.currentRoute
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         vm.resumeRelay()
     }
@@ -124,44 +145,104 @@ fun App() {
             error = Danger,
         ),
     ) {
-        Scaffold(
-            containerColor = Ink,
-            bottomBar = {
-                NavigationBar(containerColor = Velvet) {
-                    NavigationBarItem(
-                        selected = selectedTab == 0,
-                        onClick = { selectedTab = 0 },
-                        icon = { Icon(Icons.Outlined.SettingsRemote, null) },
-                        label = { Text("设备") },
-                    )
-                    NavigationBarItem(
-                        selected = selectedTab == 1,
-                        onClick = { selectedTab = 1 },
-                        icon = { Icon(Icons.Outlined.Link, null) },
-                        label = { Text("教程") },
-                    )
-                    NavigationBarItem(
-                        selected = selectedTab == 2,
-                        onClick = { selectedTab = 2 },
-                        icon = { Icon(Icons.Outlined.AutoAwesome, null) },
-                        label = { Text("我的") },
-                    )
+        NavigatorProvider(navigator) {
+            Scaffold(
+                containerColor = Ink,
+                bottomBar = {
+                    NavigationBar(containerColor = Velvet) {
+                        NavigationItem(
+                            navigator = navigator,
+                            currentRoute = currentRoute,
+                            route = AiToyRoute.Device,
+                            icon = Icons.Outlined.SettingsRemote,
+                            label = "设备",
+                        )
+                        NavigationItem(
+                            navigator = navigator,
+                            currentRoute = currentRoute,
+                            route = AiToyRoute.Guide,
+                            icon = Icons.Outlined.Link,
+                            label = "教程",
+                        )
+                        NavigationItem(
+                            navigator = navigator,
+                            currentRoute = currentRoute,
+                            route = AiToyRoute.Account,
+                            icon = Icons.Outlined.AutoAwesome,
+                            label = "我的",
+                        )
+                    }
+                },
+            ) { padding ->
+                Surface(color = Ink, modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)) {
+                    when (currentRoute) {
+                        AiToyRoute.Device -> DeviceHome(vm)
+                        AiToyRoute.Guide -> McpGuideScreen(vm)
+                        AiToyRoute.Account -> AccountScreen(vm)
+                    }
                 }
-            },
-        ) { padding ->
-            Surface(color = Ink, modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)) {
-                when (selectedTab) {
-                    0 -> DeviceHome(vm)
-                    1 -> McpGuideScreen(vm)
-                    else -> AccountScreen(vm)
-                }
+                UpdateDialog(vm)
             }
-            UpdateDialog(vm)
         }
     }
 }
+
+@Composable
+private fun NavigationItem(
+    modifier: Modifier = Modifier,
+    navigator: Navigator,
+    currentRoute: AiToyRoute,
+    route: AiToyRoute,
+    icon: ImageVector,
+    label: String,
+) {
+    val selected = currentRoute == route
+    Column(
+        modifier = modifier
+            .clickable {
+                if (!selected) navigator.replaceTop(route)
+            }
+            .padding(vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = if (selected) Rose else TextSoft,
+        )
+        Spacer(Modifier.height(3.dp))
+        Text(
+            text = label,
+            color = if (selected) Rose else TextSoft,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+        )
+    }
+}
+
+@Composable
+private fun RowScope.NavigationItem(
+    navigator: Navigator,
+    currentRoute: AiToyRoute,
+    route: AiToyRoute,
+    icon: ImageVector,
+    label: String,
+) {
+    NavigationItem(
+        modifier = Modifier.weight(1f),
+        navigator = navigator,
+        currentRoute = currentRoute,
+        route = route,
+        icon = icon,
+        label = label,
+    )
+}
+
+private val Navigator.currentRoute: AiToyRoute
+    get() = backStack.lastOrNull() as? AiToyRoute ?: AiToyRoute.Device
 
 @Composable
 private fun McpGuideScreen(vm: BridgeViewModel) {
@@ -348,8 +429,6 @@ private data class HeaderStatus(
 
 @Composable
 private fun DeviceHeader(vm: BridgeViewModel) {
-    val ready = vm.connectionState == BleConnectionState.Ready
-    val status = headerStatus(vm)
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -366,7 +445,7 @@ private fun DeviceHeader(vm: BridgeViewModel) {
             Icon(
                 imageVector = Icons.Outlined.Favorite,
                 contentDescription = null,
-                tint = if (ready) Mint else Rose,
+                tint = if (vm.connectionState == BleConnectionState.Ready) Mint else Rose,
                 modifier = Modifier
                     .background(Color(0x332A0F1A), CircleShape)
                     .padding(8.dp),
@@ -380,7 +459,7 @@ private fun DeviceHeader(vm: BridgeViewModel) {
                         fontWeight = FontWeight.Black,
                     )
                     Spacer(Modifier.width(8.dp))
-                    VersionBadge(BridgeViewModel.APP_VERSION_NAME)
+                    VersionBadge(BridgePlatform.appVersionName)
                 }
                 Text(
                     "把小玩具交给你的 AI 伙伴",
@@ -391,7 +470,7 @@ private fun DeviceHeader(vm: BridgeViewModel) {
             StatusPill(vm.connectionState)
         }
         Spacer(Modifier.height(10.dp))
-        HeaderStatusLine(status)
+        HeaderStatusLine(headerStatus(vm))
         Spacer(Modifier.height(10.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Button(
@@ -807,8 +886,14 @@ private fun DeviceList(vm: BridgeViewModel) {
                 devices.forEach { device ->
                     DeviceRow(
                         device = device,
-                        selected = vm.highlightedDeviceAddress == device.address,
-                        runtimeState = vm.toyRuntimeStates[device.address],
+                        selected = device.address == vm.selectedAddress &&
+                            (
+                                vm.connectionState == BleConnectionState.Connecting ||
+                                    vm.connectionState == BleConnectionState.Discovering ||
+                                    vm.connectionState == BleConnectionState.Ready ||
+                                    vm.connectionState == BleConnectionState.Disconnecting
+                                ),
+                        runtimeState = vm.runtimeStateForAddress(device.address),
                         onConnect = { vm.connect(device) },
                     )
                     Spacer(Modifier.height(8.dp))

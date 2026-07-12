@@ -11,7 +11,7 @@ kotlin {
             implementation(libs.compose.runtime)
             implementation(libs.compose.ui)
             implementation(libs.compose.material3)
-            implementation(libs.androidx.navigation3.ui)
+            api(libs.androidx.navigation3.ui)
             implementation(libs.androidx.material3.adaptive)
             implementation(libs.androidx.material3.adaptive.navigation3)
             api(libs.kotlinx.coroutines.core)

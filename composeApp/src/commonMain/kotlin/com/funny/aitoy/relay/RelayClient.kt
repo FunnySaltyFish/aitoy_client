@@ -1,17 +1,31 @@
 package com.funny.aitoy.relay
 
-import android.os.Handler
-import android.os.Looper
-import android.util.Log
+import com.funny.aitoy.core.log.Log
+import com.funny.aitoy.core.utils.JsonX
+import com.funny.aitoy.core.utils.nowMs
 import com.funny.aitoy.diagnostics.AiToyTraceEvent
 import com.funny.aitoy.diagnostics.AiToyTraceUploadPolicy
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
+import kotlinx.serialization.json.put
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
-import org.json.JSONArray
-import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 import kotlin.math.min
 
@@ -55,6 +69,7 @@ data class RelayDeviceFeature(
 )
 
 class RelayClient(
+    private val scope: CoroutineScope,
     private val onState: (String) -> Unit,
     private val onLog: (String) -> Unit,
     private val onCommand: (RelayCommand) -> Unit,
@@ -64,7 +79,7 @@ class RelayClient(
         .pingInterval(20, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
         .build()
-    private val mainHandler = Handler(Looper.getMainLooper())
+
     private var socket: WebSocket? = null
     private var lastServerUrl = ""
     private var lastUserToken = ""
@@ -73,31 +88,8 @@ class RelayClient(
     private var onlineConfirmed = false
     private var retryCount = 0
     private var connectionGeneration = 0
-    private val reconnect = Runnable {
-        if (userRequestedOnline && socket == null && lastServerUrl.isNotBlank()) {
-            connect(lastServerUrl, lastUserToken, resetRetry = false)
-        }
-    }
-    private val heartbeat = object : Runnable {
-        override fun run() {
-            val currentSocket = socket ?: return
-            if (!userRequestedOnline) return
-            val payload = JSONObject()
-                .put("type", "heartbeat")
-                .put("clientTime", System.currentTimeMillis())
-            val accepted = currentSocket.send(payload.toString())
-            if (accepted) {
-                mainHandler.postDelayed(this, HEARTBEAT_INTERVAL_MS)
-            } else {
-                trace("AI 伙伴保活失败，正在准备重连", error = true, type = "relay_heartbeat_failed")
-                onlineConfirmed = false
-                emitState("等待重连")
-                currentSocket.cancel()
-                if (socket === currentSocket) socket = null
-                scheduleReconnect()
-            }
-        }
-    }
+    private var heartbeatJob: Job? = null
+    private var reconnectJob: Job? = null
 
     fun connect(serverUrl: String, userToken: String) {
         connect(serverUrl, userToken, resetRetry = true)
@@ -107,7 +99,7 @@ class RelayClient(
         userRequestedOnline = true
         lastServerUrl = serverUrl
         lastUserToken = userToken
-        mainHandler.removeCallbacks(reconnect)
+        reconnectJob?.cancel()
         stopHeartbeat()
         socket?.close(1000, "Reconnect")
         socket = null
@@ -120,7 +112,7 @@ class RelayClient(
             .replaceFirst("http://", "ws://") + "/ws/app?token=$userToken"
         trace("连接 AI 伙伴：${safeWsUrl(wsUrl)}")
         emitState("正在连接")
-        val nextSocket = client.newWebSocket(
+        socket = client.newWebSocket(
             Request.Builder().url(wsUrl).build(),
             object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {
@@ -139,8 +131,8 @@ class RelayClient(
 
                 override fun onMessage(webSocket: WebSocket, text: String) {
                     if (generation != connectionGeneration) return
-                    val json = JSONObject(text)
-                    val messageType = json.optString("type")
+                    val json = runCatching { JsonX.json.parseToJsonElement(text).jsonObject }.getOrNull()
+                    val messageType = json.stringOrBlank("type")
                     when (messageType) {
                         "command" -> {
                             trace(
@@ -148,21 +140,8 @@ class RelayClient(
                                 type = "relay_command_received",
                                 uploadPolicy = AiToyTraceUploadPolicy.Always,
                             )
-                            emitCommand(
-                                RelayCommand(
-                                    commandId = json.getString("commandId"),
-                                    action = json.getString("action"),
-                                    deviceId = json.optString("deviceId").ifBlank { null },
-                                    intensity = json.optIntOrNull("intensity"),
-                                    mode = json.optIntOrNull("mode"),
-                                    durationSec = json.optIntOrNull("durationSec"),
-                                    defaultDurationSec = json.optIntOrNull("defaultDurationSec"),
-                                    script = json.optString("script").ifBlank { null },
-                                    createdAt = json.optLongOrNull("createdAt"),
-                                )
-                            )
+                            if (json != null) emitCommand(json.toRelayCommand())
                         }
-
                         "heartbeat_ack" -> Unit
                         "device_status_ack" -> {
                             if (onlineConfirmed) return
@@ -194,7 +173,7 @@ class RelayClient(
                     if (code == SERVER_COMMAND_IDLE_CLOSE_CODE) {
                         userRequestedOnline = false
                         retryCount = 0
-                        mainHandler.removeCallbacks(reconnect)
+                        reconnectJob?.cancel()
                         trace(
                             "AI 伙伴已空闲，下次使用时再上线",
                             type = "relay_idle_offline",
@@ -237,7 +216,6 @@ class RelayClient(
                 }
             },
         )
-        socket = nextSocket
     }
 
     fun reconnectNow() {
@@ -247,61 +225,22 @@ class RelayClient(
     }
 
     fun syncDevices(devices: List<RelayDevice>) {
-        val payload = JSONObject()
-            .put("type", "device_status")
-            .put(
-                "devices",
-                JSONArray().apply {
-                    devices.forEach { device ->
-                        val item = JSONObject()
-                            .put("deviceId", device.deviceId)
-                            .put("displayName", device.displayName)
-                            .put("connected", device.connected)
-                            .put("isDefault", device.isDefault)
-                            .put("protocolName", device.protocolName)
-                            .put("intensity", device.intensity)
-                            .put("mode", device.mode)
-                            .put("intensityMax", device.intensityMax)
-                            .put("modeMax", device.modeMax)
-                            .put("modeLabel", device.modeLabel)
-                            .put("modeNames", JSONArray(device.modeNames))
-                            .put("intensityLabel", device.intensityLabel)
-                            .put("channelNames", JSONArray(device.channelNames))
-                            .put("controlStyle", device.controlStyle)
-                            .put(
-                                "features",
-                                JSONArray().apply {
-                                    device.features.forEach { feature ->
-                                        put(
-                                            JSONObject()
-                                                .put("type", feature.type)
-                                                .put("min", feature.min)
-                                                .put("max", feature.max)
-                                                .put("index", feature.index)
-                                                .put("label", feature.label),
-                                        )
-                                    }
-                                },
-                            )
-                            .put("adapterType", "template_ble")
-                            .put("capabilities", JSONArray(listOf("sequence")))
-                        device.batteryPercent
-                            ?.coerceIn(1, 100)
-                            ?.let { item.put("batteryPercent", it) }
-                        put(item)
-                    }
-                },
-            )
-        send(payload)
+        send(
+            buildJsonObject {
+                put("type", "device_status")
+                put("devices", relayDevicesJsonArray(devices))
+            }
+        )
     }
 
     fun commandResult(commandId: String, success: Boolean, message: String) {
         send(
-            JSONObject()
-                .put("type", "command_result")
-                .put("commandId", commandId)
-                .put("success", success)
-                .put("message", message),
+            buildJsonObject {
+                put("type", "command_result")
+                put("commandId", commandId)
+                put("success", success)
+                put("message", message)
+            }
         )
     }
 
@@ -311,7 +250,7 @@ class RelayClient(
         onlineConfirmed = false
         retryCount = 0
         connectionGeneration += 1
-        mainHandler.removeCallbacks(reconnect)
+        reconnectJob?.cancel()
         stopHeartbeat()
         socket?.close(1000, "App disconnect")
         socket = null
@@ -324,7 +263,7 @@ class RelayClient(
         client.connectionPool.evictAll()
     }
 
-    private fun send(json: JSONObject) {
+    private fun send(json: JsonObject) {
         val currentSocket = socket
         val text = json.toString()
         val accepted = currentSocket?.send(text) == true
@@ -348,20 +287,47 @@ class RelayClient(
     }
 
     private fun startHeartbeat() {
-        mainHandler.removeCallbacks(heartbeat)
-        mainHandler.postDelayed(heartbeat, HEARTBEAT_INTERVAL_MS)
+        stopHeartbeat()
+        heartbeatJob = scope.launch {
+            while (isActive) {
+                delay(HEARTBEAT_INTERVAL_MS)
+                val currentSocket = socket ?: return@launch
+                if (!userRequestedOnline) return@launch
+                val accepted = currentSocket.send(
+                    buildJsonObject {
+                        put("type", "heartbeat")
+                        put("clientTime", nowMs())
+                    }.toString()
+                )
+                if (!accepted) {
+                    trace("AI 伙伴保活失败，正在准备重连", error = true, type = "relay_heartbeat_failed")
+                    onlineConfirmed = false
+                    emitState("等待重连")
+                    currentSocket.cancel()
+                    if (socket === currentSocket) socket = null
+                    scheduleReconnect()
+                    return@launch
+                }
+            }
+        }
     }
 
     private fun stopHeartbeat() {
-        mainHandler.removeCallbacks(heartbeat)
+        heartbeatJob?.cancel()
+        heartbeatJob = null
     }
 
     private fun scheduleReconnect() {
-        mainHandler.removeCallbacks(reconnect)
+        reconnectJob?.cancel()
         val delayMs = min(30_000L, 1_000L shl retryCount.coerceAtMost(5))
         retryCount += 1
         trace("AI 伙伴将在 ${delayMs / 1_000} 秒后重连")
-        mainHandler.postDelayed(reconnect, delayMs)
+        reconnectJob = scope.launch {
+            delay(delayMs)
+            if (userRequestedOnline && socket == null && lastServerUrl.isNotBlank()) {
+                connect(lastServerUrl, lastUserToken, resetRetry = false)
+            }
+        }
     }
 
     private fun trace(
@@ -374,8 +340,8 @@ class RelayClient(
             AiToyTraceUploadPolicy.Drop
         },
     ) {
-        if (error) Log.e(TAG, message) else Log.d(TAG, message)
-        mainHandler.post { onLog(message) }
+        if (error) Log.e(TAG) { message } else Log.d(TAG) { message }
+        emitLog(message)
         if (error || uploadPolicy != AiToyTraceUploadPolicy.Drop) {
             onTrace(
                 AiToyTraceEvent(
@@ -388,12 +354,16 @@ class RelayClient(
         }
     }
 
+    private fun emitLog(message: String) {
+        scope.launch { onLog(message) }
+    }
+
     private fun emitState(state: String) {
-        mainHandler.post { onState(state) }
+        scope.launch { onState(state) }
     }
 
     private fun emitCommand(command: RelayCommand) {
-        mainHandler.post { onCommand(command) }
+        scope.launch { onCommand(command) }
     }
 
     private fun safeWsUrl(wsUrl: String): String =
@@ -402,11 +372,75 @@ class RelayClient(
             "token=${token.take(6)}..."
         }
 
-    private fun JSONObject.optIntOrNull(name: String): Int? =
-        if (has(name) && !isNull(name)) getInt(name) else null
+    private fun JsonObject.toRelayCommand(): RelayCommand =
+        RelayCommand(
+            commandId = stringOrBlank("commandId"),
+            action = stringOrBlank("action"),
+            deviceId = stringOrBlank("deviceId").ifBlank { null },
+            intensity = intOrNull("intensity"),
+            mode = intOrNull("mode"),
+            durationSec = intOrNull("durationSec"),
+            defaultDurationSec = intOrNull("defaultDurationSec"),
+            script = stringOrBlank("script").ifBlank { null },
+            createdAt = longOrNull("createdAt"),
+        )
 
-    private fun JSONObject.optLongOrNull(name: String): Long? =
-        if (has(name) && !isNull(name)) getLong(name) else null
+    private fun relayDevicesJsonArray(devices: List<RelayDevice>): JsonArray =
+        buildJsonArray {
+            devices.forEach { device ->
+                add(
+                    buildJsonObject {
+                        put("deviceId", device.deviceId)
+                        put("displayName", device.displayName)
+                        put("connected", device.connected)
+                        put("isDefault", device.isDefault)
+                        put("protocolName", device.protocolName)
+                        put("intensity", device.intensity)
+                        put("mode", device.mode)
+                        put("intensityMax", device.intensityMax)
+                        put("modeMax", device.modeMax)
+                        put("modeLabel", device.modeLabel)
+                        put("modeNames", stringJsonArray(device.modeNames))
+                        put("intensityLabel", device.intensityLabel)
+                        put("channelNames", stringJsonArray(device.channelNames))
+                        put("controlStyle", device.controlStyle)
+                        put("features", relayDeviceFeaturesJsonArray(device.features))
+                        put("adapterType", "template_ble")
+                        put("capabilities", stringJsonArray(listOf("sequence")))
+                        device.batteryPercent?.coerceIn(1, 100)?.let { put("batteryPercent", it) }
+                    }
+                )
+            }
+        }
+
+    private fun relayDeviceFeaturesJsonArray(features: List<RelayDeviceFeature>): JsonArray =
+        buildJsonArray {
+            features.forEach { feature ->
+                add(
+                    buildJsonObject {
+                        put("type", feature.type)
+                        put("min", feature.min)
+                        put("max", feature.max)
+                        put("index", feature.index)
+                        put("label", feature.label)
+                    }
+                )
+            }
+        }
+
+    private fun stringJsonArray(values: List<String>): JsonArray =
+        buildJsonArray {
+            values.forEach { add(JsonPrimitive(it)) }
+        }
+
+    private fun JsonObject?.stringOrBlank(name: String): String =
+        this?.get(name)?.jsonPrimitive?.contentOrNull.orEmpty()
+
+    private fun JsonObject.intOrNull(name: String): Int? =
+        get(name)?.jsonPrimitive?.intOrNull
+
+    private fun JsonObject.longOrNull(name: String): Long? =
+        get(name)?.jsonPrimitive?.longOrNull
 
     companion object {
         private const val TAG = "AiToyRelay"

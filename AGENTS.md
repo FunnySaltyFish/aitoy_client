@@ -1,102 +1,125 @@
 ## 读取顺序
-- 如果未读过父目录的 `AGENTS.md`，先读取一下。
 
-## 技术要求
-- 使用 MVVM 架构
-- ViewModel 使用 vm 变量名
-- 不需要单独创建页面 State，直接写在 VM 里
-- VM 里优先直接使用 state（而不是 StateFlow + .collectAsState() 的形式）
-- 不需要 state.value 的设计，直接 value 即可
-- 整体页面风格温馨、暧昧，有流畅的使用体验和优秀的交互设计
-- 代码可复用率高，提取公共 Composable、函数、Modifier 常量等
-- 优先 import + 使用简单类名，即代码中 `import androidx.compose.material3.Text; Text {}` 优于 `androidx.compose.material3.Text {}`
-- 确保你的代码优雅简洁、UI效果丝滑流畅，富有美感
-- Modifier parameter should be the first optional parameter
-- 控制单文件的长度，模块内可复用的组件放到 components 目录下，一组/一个为一个文件，项目可复用的组件放在
-  core 模块下
+- 如果未读过父目录 `AGENTS.md`，先读父目录规则。
+- 涉及 BLE 协议、设备识别、控制无响应时，先读根目录 `docs/protocol_support.md`，再读对应 `docs/protocols/*.md`。
+- 涉及会员、额度、付费体验时，先读根目录 `docs/pricing_and_usage_analysis.md`；需要复算 Trace 使用量时看 `server/scripts/analyze_trace_usage.py`。
+
+## 模块边界
+
+- `composeApp` 是 Android App 主模块，业务页面、VM、Relay、BLE 协议优先放在 `commonMain`。
+- `androidMain` 只放 Android 必需实现：`MainActivity`、`AiToyApplication`、前台服务、系统 Intent、安装更新、Crash/Trace 上传、Android BLE GATT/广播、Android SDK 接入。
+- `core` 放项目通用能力：导航、日志、Toast、缓存、偏好存储、平台工具和可复用 UI/工具。
+- `network` 放 Retrofit、OkHttp、API Service、请求封装和接口模型。
+- `database` 放 Room/SQLite、DAO、Repository 和表同步相关能力。
+
+## 关键路径
+
+- App 入口与主界面：`composeApp/src/commonMain/kotlin/com/funny/aitoy/App.kt`
+- 首页支持面板：`composeApp/src/commonMain/kotlin/com/funny/aitoy/HomeSupportPanels.kt`
+- 账号页：`composeApp/src/commonMain/kotlin/com/funny/aitoy/AccountScreen.kt`
+- 桥接业务 VM：`composeApp/src/commonMain/kotlin/com/funny/aitoy/BridgeViewModel.kt`
+- 页面与设备模型：`composeApp/src/commonMain/kotlin/com/funny/aitoy/model/`
+- 按设备聚合的运行态：`composeApp/src/commonMain/kotlin/com/funny/aitoy/runtime/DeviceRuntimeStore.kt`
+- 平台能力 expect：`composeApp/src/commonMain/kotlin/com/funny/aitoy/BridgePlatform.kt`
+- 平台能力 Android actual：`composeApp/src/androidMain/kotlin/com/funny/aitoy/BridgePlatform.android.kt`
+- Android Activity：`composeApp/src/androidMain/kotlin/com/funny/aitoy/MainActivity.kt`
+- Android Application：`composeApp/src/androidMain/kotlin/com/funny/aitoy/AiToyApplication.kt`
+- 前台服务：`composeApp/src/androidMain/kotlin/com/funny/aitoy/AiToyForegroundService.kt`
+- 更新安装：`composeApp/src/androidMain/kotlin/com/funny/aitoy/update/AppUpdateInstaller.kt`
+
+## BLE 与协议
+
+- BLE 抽象：`composeApp/src/commonMain/kotlin/com/funny/aitoy/ble/BleController.kt`
+- BLE 数据模型：`composeApp/src/commonMain/kotlin/com/funny/aitoy/ble/BleModels.kt`
+- Android BLE 工厂：`composeApp/src/androidMain/kotlin/com/funny/aitoy/ble/BleControllerFactory.android.kt`
+- Android GATT 控制：`composeApp/src/androidMain/kotlin/com/funny/aitoy/ble/AndroidBleController.kt`
+- Android 广播控制：`composeApp/src/androidMain/kotlin/com/funny/aitoy/ble/AndroidBleAdvertiser.kt`
+- 内置 GATT 协议索引：`composeApp/src/commonMain/kotlin/com/funny/aitoy/ble/DeviceProtocols.kt`
+- 广播协议索引：`composeApp/src/commonMain/kotlin/com/funny/aitoy/ble/BroadcastProtocols.kt`
+- 分协议实现：`composeApp/src/commonMain/kotlin/com/funny/aitoy/ble/protocols/`
+- Buttplug 注册表与协议计划：`composeApp/src/commonMain/kotlin/com/funny/aitoy/buttplug/`
+- Android 外部 Buttplug 客户端：`composeApp/src/androidMain/kotlin/com/funny/aitoy/buttplug/AndroidExternalButtplugClient.kt`
+
+新增或修复协议时：
+
+- 不要用中文商品名做主要 matcher，优先使用底层设备名、Service UUID、Characteristic UUID、广播 Service Data、product code 或官方/反编译证据。
+- 不要覆盖用户反馈已证明可用的历史路径；同品牌同名但底层不同的设备优先新增确定性分流。
+- 修协议必须同步根目录协议文档：总索引 `docs/protocol_support.md` 和对应 `docs/protocols/*.md`。
+- 线上排查先用窄时间窗 Trace 证明实际命中的协议、UUID、写入路径和反馈事件，再改 matcher 或控制语义。
+
+## Relay、Trace 与诊断
+
+- Relay 客户端：`composeApp/src/commonMain/kotlin/com/funny/aitoy/relay/RelayClient.kt`
+- Relay 序列脚本解析：`composeApp/src/commonMain/kotlin/com/funny/aitoy/relay/RelaySequenceScript.kt`
+- Trace 事件模型：`composeApp/src/commonMain/kotlin/com/funny/aitoy/diagnostics/AiToyTraceEvent.kt`
+- Android Trace 上传：`composeApp/src/androidMain/kotlin/com/funny/aitoy/diagnostics/AiToyTraceUploader.kt`
+- Android 崩溃上报：`composeApp/src/androidMain/kotlin/com/funny/aitoy/diagnostics/AiToyCrashReporter.kt`
+
+本地 UI 日志和远端 Trace 是两条路径：
+
+- `appendLog` 只用于端上展示。
+- 线上排查必须在源头创建 `AiToyTraceEvent`，再交给上传器。
+- 不要在 `AiToyTraceUploader` 里靠业务文案字符串过滤；上传策略必须由产生日志的源头决定。
+- 默认不要上传高频流水线日志，如原始 Notify、写入回调、状态同步 payload、ACK、keepalive、重复扫描结果。
+- 需要上传高频摘要时必须使用稳定 key 和限频策略。
+- Relay 在线状态以服务端 ACK / `/api/status` / ws 诊断为准，不要只相信 App 本地“已在线”展示。
+
+## 会员与额度
+
+- 付费方案和 Trace 使用量口径见根目录 `docs/pricing_and_usage_analysis.md`。
+- App 用户侧展示“AI 控制时长”，不要展示“指令数”“Trace”“duration”“Relay”等内部概念。
+- 连接、扫描、待机、本地手动控制、停止控制不应消耗额度。
+- `stop()` 是安全能力，永远不能因为额度不足而被拦截。
+- 免费版也必须保留完整体验闭环：连接设备、少量 AI 控制、随时停止。
+- 会员权益应围绕更长 AI 控制、多设备、新协议提前体验、优先排查等用户可理解价值。
+
+## UI 与文案
+
+- UI 使用温暖的深色风格，面向成熟商业产品，不写测试感、工程感文案。
+- 面向用户的文案只写用户能理解的状态、动作和结果，不暴露协议、UUID、JSON、MCP、回调、Trace 等实现细节。
+- 调试信息只放到日志、诊断页或开发入口，不进入普通用户主流程。
+- Compose 页面遵循 MVVM；ViewModel 变量名使用 `vm`。
+- 页面状态优先收敛到 VM，避免在页面里另起一套业务状态。
+- 可复用 Composable、Modifier、颜色和小组件要抽出，避免单文件持续膨胀。
+- `Modifier` 参数作为第一个可选参数。
+
+## 导航与状态
+
+- 导航统一使用 `core/src/commonMain/kotlin/com/funny/aitoy/core/navigation/Navigator.kt`。
+- 新页面接入 `rememberNavigator` / `NavigatorProvider`，不要在页面中自建 tab/router 状态。
+- 持久化优先使用 `DataSaverUtils` + `dataSaverState` 体系。
+- 用户相关数据使用 `userDataSaverState(key, initialValue)`，让登录态和设备态按 owner 自动隔离。
+- 全局配置使用 `mutableDataSaverStateOf(DataSaverUtils, ...)` 或 `rememberDataSaverState(...)`。
+- 新类型持久化前在 `AiToyPrefsInit` 注册转换器。
+
+## 网络与异步
+
+- 新增网络接口统一使用 Retrofit + Service 接口。
+- 接口调用使用 `apiRequest { service.func(...) }` 等统一封装。
+- JSON 序列化统一使用 KotlinX Serialization 和 `JsonX`。
+- 不要新增 `org.json.JSONObject` / `JSONArray` 做业务请求或配置序列化。
+- 新增异步逻辑使用协程和 `viewModelScope`；不要新增 `Handler`、回调式 OkHttp 请求或手写线程切换。
+- Token 注入、缓存策略、超时策略放在统一网络层，业务层不要重复拼接鉴权头。
 
 ## 依赖
-- 使用 VersionCatalogs，以 作者名-库名 命名。比如 androidx 的库应该是 androidx-xxx，如果它有子库，才是 androidx-xxx-yyy，引用时 `libs.androidx.xxx.yyy`
 
-## AI / 对话 / 工具调用
+- 依赖版本在 `gradle/libs.versions.toml`。
+- 使用 VersionCatalogs，命名按 `作者名-库名`，例如 `androidx-xxx`、`androidx-xxx-yyy`。
+- 用户明确要求 SDK、框架或库时优先采用；如果与 minSdk、KMP 目标、许可证、体积或运行时风险冲突，先验证再说明阻塞。
+- 引入 AI SDK 时优先使用 SDK 的类型化能力，不要手写 OpenAI-compatible HTTP、SSE、function call 聚合或 JSON schema 拼接替代。
 
-- 如果需求明确要求使用 AI SDK，必须优先使用该 SDK，不要手写 OpenAI-compatible HTTP、SSE、function call 聚合或 JSON schema 拼接来替代。
-- 引入 SDK 前必须验证 Android/KMP 约束，尤其是 minSdk。若依赖如果要求高于当前 minSdk，不要用 `tools:overrideLibrary` 强行绕过，应告知用户，由用户抉择。
-- 应用内工具只负责把 SDK 已解析出的类型化参数转成业务调用；工具执行结果要使用面向用户的短文案，不暴露协议、JSON、回调、MCP 等实现细节。
+## 常用工具
 
-## 协程与网络
+- 日志：`Log.d(TAG) { "message: $variable" }`
+- Toast：`toast("message")`、`toastError("message")`
+- 当前时间戳：`nowMs()`
+- 主线程执行：`runOnUI { }`
+- 缓存目录：`CacheManager.cacheDir`、`CacheManager.fileDir`
 
-- 新增网络接口统一使用 Retrofit + Service 接口；接口调用使用 `apiRequest { service.func(...) }` 等统一封装。
-- JSON 序列化统一使用 KotlinX Serialization 和 `JsonX`；不要新增 `org.json.JSONObject` / `JSONArray` 做业务请求或配置序列化。
-- 新增异步逻辑全部使用协程和 `viewModelScope`；不要新增 `Handler`、回调式 OkHttp 请求或手写线程切换。
+## 编译与验证
 
-## 持久化
-
-项目统一使用 `DataSaverUtils` + `dataSaverState` 体系：
-
-- 用户相关数据（登录态/偏好/最近记录）统一使用 `userDataSaverState(key, initialValue)`（`core.prefs`
-  ），优先 `by` 委托。
-- `userDataSaverState` 会按当前 owner（`uid:*` / `device:*`）自动切换独立存储；登录后对设备态数据无感迁移；登出后与账号数据隔离。
-- 非用户作用域的全局配置（如 `serverBaseUrl`）使用 `mutableDataSaverStateOf(DataSaverUtils, ...)` 或
-  `rememberDataSaverState(...)`。
-
-```kotlin
-var checked: Boolean by mutableDataSaverStateOf(DataSaverUtils, "AUTO_LANGUAGE_CHECKED", false)
-onClick = { checked = true } // 自动保存并触发 UI 更新
-
-// 自定义类型需先注册转换器（在 AiToyPrefsInit）
-DataSaverConverter.registerTypeConverters<Language>( // enum
-    save = { it.name },
-    restore = { Language.valueOf(it) }
-)
-```
-
-## 缓存
-
-使用 CacheManager 统一管理缓存目录，按需创建子目录：
-
-```kotlin
-expect object CacheManager {
-  val cacheDir: File
-  val fileDir: File
-}
-
-fun CacheManager.cacheSubDir(name: String) = cacheDir.resolve(name).ensureDirectory()
-fun CacheManager.fileSubDir(name: String) = fileDir.resolve(name).ensureDirectory()
-```
-
-## 网络层约定
-
-- 网络请求统一使用 Retrofit + Service 接口
-- 按业务拆分 Service（如 auth / user / entitlement / pay / asr），避免一个超大 API 文件
-- 接口调用优先使用统一请求封装（如 `apiRequest { service.func(...) }`），常见请求应保持一行完成
-- 简单参数优先 `@FormUrlEncoded + @Field`，避免为少量字段创建大量请求体类
-- GET 与 POST 按语义区分：读取类接口优先 GET（可缓存），状态变更类接口使用 POST
-- JSON 序列化统一走全局 `JsonX`，避免重复创建多个 Json 实例
-- Token 注入、缓存策略放在全局 OkHttp 拦截器，业务层不重复拼接鉴权头
-- GET 缓存策略通过接口注解声明（如 `@GetCache(...)`），避免在拦截器中维护路径分支
-- 超时策略通过接口注解声明（如 `@DynamicTimeout(...)`），按接口粒度控制读写超时
-
-## Trace 与诊断日志
-
-- 端上本地日志和远端 Trace 是两条路径：`appendLog` 只负责本地 UI 展示；线上需要排查的事件使用 `AiToyTraceEvent` 交给 `AiToyTraceUploader.recordBle(event)`。
-- 新增 BLE、Relay 或协议排查日志时，默认不要上传。只有真正需要线上诊断的事件才在源头标记上传策略：
-  - `Always`：错误、连接请求、GATT 连接、服务发现、协议候选、协议确认、协议就绪、广播协议就绪、手动模板匹配、Relay 收到指令、断线/失败。
-  - `SessionOnce`：同一 App session 内只需要知道发生过一次的状态，例如 Relay 已在线。
-  - `RateLimited`：控制摘要、广播摘要等可能高频但仍有运营诊断价值的事件，必须提供稳定 `key` 和合理 `intervalMs`。
-  - `Drop`：默认策略，适用于写入回调、Notify 原始字节、状态同步 payload、ACK、keepalive、重复扫描结果等高频流水线日志。
-- 不要在 `AiToyTraceUploader` 里用业务文案做字符串过滤。上传器只负责通用策略执行、排队、flush 和 probe；具体是否上传必须由产生日志的源头决定。
-- 需要临时排查某个协议的低层字节时，在对应源头临时加结构化 Trace 并设置限频或 session 周期策略；排查结束后保留有长期价值的关键事件，移除噪音上传。
-
-## 全局信息
-
-> 下述：.core 代表 com.funny.aitoy.core
-
-- 日志 `Log.d(TAG) { "message: $variable" }`
-- Toast `toast("message", [type = ToastType.Error])` 或简便方法 `toastError("message")`
-- .core.utils.nowMs() 获取当前时间戳（毫秒）
-- .core.utils.runOnUI { }，安卓在主线程运行
-
-## 编译
-
-- :moduleName:compileDebugKotlinAndroid
+- 在 `KMP` 子仓库执行客户端检查，不要用根仓库状态判断 KMP 改动。
+- 快速编译：`./gradlew :composeApp:compileDebugKotlinAndroid --console=plain --no-daemon`
+- 调试包：`./gradlew :composeApp:assembleDebug --console=plain --quiet`
+- 发布包：`./gradlew :composeApp:assembleRelease --console=plain`
+- 修改 `gradle/libs.versions.toml`、`build.gradle.kts` 或跨模块 API 后，至少跑一次 `:composeApp:compileDebugKotlinAndroid`。

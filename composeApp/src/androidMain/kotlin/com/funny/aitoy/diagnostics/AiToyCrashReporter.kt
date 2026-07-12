@@ -1,7 +1,7 @@
 package com.funny.aitoy.diagnostics
 
 import android.os.Build
-import com.funny.aitoy.BridgeViewModel
+import com.funny.aitoy.BridgePlatform
 import com.funny.aitoy.core.log.Log
 import com.funny.aitoy.core.log.RecentLogBuffer
 import com.funny.aitoy.core.prefs.DataSaverUtils
@@ -49,8 +49,8 @@ object AiToyCrashReporter {
                     AiToyServices.diagnosticsService.uploadCrash(
                         CrashReportRequest(
                             reportId = reportId,
-                            versionCode = BridgeViewModel.APP_VERSION_CODE,
-                            versionName = BridgeViewModel.APP_VERSION_NAME,
+                            versionCode = BridgePlatform.appVersionCode,
+                            versionName = BridgePlatform.appVersionName,
                             deviceModel = "${Build.MANUFACTURER} ${Build.MODEL}",
                             androidVersion = Build.VERSION.RELEASE ?: "",
                             exceptionTrace = throwable.stackTraceText(),

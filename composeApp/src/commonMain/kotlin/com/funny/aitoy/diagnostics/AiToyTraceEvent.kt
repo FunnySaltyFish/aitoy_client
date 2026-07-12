@@ -19,3 +19,16 @@ data class AiToyTraceEvent(
     val key: String = "",
     val intervalMs: Long = 0L,
 )
+
+expect object AiToyTraceUploader {
+    fun updateContext(
+        userToken: String,
+        selectedDeviceName: String,
+        selectedDeviceAddress: String,
+        connectionState: String,
+        protocolId: String,
+        protocolName: String,
+    )
+
+    fun recordBle(event: AiToyTraceEvent)
+}

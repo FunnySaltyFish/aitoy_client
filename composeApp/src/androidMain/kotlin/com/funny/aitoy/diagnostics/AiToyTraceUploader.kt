@@ -1,11 +1,37 @@
 package com.funny.aitoy.diagnostics
 
 import android.os.Build
-import com.funny.aitoy.BridgeViewModel
+import com.funny.aitoy.BridgePlatform
 import com.funny.aitoy.core.log.Log
 import com.funny.aitoy.core.log.LogEvent
 import com.funny.aitoy.core.log.LogSink
 import com.funny.aitoy.core.utils.JsonX
+import com.funny.aitoy.diagnostics.AiToyTraceUploader.MAX_MESSAGE_LENGTH
+import com.funny.aitoy.diagnostics.AiToyTraceUploader.MAX_RETRY_DELAY_MS
+import com.funny.aitoy.diagnostics.AiToyTraceUploader.PROBE_MIN_INTERVAL_MS
+import com.funny.aitoy.diagnostics.AiToyTraceUploader.UPLOAD_DELAY_MS
+import com.funny.aitoy.diagnostics.AiToyTraceUploader.emitProbe
+import com.funny.aitoy.diagnostics.AiToyTraceUploader.enqueue
+import com.funny.aitoy.diagnostics.AiToyTraceUploader.failureCount
+import com.funny.aitoy.diagnostics.AiToyTraceUploader.installed
+import com.funny.aitoy.diagnostics.AiToyTraceUploader.lastContextProbeKey
+import com.funny.aitoy.diagnostics.AiToyTraceUploader.lastProbeAt
+import com.funny.aitoy.diagnostics.AiToyTraceUploader.lastTraceUploadAt
+import com.funny.aitoy.diagnostics.AiToyTraceUploader.lock
+import com.funny.aitoy.diagnostics.AiToyTraceUploader.pending
+import com.funny.aitoy.diagnostics.AiToyTraceUploader.pendingSize
+import com.funny.aitoy.diagnostics.AiToyTraceUploader.postProbe
+import com.funny.aitoy.diagnostics.AiToyTraceUploader.probeLock
+import com.funny.aitoy.diagnostics.AiToyTraceUploader.probeSeq
+import com.funny.aitoy.diagnostics.AiToyTraceUploader.rateLimit
+import com.funny.aitoy.diagnostics.AiToyTraceUploader.scheduleFlush
+import com.funny.aitoy.diagnostics.AiToyTraceUploader.scheduleFlushIfNeeded
+import com.funny.aitoy.diagnostics.AiToyTraceUploader.scope
+import com.funny.aitoy.diagnostics.AiToyTraceUploader.sessionId
+import com.funny.aitoy.diagnostics.AiToyTraceUploader.shouldUpload
+import com.funny.aitoy.diagnostics.AiToyTraceUploader.uploadScheduled
+import com.funny.aitoy.diagnostics.AiToyTraceUploader.uploadedSessionKeys
+import com.funny.aitoy.diagnostics.AiToyTraceUploader.uploading
 import com.funny.aitoy.network.OkHttpUtils
 import com.funny.aitoy.network.api.AiToyServices
 import com.funny.aitoy.network.api.apiRequest
@@ -25,7 +51,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.UUID
 import kotlin.math.min
 
-object AiToyTraceUploader : LogSink {
+actual object AiToyTraceUploader : LogSink {
     private const val TAG = "AiToyTraceUpload"
     private const val MAX_PENDING = 800
     private const val MAX_BATCH = 120
@@ -62,7 +88,7 @@ object AiToyTraceUploader : LogSink {
         emitProbe("install", force = true)
     }
 
-    fun updateContext(
+    actual fun updateContext(
         userToken: String,
         selectedDeviceName: String,
         selectedDeviceAddress: String,
@@ -86,7 +112,7 @@ object AiToyTraceUploader : LogSink {
         scheduleFlushIfNeeded(0L)
     }
 
-    fun recordBle(event: AiToyTraceEvent) {
+    actual fun recordBle(event: AiToyTraceEvent) {
         if (!shouldUpload(event)) return
         enqueue(
             TraceLogItem(
@@ -228,8 +254,8 @@ object AiToyTraceUploader : LogSink {
                         sessionId = sessionId,
                         userToken = current.userToken,
                         deviceId = current.deviceId(),
-                        versionCode = BridgeViewModel.APP_VERSION_CODE,
-                        versionName = BridgeViewModel.APP_VERSION_NAME,
+                        versionCode = BridgePlatform.appVersionCode,
+                        versionName = BridgePlatform.appVersionName,
                         deviceModel = "${Build.MANUFACTURER} ${Build.MODEL}",
                         androidVersion = Build.VERSION.RELEASE ?: "",
                         selectedDeviceName = current.selectedDeviceName,
@@ -307,8 +333,8 @@ object AiToyTraceUploader : LogSink {
                     put("sessionId", sessionId)
                     put("userToken", current.userToken)
                     put("tokenKind", current.tokenKind())
-                    put("versionCode", BridgeViewModel.APP_VERSION_CODE)
-                    put("versionName", BridgeViewModel.APP_VERSION_NAME)
+                    put("versionCode", BridgePlatform.appVersionCode)
+                    put("versionName", BridgePlatform.appVersionName)
                     put("deviceModel", "${Build.MANUFACTURER} ${Build.MODEL}")
                     put("androidVersion", Build.VERSION.RELEASE ?: "")
                     put("selectedDeviceName", current.selectedDeviceName)
