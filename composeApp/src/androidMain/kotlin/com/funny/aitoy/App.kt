@@ -140,16 +140,22 @@ fun App() {
                         icon = { Icon(Icons.Outlined.Link, null) },
                         label = { Text("教程") },
                     )
+                    NavigationBarItem(
+                        selected = selectedTab == 2,
+                        onClick = { selectedTab = 2 },
+                        icon = { Icon(Icons.Outlined.AutoAwesome, null) },
+                        label = { Text("我的") },
+                    )
                 }
             },
         ) { padding ->
             Surface(color = Ink, modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)) {
-                if (selectedTab == 0) {
-                    DeviceHome(vm)
-                } else {
-                    McpGuideScreen(vm)
+                when (selectedTab) {
+                    0 -> DeviceHome(vm)
+                    1 -> McpGuideScreen(vm)
+                    else -> AccountScreen(vm)
                 }
             }
             UpdateDialog(vm)

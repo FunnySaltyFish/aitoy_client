@@ -9,6 +9,13 @@ data class Entitlement(
     val trialSecondsRemaining: Int = 0,
     val proExpireAtMs: Long = 0,
     val proActive: Boolean = false,
+    val membershipLevel: String = "free",
+    val membershipName: String = "免费版",
+    val membershipExpireAtMs: Long = 0,
+    val aiQuotaSecondsMonthly: Int = 0,
+    val aiQuotaSecondsUsed: Int = 0,
+    val aiQuotaSecondsRemaining: Int = 0,
+    val aiQuotaMonth: String = "",
 )
 
 @Serializable
@@ -16,6 +23,9 @@ data class UserProfile(
     val uid: String = "",
     val email: String = "",
     val username: String = "",
+    val displayName: String = "",
+    val avatarUrl: String = "",
+    val userToken: String = "",
     val entitlement: Entitlement = Entitlement(),
 )
 
@@ -26,4 +36,3 @@ data class DeviceProfile(
     val entitlement: Entitlement = Entitlement(),
     val trialSyncedUid: String? = null,
 )
-

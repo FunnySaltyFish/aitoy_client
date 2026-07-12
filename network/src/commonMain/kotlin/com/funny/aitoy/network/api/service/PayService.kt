@@ -18,6 +18,7 @@ interface PayService {
     @FormUrlEncoded
     suspend fun createOrder(
         @Field("productId") productId: String,
+        @Field("payType") payType: String = "alipay",
     ): ApiResp<CreateOrderPayload>
 
     @GET("pay/query_order")
@@ -29,9 +30,13 @@ interface PayService {
 @Serializable
 data class Product(
     val id: String,
+    val level: String = "",
     val name: String,
     val priceCents: Int,
-    val proDays: Int,
+    val durationDays: Int = 31,
+    val aiControlSeconds: Int = 0,
+    val description: String = "",
+    val highlight: Boolean = false,
 )
 
 @Serializable
@@ -51,4 +56,5 @@ data class QueryOrderPayload(
     val status: String,
     val productId: String,
     val paidAtMs: Long = 0,
+    val user: com.funny.aitoy.core.model.UserProfile? = null,
 )

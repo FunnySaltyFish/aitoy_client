@@ -7,6 +7,13 @@ import retrofit2.http.FormUrlEncoded
 import retrofit2.http.POST
 
 interface AuthService {
+    @POST("auth/bootstrap")
+    @FormUrlEncoded
+    suspend fun bootstrap(
+        @Field("userToken") userToken: String,
+        @Field("deviceId") deviceId: String? = null,
+    ): ApiResp<TokenUserPayload>
+
     @POST("auth/send_code")
     @FormUrlEncoded
     suspend fun sendAuthCode(

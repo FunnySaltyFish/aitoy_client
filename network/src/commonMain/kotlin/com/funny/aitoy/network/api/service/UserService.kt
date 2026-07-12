@@ -16,6 +16,13 @@ interface UserService {
     suspend fun syncStatus(
         @Field("clientSyncVersionMs") clientSyncVersionMs: Long,
     ): ApiResp<UserSyncStatusPayload>
+
+    @POST("user/profile")
+    @FormUrlEncoded
+    suspend fun updateProfile(
+        @Field("displayName") displayName: String,
+        @Field("avatarUrl") avatarUrl: String? = null,
+    ): ApiResp<UserMePayload>
 }
 
 @Serializable

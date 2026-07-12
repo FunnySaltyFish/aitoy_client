@@ -30,6 +30,7 @@ import com.funny.aitoy.core.kmp.ToastType
 import com.funny.aitoy.core.kmp.appCtx
 import com.funny.aitoy.core.kmp.openUrl
 import com.funny.aitoy.core.kmp.toast
+import com.funny.aitoy.core.prefs.AiToyPrefs
 import com.funny.aitoy.core.prefs.DataSaverUtils
 import com.funny.aitoy.diagnostics.AiToyCrashReporter
 import com.funny.aitoy.diagnostics.AiToyTraceEvent
@@ -38,6 +39,7 @@ import com.funny.aitoy.diagnostics.AiToyTraceUploader
 import com.funny.aitoy.network.OkHttpUtils
 import com.funny.aitoy.network.api.AiToyServices
 import com.funny.aitoy.network.api.apiRequest
+import com.funny.aitoy.network.api.service.Product
 import com.funny.aitoy.relay.RelayClient
 import com.funny.aitoy.relay.RelayCommand
 import com.funny.aitoy.relay.RelayDevice
@@ -198,6 +200,22 @@ class BridgeViewModel : ViewModel() {
         "AITOY_USER_TOKEN",
         "",
     )
+    var accountUser
+        get() = AiToyPrefs.user
+        set(value) {
+            AiToyPrefs.user = value
+        }
+    var accountLoading by mutableStateOf(false)
+        private set
+    var accountMessage by mutableStateOf("")
+        private set
+    var profileNameDraft by mutableStateOf("")
+    var profileAvatarDraft by mutableStateOf("")
+    var memberProducts by mutableStateOf<List<Product>>(emptyList())
+        private set
+    var selectedPayType by mutableStateOf("alipay")
+    var pendingOrderNo by mutableStateOf("")
+        private set
 
     var rememberedDevicesJson: String by mutableDataSaverStateOf(
         DataSaverUtils,
@@ -332,6 +350,7 @@ class BridgeViewModel : ViewModel() {
         refreshBaseUrlState()
         ensureDefaultUserToken()
         userTokenDraft = userToken
+        bootstrapAccount()
         updateTraceContext()
         checkAppConfig()
     }
@@ -641,17 +660,6 @@ class BridgeViewModel : ViewModel() {
         syncRelayDevice()
     }
 
-    fun stopAllDevices() = runAction {
-        busyHint = "已全部停止"
-        mainHandler.removeCallbacks(controlTrial)
-        autoStopTasks.keys.toList().forEach(::cancelAutoStop)
-        keepAliveTasks.keys.toList().forEach(::cancelKeepAlive)
-        controllers.values.forEach { controller ->
-            runCatching { controller.stopDevice() }
-        }
-        syncRelayDevice()
-    }
-
     fun stopDevice(address: String) = runAction {
         stopToyAtAddress(address)
         if (address == selectedAddress) busyHint = "已停止"
@@ -905,7 +913,138 @@ class BridgeViewModel : ViewModel() {
         userToken = token
         userTokenDraft = token
         updateTraceContext()
+        bootstrapAccount()
         baseUrlMessage = "Token 已保存；手机已经上线时，请重新上线。"
+    }
+
+    fun bootstrapAccount() {
+        if (userToken.isBlank()) return
+        accountLoading = true
+        viewModelScope.launch {
+            runCatching {
+                apiRequest {
+                    AiToyServices.authService.bootstrap(
+                        userToken = userToken,
+                        deviceId = AiToyPrefs.deviceId,
+                    )
+                }
+            }.onSuccess { payload ->
+                AiToyPrefs.authToken = payload.token
+                AiToyPrefs.user = payload.user
+                accountUser = payload.user
+                profileNameDraft = payload.user.displayName.ifBlank { payload.user.username }
+                profileAvatarDraft = payload.user.avatarUrl
+                accountMessage = ""
+                refreshProducts()
+            }.onFailure {
+                accountMessage = "账号同步失败，请稍后重试。"
+            }
+            accountLoading = false
+        }
+    }
+
+    fun refreshAccount() {
+        accountLoading = true
+        viewModelScope.launch {
+            runCatching {
+                apiRequest { AiToyServices.userService.me() }
+            }.onSuccess { payload ->
+                AiToyPrefs.user = payload.user
+                accountUser = payload.user
+                profileNameDraft = payload.user.displayName.ifBlank { payload.user.username }
+                profileAvatarDraft = payload.user.avatarUrl
+                accountMessage = ""
+            }.onFailure {
+                if (AiToyPrefs.authToken.isBlank()) {
+                    bootstrapAccount()
+                } else {
+                    accountMessage = "刷新失败，请稍后再试。"
+                }
+            }
+            accountLoading = false
+        }
+    }
+
+    fun refreshProducts() {
+        viewModelScope.launch {
+            runCatching {
+                apiRequest { AiToyServices.payService.products() }
+            }.onSuccess { payload ->
+                memberProducts = payload.products
+            }
+        }
+    }
+
+    fun saveProfile() {
+        val name = profileNameDraft.trim()
+        if (name.isBlank()) {
+            accountMessage = "请填写昵称。"
+            return
+        }
+        accountLoading = true
+        viewModelScope.launch {
+            runCatching {
+                apiRequest {
+                    AiToyServices.userService.updateProfile(
+                        displayName = name,
+                        avatarUrl = profileAvatarDraft.trim().ifBlank { null },
+                    )
+                }
+            }.onSuccess { payload ->
+                AiToyPrefs.user = payload.user
+                accountUser = payload.user
+                accountMessage = "资料已保存。"
+            }.onFailure {
+                accountMessage = "保存失败，请稍后再试。"
+            }
+            accountLoading = false
+        }
+    }
+
+    fun startMembershipPurchase(productId: String) {
+        accountLoading = true
+        viewModelScope.launch {
+            runCatching {
+                apiRequest {
+                    AiToyServices.payService.createOrder(
+                        productId = productId,
+                        payType = selectedPayType,
+                    )
+                }
+            }.onSuccess { payload ->
+                pendingOrderNo = payload.orderNo
+                accountMessage = "订单已创建，完成支付后回到 App 刷新。"
+                if (payload.payUrl.isNotBlank()) {
+                    appCtx.openUrl(payload.payUrl)
+                }
+            }.onFailure {
+                accountMessage = "暂时无法发起支付，请稍后再试。"
+            }
+            accountLoading = false
+        }
+    }
+
+    fun refreshPendingOrder() {
+        val orderNo = pendingOrderNo
+        if (orderNo.isBlank()) {
+            refreshAccount()
+            return
+        }
+        accountLoading = true
+        viewModelScope.launch {
+            runCatching {
+                apiRequest { AiToyServices.payService.queryOrder(orderNo) }
+            }.onSuccess { payload ->
+                payload.user?.let {
+                    AiToyPrefs.user = it
+                    accountUser = it
+                }
+                accountMessage = if (payload.status == "paid") "会员已生效。" else "订单还未完成。"
+            }.onFailure {
+                accountMessage = "订单刷新失败，请稍后再试。"
+            }
+            accountLoading = false
+        }
     }
 
     fun downloadAndInstallUpdate() {
