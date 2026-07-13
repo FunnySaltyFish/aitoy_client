@@ -69,6 +69,42 @@ class CachitoBroadcastDiscoveryTest {
     }
 
     @Test
+    fun doesNotTreatCachitoControlServiceUuidAsScannedDevice() {
+        val controlAdvertisement = ScannedBleDevice(
+            name = "未命名设备",
+            address = "4A:7D:03:DD:85:68",
+            rssi = -58,
+            connectable = true,
+            serviceUuids = listOf("710002ef-0400-dd82-0302-0000000000ca"),
+            scanRecordHex = "02 01 1A 11 07 CA 00 00 00 00 00 02 03 82 DD 00 EF 02 00 71",
+        )
+        val matches = BleBroadcastProtocolRegistry.resolveAll(
+            controlAdvertisement,
+        )
+
+        assertEquals(emptyList(), matches.map { it.status.id })
+        assertTrue(controlAdvertisement.isLikelyCachitoControlAdvertisement)
+        assertFalse(controlAdvertisement.controllable)
+    }
+
+    @Test
+    fun cachitoQuickConnectDevicesResolveDirectlyToBroadcastProtocols() {
+        val quickDevices = BleBroadcastProtocolRegistry.cachitoQuickConnectDevices()
+        val shikong2 = quickDevices.first { it.broadcastProtocolName == "Cachito 失控 2.0" }
+        val daxiu = quickDevices.first { it.broadcastProtocolName == "Cachito 大秀 3.0" }
+
+        assertTrue(quickDevices.size >= 5)
+        assertEquals(
+            "cachito_shikong2_advertise",
+            BleBroadcastProtocolRegistry.resolveAll(shikong2).first().status.id,
+        )
+        assertEquals(
+            "cachito_daxiu_advertise",
+            BleBroadcastProtocolRegistry.resolveAll(daxiu).single().status.id,
+        )
+    }
+
+    @Test
     fun matchesShikong4ForHj002CarryingBothSvakomAndCachitoMarkers() {
         // HJ-002 是司康沃/失控双品牌 OEM 设备，广播同时带 SVA(0x27) 与 Cachito(0x71:17) 标记，
         // 但控制通道是失控 4.0 广播；官方仅按 company 0x0071 + 首字节 0x17 识别，不能因 SVA 标记排除。

@@ -22,6 +22,8 @@ internal interface BleBroadcastProtocol {
 }
 
 internal object BleBroadcastProtocolRegistry {
+    private const val CACHITO_QUICK_ADDRESS_PREFIX = "virtual:cachito:"
+
     private val cachitoTemplateProtocols = listOf(
         CachitoTemplateBroadcastProtocol(
             CachitoTemplateBroadcastSpec(
@@ -153,9 +155,17 @@ internal object BleBroadcastProtocolRegistry {
     )
 
     private val shikongProtocolIds = shikongFallbackProtocols.map { it.status.id }.toSet()
+    private val cachitoQuickProtocolIds = listOf(
+        "cachito_shikong2_advertise",
+        "cachito_shikong25_advertise",
+        "cachito_shikong3_advertise",
+        "cachito_shikong4_advertise",
+        "cachito_daxiu_advertise",
+    )
 
     fun resolveAll(device: ScannedBleDevice): List<BleBroadcastProtocol> {
-        val matched = protocols.filter { it.matches(device) }
+        val matched = resolveQuickConnectProtocol(device)?.let(::listOf)
+            ?: protocols.filter { it.matches(device) }
         if (matched.none { it.status.id in shikongProtocolIds }) return matched
         return (matched + shikongFallbackProtocols).distinctBy { it.status.id }
     }
@@ -170,6 +180,27 @@ internal object BleBroadcastProtocolRegistry {
     fun isUnconfirmedCachitoBroadcastDevice(device: ScannedBleDevice): Boolean =
         resolveAll(device).isEmpty() &&
             device.hasCachitoManufacturerSignature()
+
+    fun cachitoQuickConnectDevices(): List<ScannedBleDevice> =
+        cachitoQuickProtocolIds
+            .mapNotNull { protocolId -> protocols.firstOrNull { it.status.id == protocolId } }
+            .map { protocol ->
+                ScannedBleDevice(
+                    name = protocol.status.displayName,
+                    address = "$CACHITO_QUICK_ADDRESS_PREFIX${protocol.status.id}",
+                    rssi = 0,
+                    connectable = false,
+                    broadcastProtocolName = protocol.status.displayName,
+                )
+            }
+
+    private fun resolveQuickConnectProtocol(device: ScannedBleDevice): BleBroadcastProtocol? {
+        val protocolId = device.address
+            .takeIf { it.startsWith(CACHITO_QUICK_ADDRESS_PREFIX) }
+            ?.removePrefix(CACHITO_QUICK_ADDRESS_PREFIX)
+            ?: return null
+        return protocols.firstOrNull { it.status.id == protocolId }
+    }
 }
 
 /**
@@ -775,7 +806,7 @@ internal object CachitoDaxiuBroadcastProtocol : BleBroadcastProtocol {
 
     override val status = BleProtocolStatus(
         id = "cachito_daxiu_advertise",
-        displayName = "Cachito 大秀",
+        displayName = "Cachito 大秀 3.0",
         controllable = true,
         intensityMax = 100,
         supportsMode = true,
@@ -944,10 +975,7 @@ internal fun ScannedBleDevice.hasCachitoBroadcastFramePrefix(prefix: String): Bo
 
     val rawRecord = scanRecordHex.compactHex().uppercase()
     if (rawRecord.contains("FF$normalizedPrefix")) return true
-
-    return serviceUuids.any { serviceUuid ->
-        serviceUuid.compactHex().uppercase().contains(normalizedPrefix)
-    }
+    return false
 }
 
 internal fun ScannedBleDevice.hasCachitoManufacturerTypeByte(typeByte: Int): Boolean {

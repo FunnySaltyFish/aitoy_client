@@ -12,6 +12,7 @@ data class ScannedBleDevice(
 ) {
     val controllable: Boolean
         get() = !isLikelySystemPeripheral &&
+                !isLikelyCachitoControlAdvertisement &&
                 (connectable || broadcastProtocolName.isNotBlank() || serviceUuids.isNotEmpty() || isPotentialBroadcastAdvertisement)
 
     val isPotentialBroadcastAdvertisement: Boolean
@@ -43,10 +44,25 @@ data class ScannedBleDevice(
                 isLikelyMicrosoftSwiftPairDevice ||
                 name.equals("Windows Device", ignoreCase = true)
 
+    val isLikelyCachitoControlAdvertisement: Boolean
+        get() {
+            val hasCachitoCommandServiceUuid = serviceUuids.any { serviceUuid ->
+                serviceUuid.modelCompactHex().uppercase().startsWith("7100")
+            }
+            if (!hasCachitoCommandServiceUuid) return false
+            return manufacturerFirstByte(0x71) == null &&
+                !scanRecordHex.modelCompactHex().uppercase().contains("FF7100")
+        }
+
     private companion object {
         const val APPLE_CONTINUITY_SERVICE_UUID = "d0611e78-bbb4-4591-a5f8-487910ae4366"
     }
 }
+
+private fun String.modelCompactHex(): String =
+    filter { character ->
+        character.isDigit() || character.lowercaseChar() in 'a'..'f'
+    }
 
 enum class BleConnectionState(val label: String) {
     Idle("未连接"),

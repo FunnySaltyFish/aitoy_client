@@ -97,9 +97,6 @@ class AndroidBleController(
                 manufacturerData = record.manufacturerDataText(),
                 scanRecordHex = record?.bytes?.toHexString().orEmpty(),
             ).let { it.copy(broadcastProtocolName = BleBroadcastProtocolRegistry.resolveFirstName(it)) }
-            mainHandler.post {
-                onDevice(scannedDevice)
-            }
             val signature = buildString {
                 append("name=$name address=${device.address} connectable=$connectable")
                 append(" services=${record?.serviceUuids?.joinToString { it.uuid.toString() } ?: "<none>"}")
@@ -119,6 +116,18 @@ class AndroidBleController(
                     uploadPolicy = AiToyTraceUploadPolicy.SessionOnce,
                     key = "ble_scan_result:${device.address}:${signature.hashCode()}",
                 )
+            }
+            if (scannedDevice.isLikelyCachitoControlAdvertisement) {
+                trace(
+                    "忽略 Cachito 控制端广播 $signature rssi=${result.rssi}",
+                    type = "ble_ignored_control_advertisement",
+                    uploadPolicy = AiToyTraceUploadPolicy.SessionOnce,
+                    key = "ble_ignored_control_advertisement:${device.address}:${signature.hashCode()}",
+                )
+                return
+            }
+            mainHandler.post {
+                onDevice(scannedDevice)
             }
         }
 

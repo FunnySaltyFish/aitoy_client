@@ -698,6 +698,7 @@ private fun ConnectFlow(vm: BridgeViewModel) {
             Text(it, color = Danger)
         }
         ManagedDevices(vm)
+        CachitoQuickList(vm)
         DeviceList(vm)
     }
 }
@@ -839,6 +840,76 @@ private fun ManagedDeviceRow(vm: BridgeViewModel, toy: ManagedToy) {
             TextButton(onClick = { vm.deleteManagedDevice(toy.address) }) {
                 Text("删除")
             }
+        }
+    }
+}
+
+@Composable
+private fun CachitoQuickList(vm: BridgeViewModel) {
+    val devices = vm.cachitoQuickDevices
+    if (devices.isEmpty()) return
+    Spacer(Modifier.height(14.dp))
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color(0xFF211A22))
+            .border(1.dp, Line, RoundedCornerShape(16.dp))
+            .padding(14.dp),
+    ) {
+        Text("Cachito 专属入口", color = Honey, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "如果附近列表一直找不到，可以直接选择型号。",
+            color = TextSoft,
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Spacer(Modifier.height(10.dp))
+        devices.forEach { device ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFF1B151D), RoundedCornerShape(14.dp))
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        device.name,
+                        color = TextMain,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        "可直接尝试控制",
+                        color = TextSoft,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                val runtimeState = vm.runtimeStateForAddress(device.address)
+                if (runtimeState != ToyRuntimeState.Offline) {
+                    DeviceStatePill(runtimeState)
+                }
+                Spacer(Modifier.width(8.dp))
+                Button(
+                    onClick = { vm.connect(device) },
+                    enabled = device.controllable,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = RoseDeep,
+                        contentColor = Color.White,
+                    ),
+                ) {
+                    Text(
+                        when (runtimeState) {
+                            ToyRuntimeState.Connected -> "控制"
+                            ToyRuntimeState.Connecting -> "连接中"
+                            else -> "连接"
+                        }
+                    )
+                }
+            }
+            Spacer(Modifier.height(8.dp))
         }
     }
 }

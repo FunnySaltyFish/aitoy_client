@@ -9,6 +9,7 @@ import androidx.lifecycle.viewModelScope
 import com.funny.aitoy.ble.BleConnectionState
 import com.funny.aitoy.ble.BleController
 import com.funny.aitoy.ble.BleControllerFactory
+import com.funny.aitoy.ble.BleBroadcastProtocolRegistry
 import com.funny.aitoy.ble.BleProtocolStatus
 import com.funny.aitoy.ble.ProtocolAttemptStatus
 import com.funny.aitoy.ble.ProtocolTemplate
@@ -70,6 +71,7 @@ private fun generateDefaultUserToken(): String = "ut_${Uuid.random().toString().
 
 class BridgeViewModel : ViewModel() {
     val devices = mutableStateListOf<ScannedBleDevice>()
+    val cachitoQuickDevices: List<ScannedBleDevice> = BleBroadcastProtocolRegistry.cachitoQuickConnectDevices()
     private val deviceRuntimeStore = DeviceRuntimeStore()
 
     var connectionState by mutableStateOf(BleConnectionState.Idle)
