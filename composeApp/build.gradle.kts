@@ -42,6 +42,10 @@ kotlin {
             implementation(libs.compose.uiToolingPreview)
             implementation(libs.androidx.lifecycle.viewmodelCompose)
             implementation(libs.androidx.lifecycle.runtimeCompose)
+            implementation(libs.coil.compose)
+            implementation(libs.vinceglb.filekit.dialogs.compose)
+            implementation(libs.krop.ui)
+            implementation(libs.krop.extensions.filekit)
             implementation(libs.kaml)
             implementation(libs.kotlinx.serialization.json)
         }

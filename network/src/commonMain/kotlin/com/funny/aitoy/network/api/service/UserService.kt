@@ -1,11 +1,14 @@
 package com.funny.aitoy.network.api.service
 
 import com.funny.aitoy.network.api.ApiResp
+import okhttp3.MultipartBody
 import kotlinx.serialization.Serializable
 import retrofit2.http.Field
 import retrofit2.http.FormUrlEncoded
 import retrofit2.http.GET
+import retrofit2.http.Multipart
 import retrofit2.http.POST
+import retrofit2.http.Part
 
 interface UserService {
     @GET("user/me")
@@ -22,6 +25,12 @@ interface UserService {
     suspend fun updateProfile(
         @Field("displayName") displayName: String,
         @Field("avatarUrl") avatarUrl: String? = null,
+    ): ApiResp<UserMePayload>
+
+    @POST("user/avatar")
+    @Multipart
+    suspend fun uploadAvatar(
+        @Part file: MultipartBody.Part,
     ): ApiResp<UserMePayload>
 }
 

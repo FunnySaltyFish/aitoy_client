@@ -19,6 +19,7 @@ interface PayService {
     suspend fun createOrder(
         @Field("productId") productId: String,
         @Field("payType") payType: String = "alipay",
+        @Field("months") months: Int = 1,
     ): ApiResp<CreateOrderPayload>
 
     @GET("pay/query_order")
@@ -33,9 +34,16 @@ data class Product(
     val level: String = "",
     val name: String,
     val priceCents: Int,
+    val originalPriceCents: Int = priceCents,
+    val monthlyPriceCents: Int = priceCents,
+    val discountLabel: String = "",
+    val campaignTitle: String = "",
+    val campaignEndsAtMs: Long = 0,
     val durationDays: Int = 31,
     val aiControlSeconds: Int = 0,
     val description: String = "",
+    val tagline: String = "",
+    val upgradeHint: String = "",
     val highlight: Boolean = false,
 )
 

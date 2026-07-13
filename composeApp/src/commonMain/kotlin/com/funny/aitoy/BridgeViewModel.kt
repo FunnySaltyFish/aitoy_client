@@ -56,6 +56,9 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
+import okhttp3.RequestBody.Companion.toRequestBody
 import kotlin.math.roundToInt
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
@@ -135,6 +138,10 @@ class BridgeViewModel : ViewModel() {
     var selectedPayType by mutableStateOf("alipay")
     var pendingOrderNo by mutableStateOf("")
         private set
+
+    fun showAccountMessage(message: String) {
+        accountMessage = message
+    }
 
     var rememberedDevicesJson: String by mutableDataSaverStateOf(
         DataSaverUtils,
@@ -823,6 +830,10 @@ class BridgeViewModel : ViewModel() {
             accountMessage = "请填写昵称。"
             return
         }
+        if (name.length > 12) {
+            accountMessage = "昵称最多 12 个字。"
+            return
+        }
         accountLoading = true
         viewModelScope.launch {
             runCatching {
@@ -843,7 +854,39 @@ class BridgeViewModel : ViewModel() {
         }
     }
 
-    fun startMembershipPurchase(productId: String) {
+    fun uploadAvatar(fileName: String, bytes: ByteArray) {
+        if (bytes.isEmpty()) {
+            accountMessage = "请选择可用的头像图片。"
+            return
+        }
+        accountLoading = true
+        viewModelScope.launch {
+            runCatching {
+                val safeName = fileName.ifBlank { "avatar.jpg" }
+                val contentType = when (safeName.substringAfterLast('.', "").lowercase()) {
+                    "png" -> "image/png"
+                    "webp" -> "image/webp"
+                    else -> "image/jpeg"
+                }
+                val part = MultipartBody.Part.createFormData(
+                    name = "file",
+                    filename = safeName,
+                    body = bytes.toRequestBody(contentType.toMediaType()),
+                )
+                apiRequest { AiToyServices.userService.uploadAvatar(part) }
+            }.onSuccess { payload ->
+                AiToyPrefs.user = payload.user
+                accountUser = payload.user
+                profileAvatarDraft = payload.user.avatarUrl
+                accountMessage = "头像已更新。"
+            }.onFailure {
+                accountMessage = "头像更新失败，请稍后再试。"
+            }
+            accountLoading = false
+        }
+    }
+
+    fun startMembershipPurchase(productId: String, months: Int = 1) {
         accountLoading = true
         viewModelScope.launch {
             runCatching {
@@ -851,6 +894,7 @@ class BridgeViewModel : ViewModel() {
                     AiToyServices.payService.createOrder(
                         productId = productId,
                         payType = selectedPayType,
+                        months = months.coerceIn(1, 12),
                     )
                 }
             }.onSuccess { payload ->

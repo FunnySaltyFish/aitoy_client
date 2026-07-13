@@ -16,11 +16,13 @@ androidx-sqlite = "2.6.2"
 composeHotReload = "1.0.0"
 composeMultiplatform = "1.10.0"
 dataSaver = "1.2.3"
+coil = "3.5.0"
 eygraber-uri-kmp = "0.0.21"
-filekit = "0.12.0"
+filekit = "0.14.2"
 gosyerAppdirs = "2.0.0"
 google-ksp = "2.3.0"
 junit = "4.13.2"
+krop = "0.3.0-alpha01"
 kotlin = "2.3.0"
 kotlinx-coroutines = "1.10.2"
 kotlinx-serialization = "1.9.0"
@@ -70,6 +72,7 @@ compose-ui = { module = "org.jetbrains.compose.ui:ui", version.ref = "composeMul
 compose-components-resources = { module = "org.jetbrains.compose.components:components-resources", version.ref = "composeMultiplatform" }
 compose-uiToolingPreview = { module = "org.jetbrains.compose.ui:ui-tooling-preview", version.ref = "composeMultiplatform" }
 compose-material-icons-extended = { module = "org.jetbrains.compose.material:material-icons-extended", version.ref = "materialIconsExtended" }
+coil-compose = { module = "io.coil-kt.coil3:coil-compose", version.ref = "coil" }
 mikepenz-markdown-renderer = { module = "com.mikepenz:multiplatform-markdown-renderer", version.ref = "markdownRenderer" }
 mikepenz-markdown-renderer-m3 = { module = "com.mikepenz:multiplatform-markdown-renderer-m3", version.ref = "markdownRenderer" }
 openai-java = { module = "com.openai:openai-java", version.ref = "openaiJava" }
@@ -77,6 +80,9 @@ openai-java = { module = "com.openai:openai-java", version.ref = "openaiJava" }
 kotlinx-coroutinesSwing = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-swing", version.ref = "kotlinx-coroutines" }
 tencent-mmkv = { module = "com.tencent:mmkv", version.ref = "tencent-mmkv" }
 vinceglb-filekit-dialogs = { module = "io.github.vinceglb:filekit-dialogs", version.ref = "filekit" }
+vinceglb-filekit-dialogs-compose = { module = "io.github.vinceglb:filekit-dialogs-compose", version.ref = "filekit" }
+krop-ui = { module = "com.attafitamim.krop:ui", version.ref = "krop" }
+krop-extensions-filekit = { module = "com.attafitamim.krop:extensions-filekit", version.ref = "krop" }
 eygraber-uri-kmp = { module = "com.eygraber:uri-kmp", version.ref = "eygraber-uri-kmp" }
 gosyer-appdirs = { module = "ca.gosyer:kotlin-multiplatform-appdirs", version.ref = "gosyerAppdirs" }
 squareup-okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "squareup-okhttp" }
