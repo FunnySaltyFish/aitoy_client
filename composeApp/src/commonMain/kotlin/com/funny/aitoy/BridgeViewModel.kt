@@ -10,6 +10,7 @@ import com.funny.aitoy.ble.BleConnectionState
 import com.funny.aitoy.ble.BleController
 import com.funny.aitoy.ble.BleControllerFactory
 import com.funny.aitoy.ble.BleBroadcastProtocolRegistry
+import com.funny.aitoy.ble.BleProtocolFeature
 import com.funny.aitoy.ble.BleProtocolStatus
 import com.funny.aitoy.ble.ProtocolAttemptStatus
 import com.funny.aitoy.ble.ProtocolTemplate
@@ -73,6 +74,12 @@ private const val ProtocolExhaustedFeedbackMessage =
 
 @OptIn(ExperimentalUuidApi::class)
 private fun generateDefaultUserToken(): String = "ut_${Uuid.random().toString().replace("-", "")}"
+
+internal fun mapScalarFeatureValue(value: Int, feature: BleProtocolFeature): Int {
+    val min = minOf(feature.min, feature.max)
+    val max = maxOf(feature.min, feature.max)
+    return value.coerceIn(min, max)
+}
 
 class BridgeViewModel : ViewModel() {
     val devices = mutableStateListOf<ScannedBleDevice>()
@@ -1622,8 +1629,8 @@ class BridgeViewModel : ViewModel() {
         address: String,
         status: BleProtocolStatus,
     ): ToyControlAction {
-        val mappedIntensity = mapIntensityPercent(step.value, address)
         if (status.controlStyle != ToyControlStyle.IndependentFunctions) {
+            val mappedIntensity = mapIntensityPercent(step.value, address)
             return intensityAction(
                 currentMode = step.mode.coerceIn(1, status.modeMax.coerceAtLeast(1)),
                 nextIntensity = mappedIntensity,
@@ -1633,12 +1640,12 @@ class BridgeViewModel : ViewModel() {
         }
         val feature = status.features.getOrNull(step.featureIndex)
             ?: status.features.firstOrNull()
-            ?: return ToyControlAction.Intensity(mappedIntensity)
+            ?: return ToyControlAction.Intensity(mapIntensityPercent(step.value, address))
         val functionCode = status.independentFunctionCode(feature).coerceIn(1, 9)
         val safeMode = step.mode.coerceIn(0, status.independentFunctionModeMax(feature).coerceAtLeast(1))
         return ToyControlAction.Combined(
             mode = functionCode * 100 + safeMode,
-            intensity = mappedIntensity,
+            intensity = mapScalarFeatureValue(step.value, feature),
         )
     }
 
