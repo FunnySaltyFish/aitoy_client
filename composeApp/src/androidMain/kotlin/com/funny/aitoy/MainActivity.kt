@@ -37,9 +37,16 @@ class MainActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
         )
         setContent { App() }
+        AppDeepLinks.dispatch(intent?.dataString)
         window.decorView.post {
             startPermissionFlowIfNeeded()
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        AppDeepLinks.dispatch(intent.dataString)
     }
 
     private fun startPermissionFlowIfNeeded() {

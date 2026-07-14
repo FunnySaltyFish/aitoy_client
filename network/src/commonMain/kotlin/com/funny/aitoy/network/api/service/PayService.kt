@@ -27,6 +27,12 @@ interface PayService {
     suspend fun queryOrder(
         @Query("orderNo") orderNo: String,
     ): ApiResp<QueryOrderPayload>
+
+    @POST("pay/redeem")
+    @FormUrlEncoded
+    suspend fun redeemCode(
+        @Field("code") code: String,
+    ): ApiResp<RedeemPayload>
 }
 
 @Serializable
@@ -75,5 +81,12 @@ data class QueryOrderPayload(
     val quantity: Int = 1,
     val amountCents: Int = 0,
     val paidAtMs: Long = 0,
+    val user: com.funny.aitoy.core.model.UserProfile? = null,
+)
+
+@Serializable
+data class RedeemPayload(
+    val code: String = "",
+    val message: String = "",
     val user: com.funny.aitoy.core.model.UserProfile? = null,
 )

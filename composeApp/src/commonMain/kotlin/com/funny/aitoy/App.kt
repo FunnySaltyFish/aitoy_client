@@ -131,6 +131,17 @@ fun App() {
     val vm = viewModel { BridgeViewModel() }
     val navigator = rememberNavigator(AiToyRoute.Device)
     val currentRoute = navigator.currentRoute
+    LaunchedEffect(Unit) {
+        AppDeepLinks.events.collect { target ->
+            when (target) {
+                AppDeepLinkTarget.Pay -> navigator.replaceTop(AiToyRoute.Account)
+                is AppDeepLinkTarget.Redeem -> {
+                    vm.redeemCodeDraft = target.code
+                    navigator.replaceTop(AiToyRoute.Account)
+                }
+            }
+        }
+    }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         vm.resumeRelay()
     }

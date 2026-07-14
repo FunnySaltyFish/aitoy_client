@@ -145,6 +145,7 @@ class BridgeViewModel : ViewModel() {
     var memberProducts by mutableStateOf<List<Product>>(emptyList())
         private set
     var selectedPayType by mutableStateOf("alipay")
+    var redeemCodeDraft by mutableStateOf("")
     var pendingOrderNo by mutableStateOf("")
         private set
 
@@ -943,6 +944,30 @@ class BridgeViewModel : ViewModel() {
                 accountMessage = if (payload.status == "paid") "会员已生效。" else "订单还未完成。"
             }.onFailure {
                 accountMessage = "订单刷新失败，请稍后再试。"
+            }
+            accountLoading = false
+        }
+    }
+
+    fun redeemCode() {
+        val code = redeemCodeDraft.trim()
+        if (code.isBlank()) {
+            accountMessage = "请输入兑换码。"
+            return
+        }
+        accountLoading = true
+        viewModelScope.launch {
+            runCatching {
+                apiRequest { AiToyServices.payService.redeemCode(code) }
+            }.onSuccess { payload ->
+                payload.user?.let {
+                    AiToyPrefs.user = it
+                    accountUser = it
+                }
+                redeemCodeDraft = ""
+                accountMessage = payload.message.ifBlank { "兑换成功，额度已到账。" }
+            }.onFailure {
+                accountMessage = it.message ?: "兑换失败，请检查兑换码。"
             }
             accountLoading = false
         }

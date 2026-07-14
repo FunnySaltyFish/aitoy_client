@@ -33,6 +33,8 @@ import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -50,11 +52,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -131,16 +131,7 @@ internal fun AccountScreen(vm: BridgeViewModel) {
     }
 
     if (showUsageDetail) {
-        Box(Modifier.fillMaxSize()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .blur(6.dp),
-            ) {
-                UsageDetailScreen(vm = vm, onBack = { showUsageDetail = false })
-            }
-            AccountDevelopingOverlay()
-        }
+        UsageDetailScreen(vm = vm, onBack = { showUsageDetail = false })
         return
     }
 
@@ -153,110 +144,65 @@ internal fun AccountScreen(vm: BridgeViewModel) {
         selectedQuantity = selectedQuantity.coerceIn(1, quantityCap.coerceAtLeast(1))
     }
 
-    Box(Modifier.fillMaxSize()) {
-        Box(
+    Box(
+        modifier = Modifier.fillMaxSize(),
+    ) {
+        LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .blur(6.dp),
+                .statusBarsPadding()
+                .padding(horizontal = 18.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .statusBarsPadding()
-                    .padding(horizontal = 18.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                item {
-                    AvatarPickerAndCropper(
-                        vm = vm,
-                        onLauncherReady = { launchAvatarPicker = it },
-                    )
-                    AccountHeader(vm = vm, onAvatarClick = launchAvatarPicker)
-                }
-                item { UsageSummaryCard(vm = vm, onDetailClick = { showUsageDetail = true }) }
-                item { CampaignStrip(products = products) }
-                item {
-                    BillingPanel(
-                        vm = vm,
-                        monthlyProducts = monthlyProducts,
-                        addonProducts = addonProducts,
-                        purchaseMode = purchaseMode,
-                        selectedMonthlyId = selectedMonthlyId,
-                        selectedAddonId = selectedAddonId,
-                        selectedMonths = selectedMonths,
-                        selectedQuantity = selectedQuantity,
-                        quantityCap = quantityCap,
-                        onModeChanged = { purchaseMode = it },
-                        onMonthlySelected = {
-                            purchaseMode = PurchaseMode.Monthly
-                            selectedMonthlyId = it
-                        },
-                        onAddonSelected = {
-                            purchaseMode = PurchaseMode.Addon
-                            selectedAddonId = it
-                        },
-                        onMonthsChanged = { selectedMonths = it },
-                        onQuantityChanged = { selectedQuantity = it },
-                    )
-                }
-                item { ResponsibleNotice() }
-                item { Spacer(Modifier.height(132.dp)) }
-            }
-
-            if (selectedProduct != null) {
-                CheckoutBar(
+            item {
+                AvatarPickerAndCropper(
                     vm = vm,
-                    product = selectedProduct,
-                    mode = purchaseMode,
-                    months = selectedMonths,
-                    quantity = selectedQuantity,
+                    onLauncherReady = { launchAvatarPicker = it },
+                )
+                AccountHeader(vm = vm, onAvatarClick = launchAvatarPicker)
+            }
+            item { UsageSummaryCard(vm = vm, onDetailClick = { showUsageDetail = true }) }
+            item { RedeemCodePanel(vm = vm) }
+            item { CampaignStrip(products = products) }
+            item {
+                BillingPanel(
+                    vm = vm,
+                    monthlyProducts = monthlyProducts,
+                    addonProducts = addonProducts,
+                    purchaseMode = purchaseMode,
+                    selectedMonthlyId = selectedMonthlyId,
+                    selectedAddonId = selectedAddonId,
+                    selectedMonths = selectedMonths,
+                    selectedQuantity = selectedQuantity,
                     quantityCap = quantityCap,
-                    agreementChecked = agreementChecked,
-                    onAgreementChanged = { agreementChecked = it },
-                    modifier = Modifier.align(Alignment.BottomCenter),
+                    onModeChanged = { purchaseMode = it },
+                    onMonthlySelected = {
+                        purchaseMode = PurchaseMode.Monthly
+                        selectedMonthlyId = it
+                    },
+                    onAddonSelected = {
+                        purchaseMode = PurchaseMode.Addon
+                        selectedAddonId = it
+                    },
+                    onMonthsChanged = { selectedMonths = it },
+                    onQuantityChanged = { selectedQuantity = it },
                 )
             }
+            item { ResponsibleNotice() }
+            item { Spacer(Modifier.height(132.dp)) }
         }
-        AccountDevelopingOverlay()
-    }
-}
 
-@Composable
-private fun AccountDevelopingOverlay() {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Ink.copy(alpha = 0.72f))
-            .pointerInput(Unit) {
-                awaitPointerEventScope {
-                    while (true) {
-                        val event = awaitPointerEvent()
-                        event.changes.forEach { it.consume() }
-                    }
-                }
-            },
-        contentAlignment = Alignment.Center,
-    ) {
-        Column(
-            modifier = Modifier
-                .padding(horizontal = 28.dp)
-                .clip(RoundedCornerShape(18.dp))
-                .background(Velvet.copy(alpha = 0.94f))
-                .border(1.dp, Line, RoundedCornerShape(18.dp))
-                .padding(horizontal = 22.dp, vertical = 20.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Text(
-                text = "开发中",
-                color = Honey,
-                fontWeight = FontWeight.Black,
-                style = MaterialTheme.typography.headlineSmall,
-            )
-            Spacer(Modifier.height(8.dp))
-            Text(
-                text = "页面仅供预览，暂不可操作。",
-                color = TextSoft,
-                style = MaterialTheme.typography.bodyMedium,
+        if (selectedProduct != null) {
+            CheckoutBar(
+                vm = vm,
+                product = selectedProduct,
+                mode = purchaseMode,
+                months = selectedMonths,
+                quantity = selectedQuantity,
+                quantityCap = quantityCap,
+                agreementChecked = agreementChecked,
+                onAgreementChanged = { agreementChecked = it },
+                modifier = Modifier.align(Alignment.BottomCenter),
             )
         }
     }
@@ -295,6 +241,35 @@ private fun AvatarPickerAndCropper(vm: BridgeViewModel, onLauncherReady: (() -> 
             ),
             dialogShape = RoundedCornerShape(18.dp),
         )
+    }
+}
+
+@Composable
+private fun RedeemCodePanel(vm: BridgeViewModel) {
+    Panel(title = "兑换码", action = "朋友赠送或活动发放") {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            OutlinedTextField(
+                value = vm.redeemCodeDraft,
+                onValueChange = { vm.redeemCodeDraft = it.uppercase().filter { ch -> ch.isLetterOrDigit() }.take(32) },
+                singleLine = true,
+                placeholder = { Text("输入兑换码", color = TextSoft) },
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(10.dp))
+            Button(
+                onClick = vm::redeemCode,
+                enabled = !vm.accountLoading && vm.redeemCodeDraft.isNotBlank(),
+                colors = ButtonDefaults.buttonColors(containerColor = Honey, contentColor = Ink, disabledContainerColor = Line),
+                shape = RoundedCornerShape(50),
+            ) {
+                Text("兑换", fontWeight = FontWeight.Black)
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text("兑换成功后，额度会自动加入当前账号。", color = TextSoft, style = MaterialTheme.typography.bodyMedium)
     }
 }
 
