@@ -515,6 +515,7 @@ internal val KISS_TOY_OFFICIAL_V2_PROFILES = listOf(
     KissToyOfficialV2Profile("QCFW", "迷路-拍打版", listOf(KISS_TOY_OFFICIAL_V2_TYPE_1, KISS_TOY_OFFICIAL_V2_TYPE_6), toyType = 14),
     KISS_TOY_TUTU_OFFICIAL_V2_PROFILE,
     KissToyOfficialV2Profile("QCFBH25", "粉饼盒", listOf(KISS_TOY_OFFICIAL_V2_TYPE_1), toyType = 1),
+    KissToyOfficialV2Profile("QCBBT25", "嘟嘟糖", listOf(KISS_TOY_OFFICIAL_V2_TYPE_3), toyType = 10, bleHeader = 0x60),
     KissToyOfficialV2Profile("KXMINI25", "Cathy Mini", listOf(KISS_TOY_OFFICIAL_V2_TYPE_1, KISS_TOY_OFFICIAL_V2_TYPE_3), toyType = 10),
     KissToyOfficialV2Profile("PLY5", "Polly 5", listOf(KISS_TOY_OFFICIAL_V2_TYPE_1, KISS_TOY_OFFICIAL_V2_TYPE_3), toyType = 12),
 ).associateBy { it.code.normalizedDeviceName() }

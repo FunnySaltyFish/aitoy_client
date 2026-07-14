@@ -206,6 +206,38 @@ class KissToyProtocolTest {
     }
 
     @Test
+    fun qcbbt25KissSugarUsesOfficialV2SingleSuckingRoute() {
+        val fingerprint = qcbbt25LiveAe3aFingerprint()
+        val protocol = BleProtocolRegistry.resolveNative(fingerprint) ?: error("QCBBT25 protocol not resolved")
+
+        assertEquals("kisstoy_official_v2", protocol.status.id)
+        assertEquals("KissToy 嘟嘟糖", protocol.status.displayName)
+        assertEquals(ToyControlStyle.IntensityOnly, protocol.status.controlStyle)
+        assertEquals(listOf("吮吸"), protocol.status.channelNames)
+        assertFalse(protocol.status.supportsMode)
+
+        val init = protocol.initialize(fingerprint)
+        assertEquals(1, init.size)
+        assertEquals(AE3A_NOTIFY_UUID, assertIs<BleProtocolOperation.SubscribeNotify>(init[0]).characteristicUuid)
+
+        val run = protocol.commandsFor(ToyControlAction.Intensity(50))
+        val write = assertSingleKissToyBasicControlWrite(run, AE3A_WRITE_UUID, header = 0x60)
+        assertKissToyBasicControlData(
+            write.bytes,
+            content = listOf(0, 0, 153, 0, 0),
+            header = 0x60,
+        )
+
+        val stop = protocol.commandsFor(ToyControlAction.Stop)
+        assertKissToyBasicControlWrites(
+            stop,
+            AE3A_WRITE_UUID,
+            contents = listOf(listOf(0, 0, 0, 0, 0)),
+            header = 0x60,
+        )
+    }
+
+    @Test
     fun qcpwLiveAe3aGattSummaryPrefersOfficialV2BeforeHistoricalRoute() {
         val fingerprint = qcpwLiveAe3aFingerprint()
         val protocols = BleProtocolRegistry.resolveNativeAll(fingerprint)
@@ -584,6 +616,19 @@ class KissToyProtocolTest {
         ),
     )
 
+    private fun qcbbt25LiveAe3aFingerprint() = BleGattFingerprint(
+        name = "QCBBT25",
+        manufacturerData = "0x5d6:08 00 4A 4C 41 49 53 44 4B, 0xffff:60 00 F1 01 FF FF FF FF FF FF 01 01 64",
+        scanRecordHex = "",
+        serviceUuids = setOf(AE3A_SERVICE_UUID, AE00_SERVICE_UUID),
+        characteristicUuids = setOf(
+            AE3A_WRITE_UUID,
+            AE3A_NOTIFY_UUID,
+            AE00_WRITE_UUID,
+            AE00_NOTIFY_UUID,
+        ),
+    )
+
     private fun jiuaiJellyfishFingerprint() = BleGattFingerprint(
         name = "YCM-BL001",
         manufacturerData = "",
@@ -610,13 +655,14 @@ class KissToyProtocolTest {
     private fun assertSingleKissToyBasicControlWrite(
         operations: List<BleProtocolOperation>,
         writeUuid: Uuid,
+        header: Int = 0x58,
     ): BleProtocolOperation.Write {
         assertEquals(1, operations.size)
         val write = assertIs<BleProtocolOperation.Write>(operations.single())
         assertEquals(writeUuid, write.characteristicUuid)
         assertFalse(write.withResponse)
         assertEquals(13, write.bytes.size)
-        assertEquals(0x58, write.bytes[0].toInt() and 0xff)
+        assertEquals(header, write.bytes[0].toInt() and 0xff)
         return write
     }
 
@@ -624,6 +670,7 @@ class KissToyProtocolTest {
         operations: List<BleProtocolOperation>,
         writeUuid: Uuid,
         contents: List<List<Int>>,
+        header: Int = 0x58,
     ) {
         assertEquals(contents.size, operations.size)
         operations.zip(contents).forEach { (operation, content) ->
@@ -631,19 +678,19 @@ class KissToyProtocolTest {
             assertEquals(writeUuid, write.characteristicUuid)
             assertFalse(write.withResponse)
             assertEquals(13, write.bytes.size)
-            assertKissToyBasicControlData(write.bytes, content)
+            assertKissToyBasicControlData(write.bytes, content, header)
         }
     }
 
-    private fun assertKissToyBasicControlData(packet: ByteArray, content: List<Int>) {
+    private fun assertKissToyBasicControlData(packet: ByteArray, content: List<Int>, header: Int = 0x58) {
         assertEquals(5, content.size)
-        assertEquals(0x58, packet[0].toInt() and 0xff)
+        assertEquals(header, packet[0].toInt() and 0xff)
         val decrypted = decryptKissToyBleEncryption(packet.drop(1).toByteArray())
         val expectedData = listOf(
             0x02,
             0x0a,
-            0x00,
-        ) + content + listOf((0x58 + 0x02 + 0x0a + content.sum()) and 0xff)
+            if (header == 0x60) 0x01 else 0x00,
+        ) + content + listOf((header + 0x02 + 0x0a + (if (header == 0x60) 0x01 else 0x00) + content.sum()) and 0xff)
         assertEquals(expectedData, decrypted.drop(1).take(expectedData.size))
         assertEquals(listOf(0, 0), decrypted.takeLast(2))
     }
