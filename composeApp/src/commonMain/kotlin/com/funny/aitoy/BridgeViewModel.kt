@@ -886,7 +886,12 @@ class BridgeViewModel : ViewModel() {
         }
     }
 
-    fun startMembershipPurchase(productId: String, months: Int = 1) {
+    fun openMembershipAgreement() {
+        val prefix = AiToyPrefs.apiPrefix.trim().trim('/')
+        BridgePlatform.openUrl(OkHttpUtils.externalUrl("$prefix/pay/membership-agreement"))
+    }
+
+    fun startMembershipPurchase(productId: String, months: Int = 1, quantity: Int = 1) {
         accountLoading = true
         viewModelScope.launch {
             runCatching {
@@ -895,6 +900,7 @@ class BridgeViewModel : ViewModel() {
                         productId = productId,
                         payType = selectedPayType,
                         months = months.coerceIn(1, 12),
+                        quantity = quantity.coerceIn(1, 99),
                     )
                 }
             }.onSuccess { payload ->

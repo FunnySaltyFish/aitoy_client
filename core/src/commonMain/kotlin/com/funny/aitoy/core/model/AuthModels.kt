@@ -16,6 +16,15 @@ data class Entitlement(
     val aiQuotaSecondsUsed: Int = 0,
     val aiQuotaSecondsRemaining: Int = 0,
     val aiQuotaMonth: String = "",
+    val freeQuotaSecondsMonthly: Int = 0,
+    val freeQuotaSecondsUsed: Int = 0,
+    val freeQuotaSecondsRemaining: Int = 0,
+    val membershipQuotaSecondsMonthly: Int = 0,
+    val membershipQuotaSecondsUsed: Int = 0,
+    val membershipQuotaSecondsRemaining: Int = 0,
+    val aiAddonSecondsRemaining: Int = 0,
+    val aiAddonExpireAtMs: Long = 0,
+    val aiTotalSecondsRemaining: Int = aiQuotaSecondsRemaining,
 )
 
 @Serializable

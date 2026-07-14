@@ -20,6 +20,7 @@ interface PayService {
         @Field("productId") productId: String,
         @Field("payType") payType: String = "alipay",
         @Field("months") months: Int = 1,
+        @Field("quantity") quantity: Int = 1,
     ): ApiResp<CreateOrderPayload>
 
     @GET("pay/query_order")
@@ -31,6 +32,7 @@ interface PayService {
 @Serializable
 data class Product(
     val id: String,
+    val type: String = "monthly",
     val level: String = "",
     val name: String,
     val priceCents: Int,
@@ -41,6 +43,11 @@ data class Product(
     val campaignEndsAtMs: Long = 0,
     val durationDays: Int = 31,
     val aiControlSeconds: Int = 0,
+    val validDays: Int = 0,
+    val maxQuantity: Int = 1,
+    val maxHoldSeconds: Int = 0,
+    val oneTimeLimit: Boolean = false,
+    val purchasable: Boolean = true,
     val description: String = "",
     val tagline: String = "",
     val upgradeHint: String = "",
@@ -50,6 +57,7 @@ data class Product(
 @Serializable
 data class ProductsPayload(
     val products: List<Product> = emptyList(),
+    val agreementUrl: String = "",
 )
 
 @Serializable
@@ -63,6 +71,9 @@ data class QueryOrderPayload(
     val orderNo: String,
     val status: String,
     val productId: String,
+    val months: Int = 1,
+    val quantity: Int = 1,
+    val amountCents: Int = 0,
     val paidAtMs: Long = 0,
     val user: com.funny.aitoy.core.model.UserProfile? = null,
 )
