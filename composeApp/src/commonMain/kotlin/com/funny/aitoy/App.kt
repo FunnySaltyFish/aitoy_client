@@ -88,7 +88,6 @@ import com.funny.aitoy.ble.BleConnectionState
 import com.funny.aitoy.ble.BleProtocolStatus
 import com.funny.aitoy.ble.ProtocolAttemptStatus
 import com.funny.aitoy.ble.ScannedBleDevice
-import com.funny.aitoy.ble.SvakomV2HeatFunctionCode
 import com.funny.aitoy.ble.ToyControlStyle
 import com.funny.aitoy.ble.independentFunctionCode
 import com.funny.aitoy.ble.independentFunctionModeMax
@@ -1372,6 +1371,7 @@ private fun MultiFunctionControl(
     status: BleProtocolStatus,
 ) {
     val motionFeatures = status.features.filterNot { it.type == "heat" }
+    val heatFeature = status.features.firstOrNull { it.type == "heat" }
     Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
         motionFeatures.forEach { feature ->
             MultiFunctionFeatureControl(
@@ -1384,28 +1384,23 @@ private fun MultiFunctionControl(
                 maxIntensity = feature.max.coerceAtLeast(1),
             )
         }
-        if (status.features.any { it.type == "heat" }) {
-            var enabled by remember(address, status.id) { mutableStateOf(false) }
-            Button(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("svakom_plus_heat"),
-                onClick = {
-                    enabled = !enabled
-                    vm.updateIndependentFunction(
-                        address = address,
-                        functionCode = SvakomV2HeatFunctionCode,
-                        mode = 1,
-                        intensity = if (enabled) 1 else 0,
-                    )
-                },
-                enabled = status.controllable,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (enabled) Honey else VelvetLight,
-                    contentColor = if (enabled) Ink else TextMain,
-                ),
-            ) {
-                Text(if (enabled) "关闭加热" else "开启加热")
+        heatFeature?.let { feature ->
+            if (feature.max > 1) {
+                TimedHeatControl(
+                    vm = vm,
+                    address = address,
+                    status = status,
+                    title = feature.label.ifBlank { "加热" },
+                    functionCode = status.independentFunctionCode(feature),
+                    maxTemperature = feature.max.coerceAtLeast(1),
+                )
+            } else {
+                SimpleHeatControl(
+                    vm = vm,
+                    address = address,
+                    status = status,
+                    functionCode = status.independentFunctionCode(feature),
+                )
             }
         }
     }
@@ -1423,8 +1418,9 @@ private fun MultiFunctionFeatureControl(
 ) {
     var selectedMode by remember(address, status.id, functionCode) { mutableIntStateOf(0) }
     var intensity by remember(address, status.id, functionCode) { mutableIntStateOf(0) }
-    // 伸缩、拍打没有强度滑杆：官方只按模式驱动、强度固定，UI 上点模式即启动、再点即停。
+    // 没有模式的功能只展示一个独立滑杆；伸缩、拍打等模式驱动功能则点模式启动、再点即停。
     val strengthAdjustable = maxIntensity > 1
+    val directSlider = modeMax <= 0
 
     Column {
         Row(
@@ -1441,50 +1437,62 @@ private fun MultiFunctionFeatureControl(
             )
         }
         Spacer(Modifier.height(10.dp))
-        (1..modeMax.coerceAtLeast(1)).chunked(5).forEach { row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                row.forEach { index ->
-                    val selected = selectedMode == index
-                    Button(
-                        modifier = Modifier
-                            .weight(1f)
-                            .testTag("svakom_plus_${functionCode}_mode_$index"),
-                        onClick = {
-                            if (strengthAdjustable) {
-                                selectedMode = index
-                                if (intensity <= 0) intensity = maxIntensity
-                                vm.updateIndependentFunction(address, functionCode, selectedMode, intensity)
-                            } else {
-                                // 模式驱动：再次点击当前模式即停止；否则切换到该模式并以固定强度启动。
-                                if (selected) {
-                                    selectedMode = 0
-                                    intensity = 0
-                                } else {
+        if (!directSlider) {
+            (1..modeMax.coerceAtLeast(1)).chunked(5).forEach { row ->
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    row.forEach { index ->
+                        val selected = selectedMode == index
+                        Button(
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("svakom_plus_${functionCode}_mode_$index"),
+                            onClick = {
+                                if (strengthAdjustable) {
                                     selectedMode = index
-                                    intensity = 1
+                                    if (intensity <= 0) intensity = maxIntensity
+                                    vm.updateIndependentFunction(address, functionCode, selectedMode, intensity)
+                                } else {
+                                    // 模式驱动：再次点击当前模式即停止；否则切换到该模式并以固定强度启动。
+                                    if (selected) {
+                                        selectedMode = 0
+                                        intensity = 0
+                                    } else {
+                                        selectedMode = index
+                                        intensity = 1
+                                    }
+                                    vm.updateIndependentFunction(address, functionCode, selectedMode, intensity)
                                 }
-                                vm.updateIndependentFunction(address, functionCode, selectedMode, intensity)
-                            }
-                        },
-                        enabled = status.controllable,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (selected) RoseDeep else VelvetLight,
-                            contentColor = if (selected) Color.White else TextMain,
-                        ),
-                    ) {
-                        Text(index.toString())
+                            },
+                            enabled = status.controllable,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (selected) RoseDeep else VelvetLight,
+                                contentColor = if (selected) Color.White else TextMain,
+                            ),
+                        ) {
+                            Text(index.toString())
+                        }
                     }
+                    repeat(5 - row.size) { Spacer(Modifier.weight(1f)) }
                 }
-                repeat(5 - row.size) { Spacer(Modifier.weight(1f)) }
+                Spacer(Modifier.height(8.dp))
             }
-            Spacer(Modifier.height(8.dp))
         }
         if (strengthAdjustable) {
+            if (directSlider) {
+                Text(
+                    if (title.contains("速度")) "0 为设备初始速度，停止推拉请把推拉深度调为 0。"
+                    else if (title.contains("深度")) "0 为完全退出并停止推拉。"
+                    else "调为 0 可关闭这一项。",
+                    color = TextSoft,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Spacer(Modifier.height(4.dp))
+            }
             Slider(
                 value = intensity.toFloat(),
                 onValueChange = {
                     intensity = it.roundToInt()
-                    if (intensity > 0 && selectedMode <= 0) selectedMode = 1
+                    if (!directSlider && intensity > 0 && selectedMode <= 0) selectedMode = 1
                     vm.updateIndependentFunction(address, functionCode, selectedMode, intensity)
                 },
                 modifier = Modifier.testTag("svakom_plus_${functionCode}_intensity"),
@@ -1493,6 +1501,118 @@ private fun MultiFunctionFeatureControl(
                 enabled = status.controllable,
             )
         }
+    }
+}
+
+@Composable
+private fun TimedHeatControl(
+    vm: BridgeViewModel,
+    address: String,
+    status: BleProtocolStatus,
+    title: String,
+    functionCode: Int,
+    maxTemperature: Int,
+) {
+    var temperature by remember(address, status.id, functionCode) { mutableIntStateOf(0) }
+    var durationMinutes by remember(address, status.id, functionCode) { mutableIntStateOf(5) }
+    var enabled by remember(address, status.id, functionCode) { mutableStateOf(false) }
+    Column {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(title, color = TextMain, fontWeight = FontWeight.SemiBold)
+            Text(
+                if (enabled) "$temperature/$maxTemperature · ${durationMinutes}分钟" else "未开启",
+                color = Rose,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        Text("设置温度和时间后再开始加热。", color = TextSoft, style = MaterialTheme.typography.bodySmall)
+        Slider(
+            value = temperature.toFloat(),
+            onValueChange = { temperature = it.roundToInt() },
+            modifier = Modifier.testTag("heat_temperature_slider"),
+            valueRange = 0f..maxTemperature.toFloat(),
+            steps = (maxTemperature - 1).coerceAtLeast(0),
+            enabled = status.controllable,
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("加热时间", color = TextMain, fontWeight = FontWeight.SemiBold)
+            Text("${durationMinutes}分钟", color = Rose, fontWeight = FontWeight.Bold)
+        }
+        Slider(
+            value = durationMinutes.toFloat(),
+            onValueChange = { durationMinutes = it.roundToInt().coerceIn(1, 10) },
+            modifier = Modifier.testTag("heat_duration_slider"),
+            valueRange = 1f..10f,
+            steps = 8,
+            enabled = status.controllable,
+        )
+        Button(
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("timed_heat"),
+            onClick = {
+                if (enabled) {
+                    enabled = false
+                    vm.updateIndependentFunction(address, functionCode, mode = 0, intensity = 0)
+                } else {
+                    enabled = true
+                    vm.updateIndependentFunction(
+                        address = address,
+                        functionCode = functionCode,
+                        mode = 0,
+                        intensity = temperature,
+                        stopAfterSec = durationMinutes * 60,
+                    )
+                }
+            },
+            enabled = status.controllable && (enabled || temperature > 0),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = if (enabled) Honey else VelvetLight,
+                contentColor = if (enabled) Ink else TextMain,
+            ),
+        ) {
+            Text(if (enabled) "关闭加热" else "开始加热")
+        }
+    }
+}
+
+@Composable
+private fun SimpleHeatControl(
+    vm: BridgeViewModel,
+    address: String,
+    status: BleProtocolStatus,
+    functionCode: Int,
+) {
+    var enabled by remember(address, status.id, functionCode) { mutableStateOf(false) }
+    Button(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("svakom_plus_heat"),
+        onClick = {
+            enabled = !enabled
+            vm.updateIndependentFunction(
+                address = address,
+                functionCode = functionCode,
+                mode = 1,
+                intensity = if (enabled) 1 else 0,
+            )
+        },
+        enabled = status.controllable,
+        colors = ButtonDefaults.buttonColors(
+            containerColor = if (enabled) Honey else VelvetLight,
+            contentColor = if (enabled) Ink else TextMain,
+        ),
+    ) {
+        Text(if (enabled) "关闭加热" else "开启加热")
     }
 }
 

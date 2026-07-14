@@ -249,6 +249,7 @@ class BridgeViewModel : ViewModel() {
     private val controllers = mutableMapOf<String, BleController>()
     private val keepAliveJobs = mutableMapOf<String, Job>()
     private val autoStopJobs = mutableMapOf<String, Job>()
+    private val independentFunctionStopJobs = mutableMapOf<String, Job>()
     private var pendingControlAction: ToyControlAction? = null
     private var controlTrialJob: Job? = null
     private val relay = RelayClient(
@@ -555,16 +556,29 @@ class BridgeViewModel : ViewModel() {
         scheduleControlTrial(dualIntensityAction(mode, intensity, secondaryIntensity, protocolStatus))
     }
 
-    fun updateIndependentFunction(address: String, functionCode: Int, mode: Int, intensity: Int) {
+    fun updateIndependentFunction(
+        address: String,
+        functionCode: Int,
+        mode: Int,
+        intensity: Int,
+        stopAfterSec: Int? = null,
+    ) {
         if (address != selectedAddress) selectDevice(address)
         val status = protocolStatus
         val safeMode = mode.coerceIn(0, 99)
         val safeIntensity = intensity.coerceIn(0, status.intensityMax.coerceAtLeast(1))
-        scheduleControlTrial(
-            ToyControlAction.Combined(
-                mode = functionCode.coerceIn(1, 9) * 100 + safeMode,
-                intensity = safeIntensity,
-            )
+        val safeFunctionCode = functionCode.coerceIn(1, 9)
+        val action = ToyControlAction.Combined(
+            mode = safeFunctionCode * 100 + safeMode,
+            intensity = safeIntensity,
+        )
+        scheduleControlTrial(action)
+        scheduleIndependentFunctionStop(
+            address = selectedAddress.ifBlank { address },
+            functionCode = safeFunctionCode,
+            mode = safeMode,
+            active = safeIntensity > 0,
+            stopAfterSec = stopAfterSec,
         )
     }
 
@@ -1469,8 +1483,46 @@ class BridgeViewModel : ViewModel() {
     private fun stopToyAtAddress(address: String) {
         cancelAutoStop(address)
         cancelKeepAlive(address)
+        cancelIndependentFunctionStops(address)
         controllers[address]?.stopDevice()
     }
+
+    private fun scheduleIndependentFunctionStop(
+        address: String,
+        functionCode: Int,
+        mode: Int,
+        active: Boolean,
+        stopAfterSec: Int?,
+    ) {
+        val key = independentFunctionStopKey(address, functionCode)
+        independentFunctionStopJobs.remove(key)?.cancel()
+        if (!active || stopAfterSec == null || stopAfterSec <= 0) return
+        independentFunctionStopJobs[key] = viewModelScope.launch {
+            delay(stopAfterSec.coerceIn(1, MaxSequenceDurationSec) * 1_000L)
+            runCatching {
+                controllers[address]?.sendAction(
+                    ToyControlAction.Combined(
+                        mode = functionCode * 100 + mode.coerceIn(0, 99),
+                        intensity = 0,
+                    )
+                )
+            }.onFailure {
+                appendLog("定时停止失败：${it.message ?: "命令发送失败"}")
+            }
+        }
+    }
+
+    private fun cancelIndependentFunctionStops(address: String) {
+        val prefix = "$address:"
+        independentFunctionStopJobs
+            .filterKeys { it.startsWith(prefix) }
+            .keys
+            .toList()
+            .forEach { key -> independentFunctionStopJobs.remove(key)?.cancel() }
+    }
+
+    private fun independentFunctionStopKey(address: String, functionCode: Int): String =
+        "$address:$functionCode"
 
     private suspend fun delayControlWarmup(address: String) {
         val warmupMs = controllers[address]?.controlWarmupMs() ?: 0L

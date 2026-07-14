@@ -791,7 +791,7 @@ private fun cachitoScaled50(progress: Int): String {
 }
 
 internal object CachitoDaxiuBroadcastProtocol : BleBroadcastProtocol {
-    private val modeTemplates = listOf(
+    private val functions = listOf(
         CachitoDaxiuMode("推拉深度", CachitoDaxiuFunction.Depth),
         CachitoDaxiuMode("伸出速度", CachitoDaxiuFunction.ExtendSpeed),
         CachitoDaxiuMode("缩回速度", CachitoDaxiuFunction.RetractSpeed),
@@ -800,21 +800,29 @@ internal object CachitoDaxiuBroadcastProtocol : BleBroadcastProtocol {
     )
 
     private var selectedMode = 1
-    private var depthProgress = 50
-    private var extendSpeedProgress = 50
-    private var retractSpeedProgress = 50
+    private var depthProgress = 0
+    private var extendSpeedProgress = 0
+    private var retractSpeedProgress = 0
 
     override val status = BleProtocolStatus(
         id = "cachito_daxiu_advertise",
         displayName = "Cachito 大秀 3.0",
         controllable = true,
         intensityMax = 100,
-        supportsMode = true,
-        modeMax = modeTemplates.size,
-        controlStyle = ToyControlStyle.CombinedPatternAndIntensity,
-        modeLabel = "功能",
-        modeNames = modeTemplates.map { it.name },
+        supportsMode = false,
+        modeMax = 1,
+        controlStyle = ToyControlStyle.IndependentFunctions,
         intensityLabel = "数值",
+        channelNames = functions.map { it.name },
+        features = functions.mapIndexed { index, function ->
+            BleProtocolFeature(
+                type = function.type,
+                min = 0,
+                max = 100,
+                index = index,
+                label = function.name,
+            )
+        },
         automatic = true,
     )
 
@@ -834,8 +842,9 @@ internal object CachitoDaxiuBroadcastProtocol : BleBroadcastProtocol {
         }
 
     private fun control(mode: Int, intensity: Int): List<BleAdvertiseOperation> {
-        val selected = modeTemplates[(mode - 1).coerceIn(0, modeTemplates.lastIndex)]
-        selectedMode = mode.coerceIn(1, modeTemplates.size)
+        val functionIndex = if (mode >= 100) (mode / 100) - 1 else mode - 1
+        val selected = functions[functionIndex.coerceIn(0, functions.lastIndex)]
+        selectedMode = (functionIndex + 1).coerceIn(1, functions.size)
         val progress = intensity.coerceIn(0, 100)
         val template = when (selected.function) {
             CachitoDaxiuFunction.Depth -> {
@@ -905,6 +914,13 @@ internal object CachitoDaxiuBroadcastProtocol : BleBroadcastProtocol {
     private data class CachitoDaxiuMode(
         val name: String,
         val function: CachitoDaxiuFunction,
+        val type: String = when (function) {
+            CachitoDaxiuFunction.Depth -> "linear"
+            CachitoDaxiuFunction.ExtendSpeed,
+            CachitoDaxiuFunction.RetractSpeed -> "speed"
+            CachitoDaxiuFunction.EnterStrength -> "vibrate"
+            CachitoDaxiuFunction.Temperature -> "heat"
+        },
     )
 
     private enum class CachitoDaxiuFunction {

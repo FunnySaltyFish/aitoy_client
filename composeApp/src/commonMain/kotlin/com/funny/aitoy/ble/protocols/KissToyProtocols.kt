@@ -4,6 +4,7 @@ import com.funny.aitoy.buttplug.ButtplugConfigRepository
 import com.funny.aitoy.buttplug.ButtplugDeviceFingerprint
 import com.funny.aitoy.buttplug.ButtplugDeviceMatch
 import com.funny.aitoy.buttplug.ButtplugLocalHandlerRegistry
+import com.funny.aitoy.buttplug.Aes128EcbPkcs7
 import com.funny.aitoy.buttplug.FlufferProtocolPlans
 import com.funny.aitoy.buttplug.HandyProtocolPlans
 import com.funny.aitoy.buttplug.HoneyPlayBoxFrameCollector
@@ -400,8 +401,137 @@ internal fun KissToyOfficialV2Profile.kissToyOfficialV2BasicControlPacket(
     data[3] = if (data[0] == 0x60) 1 else 0
     content.copyInto(data, destinationOffset = 4)
     data[data.lastIndex] = data.take(data.lastIndex).sum() and 0xff
+    if (data[0] == KISS_TOY_AES_CCM_HEADER) {
+        return kissToyAesCcmBuildPacket(
+            header = data[0],
+            cmdId = data[1],
+            subId = data[3],
+            plaintext = content.map { it.toByte() }.toByteArray(),
+        )
+    }
     return byteArrayOf(data[0].toByte()) + kissToyBleEncryptionSendBytes(data.drop(1))
 }
+
+internal fun kissToyAesCcmBuildPacket(
+    header: Int,
+    cmdId: Int,
+    subId: Int,
+    plaintext: ByteArray,
+    nonce: ByteArray = kissToyAesCcmNonce(),
+): ByteArray {
+    require(header in 0..0xff)
+    require(cmdId in 0..0xff)
+    require(subId in 0..0xff)
+    require(nonce.size == KISS_TOY_AES_CCM_NONCE_SIZE)
+    val encrypted = kissToyAesCcmEncrypt(
+        key = KISS_TOY_AES_CCM_KEY,
+        nonce = nonce,
+        plaintext = plaintext,
+        tagSize = KISS_TOY_AES_CCM_TAG_SIZE,
+    )
+    val length = nonce.size + encrypted.size
+    require(length <= 0xff)
+    return byteArrayOf(header.toByte(), cmdId.toByte(), subId.toByte(), length.toByte()) + nonce + encrypted
+}
+
+internal fun kissToyAesCcmEncrypt(
+    key: ByteArray,
+    nonce: ByteArray,
+    plaintext: ByteArray,
+    tagSize: Int,
+): ByteArray {
+    val tag = kissToyAesCcmAuthTag(key, nonce, plaintext, tagSize)
+    val encrypted = kissToyAesCtrCrypt(key, nonce, plaintext)
+    val s0 = Aes128EcbPkcs7.encryptBlock(key, kissToyAesCcmCounterBlock(nonce, counter = 0))
+    val maskedTag = ByteArray(tagSize) { index -> (tag[index].unsigned() xor s0[index].unsigned()).toByte() }
+    return encrypted + maskedTag
+}
+
+internal fun kissToyAesCcmDecrypt(
+    key: ByteArray,
+    nonce: ByteArray,
+    encrypted: ByteArray,
+    tagSize: Int,
+): ByteArray {
+    require(encrypted.size >= tagSize)
+    val ciphertext = encrypted.copyOf(encrypted.size - tagSize)
+    return kissToyAesCtrCrypt(key, nonce, ciphertext)
+}
+
+internal fun kissToyAesCcmNonce(
+    deviceId: ByteArray = KISS_TOY_AES_CCM_DEFAULT_DEVICE_ID,
+): ByteArray {
+    require(deviceId.size == KISS_TOY_AES_CCM_DEVICE_ID_SIZE)
+    return Random.nextBytes(KISS_TOY_AES_CCM_TIME_NONCE_SIZE) + deviceId
+}
+
+private fun kissToyAesCcmAuthTag(
+    key: ByteArray,
+    nonce: ByteArray,
+    plaintext: ByteArray,
+    tagSize: Int,
+): ByteArray {
+    require(key.size == 16)
+    require(nonce.size == KISS_TOY_AES_CCM_NONCE_SIZE)
+    require(tagSize == 8)
+    require(plaintext.size < (1 shl (8 * KISS_TOY_AES_CCM_LENGTH_FIELD_SIZE)))
+    var state = Aes128EcbPkcs7.encryptBlock(key, kissToyAesCcmB0(nonce, plaintext.size, tagSize))
+    plaintext.asIterable()
+        .chunked(16)
+        .forEach { chunk ->
+            val block = ByteArray(16)
+            chunk.forEachIndexed { index, value -> block[index] = value }
+            state = Aes128EcbPkcs7.encryptBlock(key, state.xorBlock(block))
+        }
+    return state.copyOf(tagSize)
+}
+
+private fun kissToyAesCtrCrypt(
+    key: ByteArray,
+    nonce: ByteArray,
+    input: ByteArray,
+): ByteArray {
+    require(nonce.size == KISS_TOY_AES_CCM_NONCE_SIZE)
+    val output = ByteArray(input.size)
+    var offset = 0
+    var counter = 1
+    while (offset < input.size) {
+        val stream = Aes128EcbPkcs7.encryptBlock(key, kissToyAesCcmCounterBlock(nonce, counter))
+        val count = minOf(16, input.size - offset)
+        repeat(count) { index ->
+            output[offset + index] = (input[offset + index].unsigned() xor stream[index].unsigned()).toByte()
+        }
+        offset += count
+        counter += 1
+    }
+    return output
+}
+
+private fun kissToyAesCcmB0(nonce: ByteArray, plaintextSize: Int, tagSize: Int): ByteArray =
+    ByteArray(16).also { block ->
+        block[0] = (((tagSize - 2) / 2 shl 3) or (KISS_TOY_AES_CCM_LENGTH_FIELD_SIZE - 1)).toByte()
+        nonce.copyInto(block, destinationOffset = 1)
+        block.writeLength(13, plaintextSize)
+    }
+
+private fun kissToyAesCcmCounterBlock(nonce: ByteArray, counter: Int): ByteArray =
+    ByteArray(16).also { block ->
+        block[0] = (KISS_TOY_AES_CCM_LENGTH_FIELD_SIZE - 1).toByte()
+        nonce.copyInto(block, destinationOffset = 1)
+        block.writeLength(13, counter)
+    }
+
+private fun ByteArray.writeLength(offset: Int, value: Int) {
+    require(value in 0 until (1 shl (8 * KISS_TOY_AES_CCM_LENGTH_FIELD_SIZE)))
+    repeat(KISS_TOY_AES_CCM_LENGTH_FIELD_SIZE) { index ->
+        this[offset + index] = ((value ushr (8 * (KISS_TOY_AES_CCM_LENGTH_FIELD_SIZE - 1 - index))) and 0xff).toByte()
+    }
+}
+
+private fun ByteArray.xorBlock(other: ByteArray): ByteArray =
+    ByteArray(16) { index -> (this[index].unsigned() xor other[index].unsigned()).toByte() }
+
+private fun Byte.unsigned(): Int = toInt() and 0xff
 
 internal fun Int.scaleKissToyOfficialV2BasicControlValue(intensityMax: Int, startUp: Double): Int {
     val normalized = coerceIn(0, intensityMax).toDouble() / intensityMax.coerceAtLeast(1).toDouble()
@@ -467,6 +597,14 @@ private const val KISS_TOY_BASIC_CONTROL_LENGTH = 10
 private const val KISS_TOY_BASIC_CONTROL_CONTENT_SIZE = 5
 private const val KISS_TOY_BASIC_CONTROL_PACKET_DATA_SIZE = 10
 private const val KISS_TOY_BLE_ENCRYPTION_FRAME_SIZE = 12
+private const val KISS_TOY_AES_CCM_HEADER = 0x60
+private const val KISS_TOY_AES_CCM_TAG_SIZE = 8
+private const val KISS_TOY_AES_CCM_NONCE_SIZE = 12
+private const val KISS_TOY_AES_CCM_DEVICE_ID_SIZE = 6
+private const val KISS_TOY_AES_CCM_TIME_NONCE_SIZE = KISS_TOY_AES_CCM_NONCE_SIZE - KISS_TOY_AES_CCM_DEVICE_ID_SIZE
+private const val KISS_TOY_AES_CCM_LENGTH_FIELD_SIZE = 3
+internal val KISS_TOY_AES_CCM_KEY = bytes(0x7d, 0xbf, 0x2c, 0x2b, 0x97, 0x74, 0xb8, 0x86, 0xaa, 0xdb, 0xbc, 0x32, 0x36, 0xc3, 0x60, 0xf0)
+private val KISS_TOY_AES_CCM_DEFAULT_DEVICE_ID = ByteArray(KISS_TOY_AES_CCM_DEVICE_ID_SIZE) { 0xff.toByte() }
 internal val KISS_TOY_BLE_ENCRYPTION_KEY_TAB = arrayOf(
     intArrayOf(0x18, 0x5a, 0x64, 0x42, 0x10, 0xc6, 0xf6, 0x86, 0xb2, 0xd4, 0xfe, 0x92),
     intArrayOf(0xec, 0xb0, 0xbc, 0x0e, 0xc8, 0x7a, 0x54, 0xee, 0x00, 0x9a, 0x5a, 0x7a),

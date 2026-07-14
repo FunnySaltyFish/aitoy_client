@@ -1,6 +1,15 @@
 package com.funny.aitoy.buttplug
 
 object Aes128EcbPkcs7 {
+    fun encryptBlock(key: ByteArray, block: ByteArray): ByteArray {
+        require(key.size == 16) { "AES-128 key must be 16 bytes" }
+        require(block.size == 16) { "AES block must be 16 bytes" }
+        val expandedKey = expandKey(key)
+        return ByteArray(16).also { output ->
+            encryptBlock(block, 0, output, 0, expandedKey)
+        }
+    }
+
     fun encrypt(key: ByteArray, data: ByteArray): ByteArray {
         require(key.size == 16) { "AES-128 key must be 16 bytes" }
         val expandedKey = expandKey(key)

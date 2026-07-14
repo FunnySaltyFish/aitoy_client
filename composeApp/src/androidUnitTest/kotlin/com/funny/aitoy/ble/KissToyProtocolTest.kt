@@ -221,20 +221,30 @@ class KissToyProtocolTest {
         assertEquals(AE3A_NOTIFY_UUID, assertIs<BleProtocolOperation.SubscribeNotify>(init[0]).characteristicUuid)
 
         val run = protocol.commandsFor(ToyControlAction.Intensity(50))
-        val write = assertSingleKissToyBasicControlWrite(run, AE3A_WRITE_UUID, header = 0x60)
-        assertKissToyBasicControlData(
+        val write = assertSingleKissToyAesCcmBasicControlWrite(run, AE3A_WRITE_UUID)
+        assertKissToyAesCcmBasicControlData(
             write.bytes,
             content = listOf(0, 0, 153, 0, 0),
-            header = 0x60,
         )
 
         val stop = protocol.commandsFor(ToyControlAction.Stop)
-        assertKissToyBasicControlWrites(
+        assertKissToyAesCcmBasicControlWrites(
             stop,
             AE3A_WRITE_UUID,
             contents = listOf(listOf(0, 0, 0, 0, 0)),
-            header = 0x60,
         )
+    }
+
+    @Test
+    fun kissToyAesCcmMatchesStandardCcmVector() {
+        val encrypted = kissToyAesCcmEncrypt(
+            key = KISS_TOY_AES_CCM_KEY,
+            nonce = bytes(0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff),
+            plaintext = bytes(0x00, 0x00, 0x99, 0x00, 0x00),
+            tagSize = 8,
+        )
+
+        assertEquals("c091a2daf02ba2cd0dfdc9be02", encrypted.toHexForTest())
     }
 
     @Test
@@ -666,6 +676,19 @@ class KissToyProtocolTest {
         return write
     }
 
+    private fun assertSingleKissToyAesCcmBasicControlWrite(
+        operations: List<BleProtocolOperation>,
+        writeUuid: Uuid,
+    ): BleProtocolOperation.Write {
+        assertEquals(1, operations.size)
+        val write = assertIs<BleProtocolOperation.Write>(operations.single())
+        assertEquals(writeUuid, write.characteristicUuid)
+        assertFalse(write.withResponse)
+        assertEquals(29, write.bytes.size)
+        assertEquals(listOf(0x60, 0x02, 0x01, 0x19), write.bytes.take(4).map { it.toInt() and 0xff })
+        return write
+    }
+
     private fun assertKissToyBasicControlWrites(
         operations: List<BleProtocolOperation>,
         writeUuid: Uuid,
@@ -682,6 +705,21 @@ class KissToyProtocolTest {
         }
     }
 
+    private fun assertKissToyAesCcmBasicControlWrites(
+        operations: List<BleProtocolOperation>,
+        writeUuid: Uuid,
+        contents: List<List<Int>>,
+    ) {
+        assertEquals(contents.size, operations.size)
+        operations.zip(contents).forEach { (operation, content) ->
+            val write = assertIs<BleProtocolOperation.Write>(operation)
+            assertEquals(writeUuid, write.characteristicUuid)
+            assertFalse(write.withResponse)
+            assertEquals(29, write.bytes.size)
+            assertKissToyAesCcmBasicControlData(write.bytes, content)
+        }
+    }
+
     private fun assertKissToyBasicControlData(packet: ByteArray, content: List<Int>, header: Int = 0x58) {
         assertEquals(5, content.size)
         assertEquals(header, packet[0].toInt() and 0xff)
@@ -693,6 +731,24 @@ class KissToyProtocolTest {
         ) + content + listOf((header + 0x02 + 0x0a + (if (header == 0x60) 0x01 else 0x00) + content.sum()) and 0xff)
         assertEquals(expectedData, decrypted.drop(1).take(expectedData.size))
         assertEquals(listOf(0, 0), decrypted.takeLast(2))
+    }
+
+    private fun assertKissToyAesCcmBasicControlData(packet: ByteArray, content: List<Int>) {
+        assertEquals(5, content.size)
+        assertEquals(29, packet.size)
+        assertEquals(0x60, packet[0].toInt() and 0xff)
+        assertEquals(0x02, packet[1].toInt() and 0xff)
+        assertEquals(0x01, packet[2].toInt() and 0xff)
+        assertEquals(0x19, packet[3].toInt() and 0xff)
+        val nonce = packet.copyOfRange(4, 16)
+        val encrypted = packet.copyOfRange(16, packet.size)
+        val plaintext = kissToyAesCcmDecrypt(
+            key = KISS_TOY_AES_CCM_KEY,
+            nonce = nonce,
+            encrypted = encrypted,
+            tagSize = 8,
+        )
+        assertEquals(content, plaintext.map { it.toInt() and 0xff })
     }
 
     private fun decryptKissToyBleEncryption(encryptedBytes: ByteArray): List<Int> {
@@ -707,6 +763,9 @@ class KissToyProtocolTest {
         }
         return raw
     }
+
+    private fun ByteArray.toHexForTest(): String =
+        joinToString(separator = "") { (it.toInt() and 0xff).toString(16).padStart(2, '0') }
 
     private companion object {
         val KISSTOY_SERVICE_UUID: Uuid = Uuid.parse("00001000-0000-1000-8000-00805f9b34fb")

@@ -1,7 +1,7 @@
 package com.funny.aitoy.relay
 
 const val UnlimitedSequenceDurationSec = -1
-const val MaxSequenceDurationSec = 300
+const val MaxSequenceDurationSec = 600
 
 sealed interface RelaySequenceStep {
     data class Set(
@@ -121,4 +121,3 @@ private fun parseSequenceArguments(text: String): Map<String, Int> {
             key to value
         }
 }
-

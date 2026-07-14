@@ -164,13 +164,19 @@ class CachitoBroadcastDiscoveryTest {
     fun daxiuUsesOfficialMotionRtdHeatAndStopFrames() {
         val protocol = CachitoDaxiuBroadcastProtocol
 
-        val thrust = protocol.commandsFor(ToyControlAction.Combined(mode = 1, intensity = 50)).single().serviceUuid
-        assertTrue(thrust.matchesUuidBody("-8800-", "-0000-2B08080000"))
+        assertEquals(ToyControlStyle.IndependentFunctions, protocol.status.controlStyle)
+        assertEquals(listOf("推拉深度", "伸出速度", "缩回速度", "入体端强度", "加热温度"), protocol.status.features.map { it.label })
 
-        val enterStrength = protocol.commandsFor(ToyControlAction.Combined(mode = 4, intensity = 40)).single().serviceUuid
+        val thrust = protocol.commandsFor(ToyControlAction.Combined(mode = 100, intensity = 50)).single().serviceUuid
+        assertTrue(thrust.matchesUuidBody("-8800-", "-0000-2B02020000"))
+
+        val extendSpeed = protocol.commandsFor(ToyControlAction.Combined(mode = 200, intensity = 30)).single().serviceUuid
+        assertTrue(extendSpeed.matchesUuidBody("-8800-", "-0000-2B05020000"))
+
+        val enterStrength = protocol.commandsFor(ToyControlAction.Combined(mode = 400, intensity = 40)).single().serviceUuid
         assertTrue(enterStrength.matchesUuidBody("-8200-", "-0100-6400003102"))
 
-        val heat = protocol.commandsFor(ToyControlAction.Combined(mode = 5, intensity = 50)).single().serviceUuid
+        val heat = protocol.commandsFor(ToyControlAction.Combined(mode = 500, intensity = 50)).single().serviceUuid
         assertTrue(heat.matchesUuidBody("-9000-", "-0000-2D00000000"))
 
         val stopFrames = protocol.commandsFor(ToyControlAction.Stop).map { it.serviceUuid }
