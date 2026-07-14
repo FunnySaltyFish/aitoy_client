@@ -96,7 +96,11 @@ internal object SvakomV2MultiFunctionProtocol : BleDeviceProtocol {
     }
 
     override fun createInstance(fingerprint: BleGattFingerprint): BleDeviceProtocol =
-        SvakomV2Session(fingerprint.svakomProductCode().svakomV2Profile())
+        if (fingerprint.svakomProductCode() == 240) {
+            SvakomTl278bAppSession()
+        } else {
+            SvakomV2Session(fingerprint.svakomProductCode().svakomV2Profile())
+        }
 
     override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> = emptyList()
 
@@ -295,6 +299,119 @@ internal class SvakomV2Session(
         states.keys.forEach { states[it] = SvakomV2FunctionState(mode = 0, intensity = 0) }
         return writeCurrentState() + write(bytes(0x55, 0x04, 0x00, 0x00, 0x00, 0x00, 0xaa))
     }
+
+    private fun write(bytes: ByteArray): BleProtocolOperation.Write =
+        BleProtocolOperation.Write(
+            characteristicUuid = writeUuid,
+            bytes = bytes,
+            withResponse = false,
+    )
+}
+
+internal class SvakomTl278bAppSession : BleDeviceProtocol {
+    private val writeUuid = Uuid.parse("0000ffe1-0000-1000-8000-00805f9b34fb")
+    private val notifyUuid = Uuid.parse("0000ffe2-0000-1000-8000-00805f9b34fb")
+    private var stretchMode = 0
+    private var vibrateMode = 0
+    private var vibrateIntensity = 0
+    private var suckMode = 0
+    private var suckIntensity = 0
+
+    override val status: BleProtocolStatus = svakomV2Status(
+        id = "svakom_sl278_app_pair",
+        displayName = "SVAKOM 分欣 App 版",
+        functions = listOf(SvakomV2Stretch, SvakomV2Vibrate, SvakomV2Suck),
+    )
+
+    override fun matches(fingerprint: BleGattFingerprint): Boolean = false
+
+    override fun initialize(fingerprint: BleGattFingerprint): List<BleProtocolOperation> {
+        stretchMode = 0
+        vibrateMode = 0
+        vibrateIntensity = 0
+        suckMode = 0
+        suckIntensity = 0
+        val operations = mutableListOf<BleProtocolOperation>()
+        if (fingerprint.characteristicUuids.contains(notifyUuid)) {
+            operations += BleProtocolOperation.SubscribeNotify(notifyUuid)
+        }
+        operations += write(bytes(0x55, 0x17))
+        operations += BleProtocolOperation.Sleep(600L)
+        operations += write(heatZoneCommand(zone = 1, enabled = false))
+        operations += write(heatZoneCommand(zone = 2, enabled = false))
+        return operations
+    }
+
+    override fun keepaliveIntervalMs(): Long = 1_500L
+
+    override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
+        when (action) {
+            is ToyControlAction.Pattern -> updateVibrate(action.mode, vibrateIntensity.takeIf { it > 0 } ?: 1)
+            is ToyControlAction.Intensity -> updateVibrate(vibrateMode.takeIf { it > 0 } ?: 1, action.value)
+            is ToyControlAction.Combined -> {
+                val functionCode = action.mode / 100
+                val mode = action.mode % 100
+                when (functionCode) {
+                    SvakomV2Stretch.code -> updateStretch(mode)
+                    SvakomV2Vibrate.code -> updateVibrate(mode, action.intensity)
+                    SvakomV2Suck.code -> updateSuck(mode, action.intensity)
+                    else -> updateVibrate(action.mode, action.intensity)
+                }
+            }
+            is ToyControlAction.DualMotor -> {
+                val mode = action.mode.coerceAtLeast(1)
+                updateSuck(mode, action.internalIntensity) +
+                    BleProtocolOperation.Sleep(500L) +
+                    updateVibrate(mode, action.externalIntensity)
+            }
+            ToyControlAction.Stop -> stopAll()
+        }
+
+    private fun updateStretch(mode: Int): List<BleProtocolOperation> {
+        stretchMode = mode.coerceIn(0, SvakomV2Stretch.modeMax)
+        return listOf(write(stretchCommand(stretchMode)))
+    }
+
+    private fun updateVibrate(mode: Int, intensity: Int): List<BleProtocolOperation> {
+        vibrateIntensity = intensity.coerceIn(0, SvakomV2Vibrate.intensityMax)
+        vibrateMode = if (vibrateIntensity > 0) mode.coerceIn(1, SvakomV2Vibrate.modeMax) else 0
+        return listOf(write(modeIntensityCommand(command = 0x03, mode = vibrateMode, intensity = vibrateIntensity)))
+    }
+
+    private fun updateSuck(mode: Int, intensity: Int): List<BleProtocolOperation> {
+        suckIntensity = intensity.coerceIn(0, SvakomV2Suck.intensityMax)
+        suckMode = if (suckIntensity > 0) mode.coerceIn(1, SvakomV2Suck.modeMax) else 0
+        return listOf(write(modeIntensityCommand(command = 0x09, mode = suckMode, intensity = suckIntensity)))
+    }
+
+    private fun stopAll(): List<BleProtocolOperation> {
+        stretchMode = 0
+        vibrateMode = 0
+        vibrateIntensity = 0
+        suckMode = 0
+        suckIntensity = 0
+        return listOf(
+            write(modeIntensityCommand(command = 0x03, mode = 0, intensity = 0)),
+            write(stretchCommand(mode = 0)),
+            write(modeIntensityCommand(command = 0x09, mode = 0, intensity = 0)),
+            write(bytes(0x55, 0x04, 0x03, 0x00, 0x00, 0x00, 0xaa)),
+            write(heatZoneCommand(zone = 1, enabled = false)),
+            write(heatZoneCommand(zone = 2, enabled = false)),
+        )
+    }
+
+    private fun stretchCommand(mode: Int): ByteArray =
+        bytes(0x55, 0x08, 0x00, 0x00, mode.coerceIn(0, SvakomV2Stretch.modeMax), if (mode > 0) 0xff else 0x00)
+
+    private fun modeIntensityCommand(command: Int, mode: Int, intensity: Int): ByteArray =
+        bytes(0x55, command, 0x00, 0x00, mode, intensity)
+
+    private fun heatZoneCommand(zone: Int, enabled: Boolean): ByteArray =
+        if (enabled) {
+            bytes(0x55, 0x05, 0x01, 0x37, zone, 0x00)
+        } else {
+            bytes(0x55, 0x05, 0x00, 0x00, zone, 0x00)
+        }
 
     private fun write(bytes: ByteArray): BleProtocolOperation.Write =
         BleProtocolOperation.Write(

@@ -115,25 +115,42 @@ class SvakomSl278hProtocolTest {
 
     @Test
     fun sl278bAppVersionCodeUsesAppPairProfileAndWritesOnlySelectedFunction() {
-        val protocol = BleProtocolRegistry.resolveNative(
-            svakomFingerprint(
-                productCode = 0xf0,
-                name = "SL278B",
-                manufacturerData = "0x101:53 56 41 14 F0 FF FF 11 D0 86 C5 30 A1",
-            ),
-        ) ?: error("SL278B app profile did not resolve")
+        val fingerprint = svakomFingerprint(
+            productCode = 0xf0,
+            name = "SL278B",
+            manufacturerData = "0x101:53 56 41 14 F0 FF FF 11 D0 86 C5 30 A1",
+        )
+        val protocol = BleProtocolRegistry.resolveNative(fingerprint)
+            ?: error("SL278B app profile did not resolve")
 
         assertEquals("svakom_sl278_app_pair", protocol.status.id)
         assertEquals("SVAKOM 分欣 App 版", protocol.status.displayName)
         assertEquals(listOf("伸缩", "震动", "吮吸"), protocol.status.channelNames)
 
+        val initialize = protocol.initialize(fingerprint)
+        assertEquals(NOTIFY_UUID, assertIs<BleProtocolOperation.SubscribeNotify>(initialize[0]).characteristicUuid)
+        assertEquals("5517", assertIs<BleProtocolOperation.Write>(initialize[1]).bytes.hexUpper())
+        assertEquals(600L, assertIs<BleProtocolOperation.Sleep>(initialize[2]).millis)
+        assertEquals("550500000100", assertIs<BleProtocolOperation.Write>(initialize[3]).bytes.hexUpper())
+        assertEquals("550500000200", assertIs<BleProtocolOperation.Write>(initialize[4]).bytes.hexUpper())
+
         val stretch = protocol.commandsFor(ToyControlAction.Combined(mode = 102, intensity = 1))
         assertEquals(1, stretch.size)
-        assertEquals("55080000020000", assertIs<BleProtocolOperation.Write>(stretch.single()).bytes.hexUpper())
+        assertEquals("5508000002FF", assertIs<BleProtocolOperation.Write>(stretch.single()).bytes.hexUpper())
+
+        val vibrate = protocol.commandsFor(ToyControlAction.Combined(mode = 206, intensity = 10))
+        assertEquals(1, vibrate.size)
+        assertEquals("55030000060A", assertIs<BleProtocolOperation.Write>(vibrate.single()).bytes.hexUpper())
 
         val suction = protocol.commandsFor(ToyControlAction.Combined(mode = 303, intensity = 8))
         assertEquals(1, suction.size)
-        assertEquals("55090000030800", assertIs<BleProtocolOperation.Write>(suction.single()).bytes.hexUpper())
+        assertEquals("550900000308", assertIs<BleProtocolOperation.Write>(suction.single()).bytes.hexUpper())
+
+        val stop = protocol.commandsFor(ToyControlAction.Stop)
+        assertEquals("550300000000", assertIs<BleProtocolOperation.Write>(stop[0]).bytes.hexUpper())
+        assertEquals("550800000000", assertIs<BleProtocolOperation.Write>(stop[1]).bytes.hexUpper())
+        assertEquals("550900000000", assertIs<BleProtocolOperation.Write>(stop[2]).bytes.hexUpper())
+        assertEquals("550403000000AA", assertIs<BleProtocolOperation.Write>(stop[3]).bytes.hexUpper())
     }
 
     @Test
