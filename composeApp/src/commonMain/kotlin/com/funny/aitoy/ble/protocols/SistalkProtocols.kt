@@ -113,6 +113,7 @@ internal object SistalkMonsterPartyProtocol : BleDeviceProtocol {
 
     override fun matches(fingerprint: BleGattFingerprint): Boolean =
         fingerprint.sistalkProtocolVersion != 1 &&
+                !fingerprint.hasSvakomManufacturerData() &&
                 fingerprint.serviceUuids.contains(serviceUuid) &&
                 fingerprint.characteristicUuids.contains(opUuid) &&
                 fingerprint.characteristicUuids.contains(functionUuid)

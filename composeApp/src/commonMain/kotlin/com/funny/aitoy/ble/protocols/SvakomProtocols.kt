@@ -145,6 +145,34 @@ internal object SvakomVibrateSuckProtocol : BleDeviceProtocol {
         }
 }
 
+// 礼物猫 / BeYourLover 大人铃：官方产品码 62=VA617A_V（震动端）、63=VA617A_S（吮吸端）。
+// 这两个端点使用 SVA V2 广播前缀和 FFE0/FFE1 写入通道，但名称可能在 VA617A-* / 大人铃之间变化。
+internal object BeYourLoverVa617aProtocol : BleDeviceProtocol {
+    private val serviceUuid = Uuid.parse("0000ffe0-0000-1000-8000-00805f9b34fb")
+    private val writeUuid = Uuid.parse("0000ffe1-0000-1000-8000-00805f9b34fb")
+
+    override val status = BE_YOUR_LOVER_VA617A_SUCK.status
+
+    override fun matches(fingerprint: BleGattFingerprint): Boolean {
+        val productCode = fingerprint.svakomProductCode()
+        val hasWriteGatt = fingerprint.serviceUuids.contains(serviceUuid) &&
+                fingerprint.characteristicUuids.contains(writeUuid)
+        return productCode in setOf(62, 63) &&
+                hasWriteGatt &&
+                fingerprint.hasSvakomManufacturerData()
+    }
+
+    override fun createInstance(fingerprint: BleGattFingerprint): BleDeviceProtocol =
+        SvakomV2Session(
+            when (fingerprint.svakomProductCode()) {
+                62 -> BE_YOUR_LOVER_VA617A_VIBRATE
+                else -> BE_YOUR_LOVER_VA617A_SUCK
+            }
+        )
+
+    override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> = emptyList()
+}
+
 internal class SvakomV2Session(
     private val profile: SvakomV2Profile,
 ) : BleDeviceProtocol {
@@ -158,7 +186,11 @@ internal class SvakomV2Session(
 
     override fun initialize(fingerprint: BleGattFingerprint): List<BleProtocolOperation> {
         states.keys.forEach { states[it] = SvakomV2FunctionState() }
-        return listOf(BleProtocolOperation.SubscribeNotify(notifyUuid))
+        return if (fingerprint.characteristicUuids.contains(notifyUuid)) {
+            listOf(BleProtocolOperation.SubscribeNotify(notifyUuid))
+        } else {
+            emptyList()
+        }
     }
 
     override fun keepaliveIntervalMs(): Long = 1_500L
@@ -497,6 +529,34 @@ internal object SVAKOM_V2_ST462A : SvakomV2Profile(
     ),
     functions = listOf(SvakomV2Lick, SvakomV2Suck3Mode, SvakomV2Vibrate),
     defaultFunction = SvakomV2Lick,
+    writeCurrentStateOnUpdate = false,
+)
+
+private val BeYourLoverVa617aSuck =
+    SvakomV2Suck.copy(modeMax = 8, intensityMax = 10)
+
+private val BeYourLoverVa617aVibrate =
+    SvakomV2Vibrate.copy(modeMax = 9, intensityMax = 10)
+
+internal object BE_YOUR_LOVER_VA617A_SUCK : SvakomV2Profile(
+    status = svakomV2Status(
+        id = "beyourlover_va617a_suck",
+        displayName = "礼物猫大人铃",
+        functions = listOf(BeYourLoverVa617aSuck),
+    ),
+    functions = listOf(BeYourLoverVa617aSuck),
+    defaultFunction = BeYourLoverVa617aSuck,
+    writeCurrentStateOnUpdate = false,
+)
+
+internal object BE_YOUR_LOVER_VA617A_VIBRATE : SvakomV2Profile(
+    status = svakomV2Status(
+        id = "beyourlover_va617a_vibrate",
+        displayName = "礼物猫大人铃",
+        functions = listOf(BeYourLoverVa617aVibrate),
+    ),
+    functions = listOf(BeYourLoverVa617aVibrate),
+    defaultFunction = BeYourLoverVa617aVibrate,
     writeCurrentStateOnUpdate = false,
 )
 

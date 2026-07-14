@@ -112,6 +112,54 @@ class SvakomQhSx007eProtocolTest {
     }
 
     @Test
+    fun va617aSuckEndpointResolvesFromLiveGiftCatAdvertisement() {
+        val fingerprint = va617aSuckFingerprint(characteristicUuids = setOf(WRITE_UUID))
+        val protocol = BleProtocolRegistry.resolveNative(fingerprint)
+            ?: error("VA617A_S protocol not resolved")
+
+        assertEquals("beyourlover_va617a_suck", protocol.status.id)
+        assertEquals(ToyControlStyle.IndependentFunctions, protocol.status.controlStyle)
+        assertEquals(listOf("吮吸"), protocol.status.channelNames)
+        assertEquals(8, protocol.status.modeMax)
+        assertEquals(10, protocol.status.features.first { it.type == "constrict" }.max)
+        assertEquals(emptyList(), protocol.initialize(fingerprint))
+
+        val suck = protocol.commandsFor(ToyControlAction.Combined(mode = 3 * 100 + 8, intensity = 10))
+        assertEquals(1, suck.size)
+        assertEquals("55090000080A00", assertIs<BleProtocolOperation.Write>(suck[0]).bytes.hexUpper())
+    }
+
+    @Test
+    fun va617aVibrateEndpointResolvesFromLiveGiftCatAdvertisement() {
+        val fingerprint = va617aVibrateFingerprint()
+        val protocol = BleProtocolRegistry.resolveNative(fingerprint)
+            ?: error("VA617A_V protocol not resolved")
+
+        assertEquals("beyourlover_va617a_vibrate", protocol.status.id)
+        assertEquals(ToyControlStyle.IndependentFunctions, protocol.status.controlStyle)
+        assertEquals(listOf("震动"), protocol.status.channelNames)
+        assertEquals(9, protocol.status.modeMax)
+        assertEquals(10, protocol.status.features.first { it.type == "vibrate" }.max)
+        assertEquals(listOf(BleProtocolOperation.SubscribeNotify(NOTIFY_UUID)), protocol.initialize(fingerprint))
+
+        val vibrate = protocol.commandsFor(ToyControlAction.Combined(mode = 2 * 100 + 9, intensity = 10))
+        assertEquals(1, vibrate.size)
+        assertEquals("55030000090A00", assertIs<BleProtocolOperation.Write>(vibrate[0]).bytes.hexUpper())
+    }
+
+    @Test
+    fun va617aWithSvakomManufacturerDoesNotFallbackToSistalkMonsterParty() {
+        val protocol = BleProtocolRegistry.resolveNative(
+            va617aSuckFingerprint(
+                serviceUuids = setOf(SISTALK_SERVICE_UUID),
+                characteristicUuids = setOf(SISTALK_OP_UUID, SISTALK_FUNCTION_UUID),
+            )
+        )
+
+        assertEquals(null, protocol)
+    }
+
+    @Test
     fun st462aStopSendsAllThreeChannelStopsAndGlobalFallback() {
         val protocol = BleProtocolRegistry.resolveNative(st462aFingerprint())
             ?: error("ST462A protocol not resolved")
@@ -252,6 +300,36 @@ class SvakomQhSx007eProtocolTest {
         characteristicUuids = setOf(WRITE_UUID, NOTIFY_UUID),
     )
 
+    // 真实广播（线上 trace 2026-07-14）：name=大人铃/VA617A-4 manufacturer=0x32:... 00 00 3F ...
+    // 官方 ProductCodeMapper：产品码 63 -> VA617A_S，ComboOldVersionMapper 配对 63 <-> 62。
+    private fun va617aSuckFingerprint(
+        name: String = "大人铃",
+        manufacturerData: String = "0x32:53 56 41 02 32 FF 25 06 B7 61 D5 FF 32 00 00 3F 00 00 BB",
+        serviceUuids: Set<Uuid> = setOf(SERVICE_UUID),
+        characteristicUuids: Set<Uuid> = setOf(WRITE_UUID, NOTIFY_UUID),
+    ) = BleGattFingerprint(
+        name = name,
+        address = "FF:25:06:B7:61:D5",
+        manufacturerData = manufacturerData,
+        scanRecordHex = "",
+        serviceUuids = serviceUuids,
+        characteristicUuids = characteristicUuids,
+    )
+
+    // 真实广播（线上 trace 2026-07-14）：name=VA617A-3 manufacturer=0x32:... 00 00 3E ...
+    // 官方 ProductCodeMapper：产品码 62 -> VA617A_V。
+    private fun va617aVibrateFingerprint(
+        name: String = "VA617A-3",
+        manufacturerData: String = "0x32:53 56 41 02 FF 32 25 05 C3 6C 8F FF 32 00 00 3E 00 00 AA",
+    ) = BleGattFingerprint(
+        name = name,
+        address = "FF:25:05:C3:6C:8F",
+        manufacturerData = manufacturerData,
+        scanRecordHex = "",
+        serviceUuids = setOf(SERVICE_UUID),
+        characteristicUuids = setOf(WRITE_UUID, NOTIFY_UUID),
+    )
+
     private fun ByteArray.hexUpper(): String =
         joinToString("") { byte -> "%02X".format(byte.toInt() and 0xff) }
 
@@ -259,5 +337,8 @@ class SvakomQhSx007eProtocolTest {
         val SERVICE_UUID: Uuid = Uuid.parse("0000ffe0-0000-1000-8000-00805f9b34fb")
         val WRITE_UUID: Uuid = Uuid.parse("0000ffe1-0000-1000-8000-00805f9b34fb")
         val NOTIFY_UUID: Uuid = Uuid.parse("0000ffe2-0000-1000-8000-00805f9b34fb")
+        val SISTALK_SERVICE_UUID: Uuid = Uuid.parse("00009000-0000-1000-8000-00805f9b34fb")
+        val SISTALK_OP_UUID: Uuid = Uuid.parse("00009001-0000-1000-8000-00805f9b34fb")
+        val SISTALK_FUNCTION_UUID: Uuid = Uuid.parse("00009002-0000-1000-8000-00805f9b34fb")
     }
 }
