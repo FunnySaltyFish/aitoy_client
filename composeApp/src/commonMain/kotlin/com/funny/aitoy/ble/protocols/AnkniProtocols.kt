@@ -265,6 +265,7 @@ internal object Ankni0010Protocol : BleDeviceProtocol {
 }
 
 internal val ankniDdddProfileProtocols: List<BleDeviceProtocol> = listOf(
+    AnkniMxProtocol,
     AnkniDdddProfileProtocol(AnkniDdddProfile.tqjD()),
     AnkniDdddProfileProtocol(AnkniDdddProfile.classic("ankni_0001", "ANKNI 0001", 0x0A, 1, 10, listOf("安可尼0001", "ankni0001", "ankeni0001", "intung", "intang"))),
     AnkniDdddProfileProtocol(AnkniDdddProfile.classic("ankni_0002", "ANKNI 0002", 0x0A, 1, 8, listOf("安可尼0002", "ankni0002", "ankeni0002"))),
@@ -429,6 +430,142 @@ internal class AnkniDdddProfileProtocol(
         // 与小程序滑动控制 setInterval(200) 保活节奏一致
         private const val TQJD_KEEP_ALIVE_MS = 200
     }
+}
+
+internal object AnkniMxProtocol : BleDeviceProtocol {
+    private val writeUuid = Uuid.parse("0000ddd1-0000-1000-8000-00805f9b34fb")
+    private val modeNames = listOf(
+        "一心撩拨",
+        "二弦追悦",
+        "三连暴击",
+        "五指生死",
+        "欣喜涌动",
+        "心跳如擂",
+        "反复横跳",
+        "摇滚万岁",
+        "蛮牛冲撞",
+        "悸动纷呈",
+    )
+    private val functions = listOf(
+        AnkniMxFunction(functionCode = 1, type = "constrict", label = "吮吸"),
+        AnkniMxFunction(functionCode = 2, type = "vibrate", label = "震动"),
+    )
+    private val modeState = IntArray(functions.size)
+
+    override val status = BleProtocolStatus(
+        id = "ankni_mx",
+        displayName = "谜姬喵喜",
+        controllable = true,
+        intensityMax = 100,
+        supportsMode = true,
+        modeMax = modeNames.size,
+        controlStyle = ToyControlStyle.IndependentFunctions,
+        modeLabel = "模式",
+        modeNames = modeNames,
+        intensityLabel = "强度",
+        channelNames = functions.map { it.label },
+        features = functions.mapIndexed { index, function ->
+            BleProtocolFeature(
+                type = function.type,
+                min = 0,
+                max = 100,
+                index = index,
+                label = function.label,
+            )
+        },
+        automatic = true,
+        repeatIntervalMs = MX_KEEP_ALIVE_MS,
+    )
+
+    override fun matches(fingerprint: BleGattFingerprint): Boolean {
+        if (!fingerprint.hasAnkniDdddGatt()) return false
+        return fingerprint.name.normalizedDeviceName() == "anknimx"
+    }
+
+    override fun createInstance(fingerprint: BleGattFingerprint): BleDeviceProtocol {
+        modeState.fill(0)
+        return this
+    }
+
+    override fun initialize(fingerprint: BleGattFingerprint): List<BleProtocolOperation> {
+        modeState.fill(0)
+        return emptyList()
+    }
+
+    override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
+        when (action) {
+            is ToyControlAction.Pattern -> {
+                val mode = action.mode.coerceIn(1, status.modeMax)
+                modeState.fill(mode)
+                listOf(write(modeFrame(modeState)))
+            }
+            is ToyControlAction.Intensity -> {
+                val value = action.value.coerceIn(0, status.intensityMax)
+                listOf(write(slideFrame(value, value)))
+            }
+            is ToyControlAction.Combined -> {
+                val function = functionForMode(action.mode)
+                val gear = gearForMode(action.mode).coerceIn(1, status.modeMax)
+                modeState[function.index] = gear
+                listOf(write(modeFrame(modeState)))
+            }
+            is ToyControlAction.DualMotor -> {
+                val suction = action.internalIntensity.coerceIn(0, status.intensityMax)
+                val vibration = action.externalIntensity.coerceIn(0, status.intensityMax)
+                listOf(write(slideFrame(suction, vibration)))
+            }
+            ToyControlAction.Stop -> {
+                modeState.fill(0)
+                listOf(
+                    write(modeFrame(modeState)),
+                    write(slideFrame(0, 0)),
+                )
+            }
+        }
+
+    private fun functionForMode(mode: Int): AnkniMxFunction {
+        val functionCode = mode / 100
+        if (functionCode > 0) {
+            return functions.firstOrNull { it.functionCode == functionCode } ?: functions.first()
+        }
+        return functions.getOrNull(mode.coerceIn(1, functions.size) - 1) ?: functions.first()
+    }
+
+    private fun gearForMode(mode: Int): Int {
+        val gear = mode % 100
+        return if (gear > 0) gear else mode
+    }
+
+    private fun modeFrame(state: IntArray): ByteArray =
+        ankniAaFrame(MODE_COMMAND, *state.map { it.coerceIn(0, status.modeMax) }.toIntArray())
+
+    private fun slideFrame(suction: Int, vibration: Int): ByteArray =
+        ankniAaFrame(
+            SLIDE_COMMAND,
+            suction.coerceIn(0, status.intensityMax),
+            vibration.coerceIn(0, status.intensityMax),
+            if (suction > 0 || vibration > 0) SLIDE_DURATION else 0,
+        )
+
+    private fun write(bytes: ByteArray): BleProtocolOperation.Write =
+        BleProtocolOperation.Write(
+            characteristicUuid = writeUuid,
+            bytes = bytes,
+            withResponse = true,
+        )
+
+    private data class AnkniMxFunction(
+        val functionCode: Int,
+        val type: String,
+        val label: String,
+    ) {
+        val index: Int = functionCode - 1
+    }
+
+    private const val MODE_COMMAND = 0x0F
+    private const val SLIDE_COMMAND = 0x08
+    private const val SLIDE_DURATION = 0xC8
+    private const val MX_KEEP_ALIVE_MS = 200
 }
 
 internal object AnkniYwtdProtocol : BleDeviceProtocol {
