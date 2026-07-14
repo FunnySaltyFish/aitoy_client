@@ -171,6 +171,132 @@ internal object SistalkMonsterPartyProtocol : BleDeviceProtocol {
         functionCommand(COMMAND_POWER_OFF)
 }
 
+internal object SistalkPopocatProtocol : BleDeviceProtocol {
+    private val serviceUuid = Uuid.parse("00009000-0000-1000-8000-00805f9b34fb")
+    private val opUuid = Uuid.parse("00009001-0000-1000-8000-00805f9b34fb")
+    private val functionUuid = Uuid.parse("00009002-0000-1000-8000-00805f9b34fb")
+
+    private const val COMMAND_MOTOR = 0xA0
+    private val currentLevels = IntArray(PopocatFunction.entries.size)
+
+    override val status = BleProtocolStatus(
+        id = "sistalk_popocat",
+        displayName = "popocat 猫猫头",
+        controllable = true,
+        intensityMax = 100,
+        supportsMode = true,
+        modeMax = PopocatFunction.entries.size,
+        controlStyle = ToyControlStyle.IndependentFunctions,
+        modeLabel = "功能",
+        intensityLabel = "强度",
+        channelNames = PopocatFunction.entries.map { it.label },
+        features = PopocatFunction.entries.mapIndexed { index, function ->
+            BleProtocolFeature(
+                type = function.type,
+                min = 0,
+                max = 100,
+                index = index,
+                label = function.label,
+            )
+        },
+        automatic = true,
+    )
+
+    override fun matches(fingerprint: BleGattFingerprint): Boolean =
+        fingerprint.hasPopocatIdentity() &&
+                fingerprint.sistalkProtocolVersion != 1 &&
+                fingerprint.serviceUuids.contains(serviceUuid) &&
+                fingerprint.characteristicUuids.contains(opUuid) &&
+                fingerprint.characteristicUuids.contains(functionUuid)
+
+    override fun initialize(fingerprint: BleGattFingerprint): List<BleProtocolOperation> =
+        listOf(
+            BleProtocolOperation.SubscribeNotify(opUuid),
+            BleProtocolOperation.SubscribeNotify(functionUuid),
+        ).also {
+            currentLevels.fill(0)
+        }
+
+    override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
+        when (action) {
+            is ToyControlAction.Pattern -> listOf(updateAllChannels(status.intensityMax.coerceAtLeast(1)))
+            is ToyControlAction.Intensity -> listOf(updateAllChannels(action.value))
+            is ToyControlAction.Combined -> listOf(updateFunction(functionForMode(action.mode), action.intensity))
+            is ToyControlAction.DualMotor -> listOf(updateTargets(action.internalIntensity, action.externalIntensity))
+            ToyControlAction.Stop -> stop()?.let(::listOf).orEmpty()
+        }
+
+    private fun updateAllChannels(intensity: Int): BleProtocolOperation.Write {
+        val safeIntensity = intensity.coerceIn(0, status.intensityMax)
+        currentLevels.fill(safeIntensity)
+        return motorCommand()
+    }
+
+    private fun updateFunction(function: PopocatFunction, intensity: Int): BleProtocolOperation.Write {
+        currentLevels[function.index] = intensity.coerceIn(0, status.intensityMax)
+        return motorCommand()
+    }
+
+    private fun updateTargets(suction: Int, catHeadVibration: Int): BleProtocolOperation.Write {
+        currentLevels[PopocatFunction.Suction.index] = suction.coerceIn(0, status.intensityMax)
+        currentLevels[PopocatFunction.CatHeadVibration.index] = catHeadVibration.coerceIn(0, status.intensityMax)
+        return motorCommand()
+    }
+
+    private fun functionForMode(mode: Int): PopocatFunction {
+        val functionCode = mode / 100
+        if (functionCode > 0) {
+            return PopocatFunction.entries.firstOrNull { it.functionCode == functionCode } ?: PopocatFunction.Suction
+        }
+        return PopocatFunction.entries.getOrNull(mode.coerceIn(1, PopocatFunction.entries.size) - 1) ?: PopocatFunction.Suction
+    }
+
+    private fun stop(): BleProtocolOperation.Write? {
+        if (currentLevels.all { it == 0 }) return null
+        currentLevels.fill(0)
+        return motorCommand()
+    }
+
+    private fun motorCommand(): BleProtocolOperation.Write =
+        BleProtocolOperation.Write(
+            characteristicUuid = functionUuid,
+            bytes = bytes(
+                COMMAND_MOTOR,
+                (3 shl 3) or 0x80,
+                0x02,
+                currentLevels[PopocatFunction.CatHeadVibration.index],
+                currentLevels[PopocatFunction.Suction.index],
+            ),
+            withResponse = false,
+        )
+
+    private fun BleGattFingerprint.hasPopocatIdentity(): Boolean {
+        val manufacturerPayload = manufacturerData.toManufacturerDataMap()[0x2512] ?: return false
+        return manufacturerPayload.isPopocatManufacturerPayload()
+    }
+
+    private fun ByteArray.isPopocatManufacturerPayload(): Boolean {
+        if (size < 4 || unsignedByteAt(0) != 0x02) return false
+        val productId = unsignedByteAt(2)
+        val variantId = unsignedByteAt(3)
+        return productId == 0x27 && variantId == 0x00
+    }
+
+    private fun ByteArray.unsignedByteAt(index: Int): Int =
+        this[index].unsignedByte()
+}
+
+private enum class PopocatFunction(
+    val functionCode: Int,
+    val type: String,
+    val label: String,
+) {
+    Suction(1, "constrict", "吮吸"),
+    CatHeadVibration(2, "vibrate", "猫头震动");
+
+    val index: Int = functionCode - 1
+}
+
 internal object SistalkWeightless808Protocol : BleDeviceProtocol {
     private val serviceUuid = Uuid.parse("00009000-0000-1000-8000-00805f9b34fb")
     private val opUuid = Uuid.parse("00009001-0000-1000-8000-00805f9b34fb")

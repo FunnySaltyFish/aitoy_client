@@ -93,6 +93,7 @@ internal fun BleProtocolStatus.independentFunctionCode(feature: BleProtocolFeatu
     when (id) {
         AnkniMxProtocol.status.id -> feature.index + 1
         SosexyBoboBeiProtocol.status.id -> feature.index + 1
+        SistalkPopocatProtocol.status.id -> feature.index + 1
         else -> svakomV2FunctionCode(feature.type)
     }
 
@@ -100,5 +101,6 @@ internal fun BleProtocolStatus.independentFunctionModeMax(feature: BleProtocolFe
     when (id) {
         AnkniMxProtocol.status.id -> modeMax.coerceAtLeast(1)
         SosexyBoboBeiProtocol.status.id -> 1
+        SistalkPopocatProtocol.status.id -> 1
         else -> svakomV2FunctionModeMax(feature.type)
     }

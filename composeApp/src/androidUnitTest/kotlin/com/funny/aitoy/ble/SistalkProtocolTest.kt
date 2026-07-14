@@ -60,6 +60,38 @@ class SistalkProtocolTest {
     }
 
     @Test
+    fun popocatProductIdUsesDedicatedSuctionAndCatHeadMapping() {
+        val fingerprint = sistalkV2Fingerprint(
+            name = "MoulinRouge",
+            manufacturerData = "0x2512:02 00 27 00 00 00 00 00 00 00",
+        )
+        val protocol = BleProtocolRegistry.resolveNative(fingerprint)
+            ?: error("popocat protocol not resolved")
+
+        assertEquals("sistalk_popocat", protocol.status.id)
+        assertEquals(ToyControlStyle.IndependentFunctions, protocol.status.controlStyle)
+        assertEquals(listOf("吮吸", "猫头震动"), protocol.status.channelNames)
+        assertEquals("constrict", protocol.status.features[0].type)
+        assertEquals("vibrate", protocol.status.features[1].type)
+
+        val suction = protocol.commandsFor(ToyControlAction.Combined(mode = 100, intensity = 25))
+        val suctionWrite = assertIs<BleProtocolOperation.Write>(suction.single())
+        assertEquals("A098020019", suctionWrite.bytes.hexUpper())
+
+        val catHead = protocol.commandsFor(ToyControlAction.Combined(mode = 200, intensity = 70))
+        val catHeadWrite = assertIs<BleProtocolOperation.Write>(catHead.single())
+        assertEquals("A098024619", catHeadWrite.bytes.hexUpper())
+
+        val dual = protocol.commandsFor(ToyControlAction.DualMotor(mode = 1, internalIntensity = 30, externalIntensity = 80))
+        val dualWrite = assertIs<BleProtocolOperation.Write>(dual.single())
+        assertEquals("A09802501E", dualWrite.bytes.hexUpper())
+
+        val stop = protocol.commandsFor(ToyControlAction.Stop)
+        val stopWrite = assertIs<BleProtocolOperation.Write>(stop.single())
+        assertEquals("A098020000", stopWrite.bytes.hexUpper())
+    }
+
+    @Test
     fun localizedWeightless808NameAlsoMatchesDedicatedRoute() {
         val protocol = BleProtocolRegistry.resolveNative(
             sistalkV2Fingerprint(name = "失重808", manufacturerData = "0xffff:02 00 00 00")
