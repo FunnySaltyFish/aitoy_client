@@ -68,6 +68,8 @@ private const val EXCLUSIVE_INTENSITY_MODE = 0
 private const val LegacyDefaultUserToken = "ut_fishfish"
 private const val DefaultCommunityUrl = "https://qm.qq.com/q/ytRVIe6O7m"
 private const val DefaultTutorialUrl = "https://docs.qq.com/s/4dhBqBSu1u5900Qh7qvYHW/folder/YFZTdLuzaIxv"
+private const val ProtocolExhaustedFeedbackMessage =
+    "已尝试所有协议，目前仍不支持。请在群里反馈，并附上官方 App 截图或产品说明书，说明设备可用的档位和模式；同时提供你在本 App 内的操作时间，方便查找日志。"
 
 @OptIn(ExperimentalUuidApi::class)
 private fun generateDefaultUserToken(): String = "ut_${Uuid.random().toString().replace("-", "")}"
@@ -302,7 +304,7 @@ class BridgeViewModel : ViewModel() {
             BleConnectionState.Error -> {
                 if (address == selectedAddress) {
                     busyHint = if (deviceRuntimeStore.protocolAttemptStatus(address).exhausted) {
-                        "已尝试所有协议，目前仍不支持，请加群提交反馈，开发者会尝试支持。"
+                        ProtocolExhaustedFeedbackMessage
                     } else {
                         "设备连接不上，请确认设备已开机并靠近手机"
                     }
@@ -603,7 +605,7 @@ class BridgeViewModel : ViewModel() {
                 "已保持当前设备类型，请靠近手机并从低强度再试一次"
             }
             else -> {
-                "已尝试所有协议，目前仍不支持，请加群提交反馈，开发者会尝试支持。"
+                ProtocolExhaustedFeedbackMessage
             }
         }
         syncRelayDevice()

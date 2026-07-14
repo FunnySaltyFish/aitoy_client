@@ -557,7 +557,7 @@ private fun HeaderStatusLine(status: HeaderStatus) {
             text = status.text,
             color = TextMain,
             style = MaterialTheme.typography.bodyMedium,
-            maxLines = 1,
+            maxLines = 4,
             overflow = TextOverflow.Ellipsis,
         )
     }
@@ -848,6 +848,7 @@ private fun ManagedDeviceRow(vm: BridgeViewModel, toy: ManagedToy) {
 private fun CachitoQuickList(vm: BridgeViewModel) {
     val devices = vm.cachitoQuickDevices
     if (devices.isEmpty()) return
+    var expanded by remember { mutableStateOf(false) }
     Spacer(Modifier.height(14.dp))
     Column(
         modifier = Modifier
@@ -855,61 +856,88 @@ private fun CachitoQuickList(vm: BridgeViewModel) {
             .clip(RoundedCornerShape(16.dp))
             .background(Color(0xFF211A22))
             .border(1.dp, Line, RoundedCornerShape(16.dp))
-            .padding(14.dp),
     ) {
-        Text("Cachito 专属入口", color = Honey, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(4.dp))
-        Text(
-            "如果附近列表一直找不到，可以直接选择型号。",
-            color = TextSoft,
-            style = MaterialTheme.typography.bodySmall,
-        )
-        Spacer(Modifier.height(10.dp))
-        devices.forEach { device ->
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color(0xFF1B151D), RoundedCornerShape(14.dp))
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        device.name,
-                        color = TextMain,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        "可直接尝试控制",
-                        color = TextSoft,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-                val runtimeState = vm.runtimeStateForAddress(device.address)
-                if (runtimeState != ToyRuntimeState.Offline) {
-                    DeviceStatePill(runtimeState)
-                }
-                Spacer(Modifier.width(8.dp))
-                Button(
-                    onClick = { vm.connect(device) },
-                    enabled = device.controllable,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = RoseDeep,
-                        contentColor = Color.White,
-                    ),
-                ) {
-                    Text(
-                        when (runtimeState) {
-                            ToyRuntimeState.Connected -> "控制"
-                            ToyRuntimeState.Connecting -> "连接中"
-                            else -> "连接"
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { expanded = !expanded }
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("Cachito 专属入口", color = Honey, fontWeight = FontWeight.Bold)
+                Text(
+                    "${devices.size} 个型号${if (expanded) "" else "，点击展开"}",
+                    color = TextSoft,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            Icon(
+                imageVector = if (expanded) Icons.Outlined.KeyboardArrowUp else Icons.Outlined.KeyboardArrowDown,
+                contentDescription = null,
+                tint = TextSoft,
+            )
+        }
+        AnimatedVisibility(
+            visible = expanded,
+            enter = fadeIn() + expandVertically(),
+            exit = fadeOut() + shrinkVertically(),
+        ) {
+            Column(Modifier.padding(horizontal = 10.dp, vertical = 2.dp)) {
+                Text(
+                    "如果附近列表一直找不到，可以直接选择型号。",
+                    color = TextSoft,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
+                )
+                Spacer(Modifier.height(6.dp))
+                devices.forEach { device ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFF1B151D), RoundedCornerShape(14.dp))
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                device.name,
+                                color = TextMain,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                "可直接尝试控制",
+                                color = TextSoft,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
                         }
-                    )
+                        val runtimeState = vm.runtimeStateForAddress(device.address)
+                        if (runtimeState != ToyRuntimeState.Offline) {
+                            DeviceStatePill(runtimeState)
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        Button(
+                            onClick = { vm.connect(device) },
+                            enabled = device.controllable,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = RoseDeep,
+                                contentColor = Color.White,
+                            ),
+                        ) {
+                            Text(
+                                when (runtimeState) {
+                                    ToyRuntimeState.Connected -> "控制"
+                                    ToyRuntimeState.Connecting -> "连接中"
+                                    else -> "连接"
+                                }
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
                 }
             }
-            Spacer(Modifier.height(8.dp))
         }
     }
 }
