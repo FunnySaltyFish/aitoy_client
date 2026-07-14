@@ -31,6 +31,29 @@ import com.funny.aitoy.buttplug.toToyOutputKind
 import kotlin.random.Random
 import kotlin.uuid.Uuid
 
+internal object AnkniQd1XhtkjProtocol : BleDeviceProtocol {
+    private val serviceUuid = Uuid.parse("0000ff10-0000-1000-8000-00805f9b34fb")
+    private val writeUuid = Uuid.parse("0000ff12-0000-1000-8000-00805f9b34fb")
+
+    override val status = MizzzeeXhtkjProtocol.status.copy(
+        id = "ankni_qd1_xhtkj",
+        displayName = "ANKNI QD1",
+    )
+
+    override fun matches(fingerprint: BleGattFingerprint): Boolean {
+        if (!fingerprint.hasAnkniQd1Name()) return false
+        if (!fingerprint.manufacturerData.contains("0x642", ignoreCase = true)) return false
+        return fingerprint.serviceUuids.contains(serviceUuid) &&
+                fingerprint.characteristicUuids.contains(writeUuid)
+    }
+
+    override fun initialize(fingerprint: BleGattFingerprint): List<BleProtocolOperation> =
+        MizzzeeXhtkjProtocol.initialize(fingerprint)
+
+    override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
+        MizzzeeXhtkjProtocol.commandsFor(action)
+}
+
 internal object MizzzeeXhtkjProtocol : BleDeviceProtocol {
     private val serviceUuid = Uuid.parse("0000ff10-0000-1000-8000-00805f9b34fb")
     private val writeUuid = Uuid.parse("0000ff12-0000-1000-8000-00805f9b34fb")

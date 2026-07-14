@@ -6,6 +6,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertTrue
 import kotlin.uuid.Uuid
 
 class MizzzeeXhtkjProtocolTest {
@@ -40,10 +41,34 @@ class MizzzeeXhtkjProtocolTest {
         assertEquals("0312F400" + "00".repeat(16), assertIs<BleProtocolOperation.Write>(stop[1]).bytes.hexUpper())
     }
 
-    private fun mizzzeeXhtkjFingerprint(name: String): BleGattFingerprint =
+    @Test
+    fun ankniQd1WithTraceManufacturerUsesOfficialXhtFramesBeforeLegacyAaRoute() {
+        val fingerprint = mizzzeeXhtkjFingerprint(
+            name = "ANKNI QD 1",
+            manufacturerData = "0x642:",
+        )
+        val protocols = BleProtocolRegistry.resolveNativeAll(fingerprint)
+
+        assertEquals("ankni_qd1_xhtkj", protocols.first().status.id)
+        assertTrue(protocols.any { it.status.id == "ankni_qd1_ff12_gatt" })
+
+        val protocol = protocols.first()
+        val init = assertIs<BleProtocolOperation.Write>(protocol.initialize(fingerprint).single())
+        assertEquals("0312F600", init.bytes.hexUpper())
+
+        val strength = assertIs<BleProtocolOperation.Write>(
+            protocol.commandsFor(ToyControlAction.Intensity(50)).single(),
+        )
+        assertEquals("0312F300FC00FE40013CA600FC00FE40013CA600", strength.bytes.hexUpper())
+    }
+
+    private fun mizzzeeXhtkjFingerprint(
+        name: String,
+        manufacturerData: String = "",
+    ): BleGattFingerprint =
         BleGattFingerprint(
             name = name,
-            manufacturerData = "",
+            manufacturerData = manufacturerData,
             scanRecordHex = "",
             serviceUuids = setOf(SERVICE_UUID),
             characteristicUuids = setOf(WRITE_UUID),

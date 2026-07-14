@@ -78,6 +78,7 @@ internal object BleProtocolRegistry {
         listOf(AnkniProtocol) +
                 ankniDdddProfileProtocols +
                 listOf(
+                    AnkniQd1XhtkjProtocol,
                     AnkniQd1Ff12GattProtocol,
                     AnkniQd1GattProtocol,
                     Ankni0010Protocol,
