@@ -29,6 +29,7 @@ import com.funny.aitoy.buttplug.VibCrafterProtocolPlans
 import com.funny.aitoy.buttplug.WeVibeProtocolPlans
 import com.funny.aitoy.buttplug.normalizedUuidText
 import com.funny.aitoy.buttplug.toToyOutputKind
+import com.funny.aitoy.core.utils.nowMs
 import kotlin.random.Random
 import kotlin.uuid.Uuid
 
@@ -460,9 +461,13 @@ internal fun kissToyAesCcmDecrypt(
 
 internal fun kissToyAesCcmNonce(
     deviceId: ByteArray = KISS_TOY_AES_CCM_DEFAULT_DEVICE_ID,
+    timestampMs: Long = nowMs(),
 ): ByteArray {
     require(deviceId.size == KISS_TOY_AES_CCM_DEVICE_ID_SIZE)
-    return Random.nextBytes(KISS_TOY_AES_CCM_TIME_NONCE_SIZE) + deviceId
+    val timeBytes = ByteArray(Long.SIZE_BYTES) { index ->
+        ((timestampMs ushr (8 * (Long.SIZE_BYTES - 1 - index))) and 0xff).toByte()
+    }
+    return timeBytes.copyOfRange(2, Long.SIZE_BYTES) + deviceId
 }
 
 private fun kissToyAesCcmAuthTag(

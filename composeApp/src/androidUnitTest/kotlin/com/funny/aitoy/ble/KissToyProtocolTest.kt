@@ -248,6 +248,13 @@ class KissToyProtocolTest {
     }
 
     @Test
+    fun kissToyAesCcmNonceMatchesOfficialTimestampShape() {
+        val nonce = kissToyAesCcmNonce(timestampMs = 0x0102030405060708L)
+
+        assertEquals("030405060708ffffffffffff", nonce.toHexForTest())
+    }
+
+    @Test
     fun qcpwLiveAe3aGattSummaryPrefersOfficialV2BeforeHistoricalRoute() {
         val fingerprint = qcpwLiveAe3aFingerprint()
         val protocols = BleProtocolRegistry.resolveNativeAll(fingerprint)
