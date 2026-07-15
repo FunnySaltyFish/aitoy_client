@@ -21,8 +21,10 @@ class MizzzeeXhtkjProtocolTest {
         assertEquals(10, protocol.status.modeMax)
         assertEquals(100, protocol.status.intensityMax)
 
-        val init = protocol.initialize(fingerprint).single()
-        val initWrite = assertIs<BleProtocolOperation.Write>(init)
+        val init = protocol.initialize(fingerprint)
+        val initSubscribe = assertIs<BleProtocolOperation.SubscribeNotify>(init[0])
+        assertEquals(NOTIFY_UUID, initSubscribe.characteristicUuid)
+        val initWrite = assertIs<BleProtocolOperation.Write>(init[1])
         assertEquals(WRITE_UUID, initWrite.characteristicUuid)
         assertFalse(initWrite.withResponse)
         assertEquals("0312F600", initWrite.bytes.hexUpper())
@@ -53,8 +55,9 @@ class MizzzeeXhtkjProtocolTest {
         assertTrue(protocols.any { it.status.id == "ankni_qd1_ff12_gatt" })
 
         val protocol = protocols.first()
-        val init = assertIs<BleProtocolOperation.Write>(protocol.initialize(fingerprint).single())
-        assertEquals("0312F600", init.bytes.hexUpper())
+        val init = protocol.initialize(fingerprint)
+        assertEquals(NOTIFY_UUID, assertIs<BleProtocolOperation.SubscribeNotify>(init[0]).characteristicUuid)
+        assertEquals("0312F600", assertIs<BleProtocolOperation.Write>(init[1]).bytes.hexUpper())
 
         val strength = assertIs<BleProtocolOperation.Write>(
             protocol.commandsFor(ToyControlAction.Intensity(50)).single(),
@@ -62,16 +65,34 @@ class MizzzeeXhtkjProtocolTest {
         assertEquals("0312F300FC00FE40013CA600FC00FE40013CA600", strength.bytes.hexUpper())
     }
 
+    @Test
+    fun xhtkjInitializationStillWritesHandshakeWhenNotifyCharacteristicIsAbsent() {
+        val fingerprint = mizzzeeXhtkjFingerprint(
+            name = "XHTKJ",
+            includeNotify = false,
+        )
+        val protocol = BleProtocolRegistry.resolveNative(fingerprint)
+            ?: error("Mizzzee XHTKJ protocol not resolved")
+
+        val init = protocol.initialize(fingerprint).single()
+        val initWrite = assertIs<BleProtocolOperation.Write>(init)
+        assertEquals("0312F600", initWrite.bytes.hexUpper())
+    }
+
     private fun mizzzeeXhtkjFingerprint(
         name: String,
         manufacturerData: String = "",
+        includeNotify: Boolean = true,
     ): BleGattFingerprint =
         BleGattFingerprint(
             name = name,
             manufacturerData = manufacturerData,
             scanRecordHex = "",
             serviceUuids = setOf(SERVICE_UUID),
-            characteristicUuids = setOf(WRITE_UUID),
+            characteristicUuids = buildSet {
+                add(WRITE_UUID)
+                if (includeNotify) add(NOTIFY_UUID)
+            },
         )
 
     private fun ByteArray.hexUpper(): String =
@@ -79,6 +100,7 @@ class MizzzeeXhtkjProtocolTest {
 
     private companion object {
         val SERVICE_UUID: Uuid = Uuid.parse("0000ff10-0000-1000-8000-00805f9b34fb")
+        val NOTIFY_UUID: Uuid = Uuid.parse("0000ff11-0000-1000-8000-00805f9b34fb")
         val WRITE_UUID: Uuid = Uuid.parse("0000ff12-0000-1000-8000-00805f9b34fb")
     }
 }
