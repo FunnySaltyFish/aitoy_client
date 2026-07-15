@@ -15,9 +15,13 @@ class MesanelProtocolTest {
 
         assertEquals("mesanel_coco", protocol.status.id)
         assertEquals(ToyControlStyle.IndependentFunctions, protocol.status.controlStyle)
-        assertEquals(listOf("震动", "吮吸"), protocol.status.channelNames)
-        assertEquals(10, protocol.status.features[0].max)
-        assertEquals(3, protocol.status.features[1].max)
+        assertEquals(listOf("舔动", "吮吸"), protocol.status.channelNames)
+        assertEquals(1, protocol.status.features[0].max)
+        assertEquals(10, protocol.status.features[0].modeMax)
+        assertEquals(10, protocol.status.independentFunctionModeMax(protocol.status.features[0]))
+        assertEquals(1, protocol.status.features[1].max)
+        assertEquals(3, protocol.status.features[1].modeMax)
+        assertEquals(3, protocol.status.independentFunctionModeMax(protocol.status.features[1]))
     }
 
     @Test
@@ -26,8 +30,9 @@ class MesanelProtocolTest {
             ?: error("Mesanel cocopro protocol not resolved")
 
         assertEquals("mesanel_cocopro", protocol.status.id)
-        assertEquals(listOf("震动", "吮吸", "震动棒"), protocol.status.channelNames)
+        assertEquals(listOf("舔动", "吮吸", "震动棒"), protocol.status.channelNames)
         assertEquals(4, protocol.status.independentFunctionCode(protocol.status.features[2]))
+        assertEquals(0, protocol.status.features[2].modeMax)
 
         val third = protocol.commandsFor(ToyControlAction.Combined(mode = 4 * 100 + 1, intensity = 7))
         assertEquals("C37C216554", assertIs<BleProtocolOperation.Write>(third.single()).bytes.hexUpper())
@@ -38,10 +43,10 @@ class MesanelProtocolTest {
         val protocol = BleProtocolRegistry.resolveNative(fingerprint("coco"))
             ?: error("Mesanel coco protocol not resolved")
 
-        val vibrate = protocol.commandsFor(ToyControlAction.Combined(mode = 1 * 100 + 1, intensity = 10))
-        assertEquals("C37C246854", assertIs<BleProtocolOperation.Write>(vibrate.single()).bytes.hexUpper())
+        val licking = protocol.commandsFor(ToyControlAction.Combined(mode = 1 * 100 + 10, intensity = 1))
+        assertEquals("C37C246854", assertIs<BleProtocolOperation.Write>(licking.single()).bytes.hexUpper())
 
-        val suction = protocol.commandsFor(ToyControlAction.Combined(mode = 2 * 100 + 1, intensity = 20))
+        val suction = protocol.commandsFor(ToyControlAction.Combined(mode = 2 * 100 + 3, intensity = 1))
         assertEquals("C37C27616A", assertIs<BleProtocolOperation.Write>(suction.single()).bytes.hexUpper())
     }
 
@@ -75,6 +80,7 @@ class MesanelProtocolTest {
 
         assertEquals("mesanel_generic", protocol.status.id)
         assertEquals(listOf("功能 1", "功能 2", "功能 3"), protocol.status.channelNames)
+        assertEquals(0, protocol.status.independentFunctionModeMax(protocol.status.features[1]))
     }
 
     private fun fingerprint(name: String): BleGattFingerprint = BleGattFingerprint(

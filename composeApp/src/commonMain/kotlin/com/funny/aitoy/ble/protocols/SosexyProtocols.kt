@@ -111,6 +111,15 @@ internal fun BleProtocolStatus.independentFunctionModeMax(feature: BleProtocolFe
     when (id) {
         AnkniMxProtocol.status.id -> modeMax.coerceAtLeast(1)
         CachitoDaxiuBroadcastProtocol.status.id -> 0
+        MesanelProtocol.status.id,
+        "mesanel_coco",
+        "mesanel_cocopro",
+        "mesanel_super",
+        "mesanel_handou",
+        "mesanel_cisecat",
+        "mesanel_pinkpo",
+        "mesanel_bosscat",
+        "mesanel_generic" -> feature.modeMax
         SosexyBoboBeiProtocol.status.id -> 1
         SistalkPopocatProtocol.status.id -> 1
         else -> feature.modeMax.takeIf { it > 0 } ?: svakomV2FunctionModeMax(feature.type)

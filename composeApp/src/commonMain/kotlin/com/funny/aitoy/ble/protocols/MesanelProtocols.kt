@@ -15,7 +15,9 @@ internal data class MesanelFunction(
     val code: Int,
     val type: String,
     val label: String,
-    val max: Int,
+    val commandMax: Int,
+    val modeMax: Int = 0,
+    val intensityMax: Int = commandMax,
 )
 
 internal data class MesanelProfile(
@@ -31,8 +33,8 @@ internal val MESANEL_PROFILES: List<MesanelProfile> = listOf(
         displayName = "享要 口口舱",
         nameTokens = setOf("coco"),
         functions = listOf(
-            MesanelFunction(0x01, "vibrate", "震动", 10),
-            MesanelFunction(0x02, "constrict", "吮吸", 3),
+            MesanelFunction(0x01, "licking", "舔动", commandMax = 10, modeMax = 10, intensityMax = 1),
+            MesanelFunction(0x02, "constrict", "吮吸", commandMax = 3, modeMax = 3, intensityMax = 1),
         ),
     ),
     MesanelProfile(
@@ -40,8 +42,8 @@ internal val MESANEL_PROFILES: List<MesanelProfile> = listOf(
         displayName = "享要 口口舱 Pro",
         nameTokens = setOf("cocopro"),
         functions = listOf(
-            MesanelFunction(0x01, "vibrate", "震动", 10),
-            MesanelFunction(0x02, "constrict", "吮吸", 3),
+            MesanelFunction(0x01, "licking", "舔动", commandMax = 10, modeMax = 10, intensityMax = 1),
+            MesanelFunction(0x02, "constrict", "吮吸", commandMax = 3, modeMax = 3, intensityMax = 1),
             MesanelFunction(0x04, "vibrate", "震动棒", 10),
         ),
     ),
@@ -158,7 +160,7 @@ internal class MesanelProfileProtocol(
         id = profile.id,
         displayName = profile.displayName,
         controllable = true,
-        intensityMax = profile.functions.maxOfOrNull { it.max } ?: 20,
+        intensityMax = profile.functions.maxOfOrNull { it.intensityMax } ?: 20,
         supportsMode = false,
         controlStyle = ToyControlStyle.IndependentFunctions,
         intensityLabel = "档位",
@@ -167,9 +169,10 @@ internal class MesanelProfileProtocol(
             BleProtocolFeature(
                 type = function.type,
                 min = 0,
-                max = function.max,
+                max = function.intensityMax,
                 index = index,
                 label = function.label,
+                modeMax = function.modeMax,
             )
         },
         automatic = true,
@@ -191,7 +194,7 @@ internal class MesanelProfileProtocol(
 
     override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
         when (action) {
-            is ToyControlAction.Pattern -> listOf(run(profile.functions.first(), profile.functions.first().max))
+            is ToyControlAction.Pattern -> listOf(run(profile.functions.first(), action.mode))
             is ToyControlAction.Intensity -> listOf(run(profile.functions.first(), action.value))
             is ToyControlAction.Combined -> listOf(commandForCombined(action))
             is ToyControlAction.DualMotor -> profile.functions.take(2).mapIndexed { index, function ->
@@ -202,7 +205,13 @@ internal class MesanelProfileProtocol(
 
     private fun commandForCombined(action: ToyControlAction.Combined): BleProtocolOperation {
         val function = functionForMode(action.mode)
-        return if (action.intensity <= 0) stop(function.code) else run(function, action.intensity)
+        val modeValue = action.mode % 100
+        val value = if (function.modeMax > 0) {
+            modeValue.coerceIn(1, function.modeMax)
+        } else {
+            action.intensity
+        }
+        return if (action.intensity <= 0) stop(function.code) else run(function, value)
     }
 
     private fun functionForMode(mode: Int): MesanelFunction {
@@ -214,7 +223,7 @@ internal class MesanelProfileProtocol(
     }
 
     private fun run(function: MesanelFunction, value: Int): BleProtocolOperation.Write =
-        write(mesanelEncryptedFrame(0x62, function.code, value.coerceIn(0, function.max)))
+        write(mesanelEncryptedFrame(0x62, function.code, value.coerceIn(0, function.commandMax)))
 
     private fun stop(functionCode: Int): BleProtocolOperation.Write =
         write(mesanelEncryptedFrame(0x60, functionCode, 0x00))
