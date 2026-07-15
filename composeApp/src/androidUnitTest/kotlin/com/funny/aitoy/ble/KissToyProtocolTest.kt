@@ -217,8 +217,18 @@ class KissToyProtocolTest {
         assertFalse(protocol.status.supportsMode)
 
         val init = protocol.initialize(fingerprint)
-        assertEquals(1, init.size)
+        assertEquals(3, init.size)
         assertEquals(AE3A_NOTIFY_UUID, assertIs<BleProtocolOperation.SubscribeNotify>(init[0]).characteristicUuid)
+        val macRequest = assertIs<BleProtocolOperation.Write>(init[1])
+        assertEquals(AE3A_WRITE_UUID, macRequest.characteristicUuid)
+        assertFalse(macRequest.withResponse)
+        assertKissToyAesCcmPacket(
+            macRequest.bytes,
+            cmdId = 0x00,
+            subId = 0xf1,
+            plaintext = emptyList(),
+        )
+        assertEquals(500L, assertIs<BleProtocolOperation.Sleep>(init[2]).millis)
 
         val run = protocol.commandsFor(ToyControlAction.Intensity(50))
         val write = assertSingleKissToyAesCcmBasicControlWrite(run, AE3A_WRITE_UUID)
@@ -252,6 +262,20 @@ class KissToyProtocolTest {
         val nonce = kissToyAesCcmNonce(timestampMs = 0x0102030405060708L)
 
         assertEquals("030405060708ffffffffffff", nonce.toHexForTest())
+    }
+
+    @Test
+    fun kissToyAesCcmGetDeviceMacAddressUsesOfficialInitShape() {
+        val packet = kissToyAesCcmGetDeviceMacAddressPacket(
+            nonce = bytes(0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff),
+        )
+
+        assertKissToyAesCcmPacket(
+            packet,
+            cmdId = 0x00,
+            subId = 0xf1,
+            plaintext = emptyList(),
+        )
     }
 
     @Test
@@ -742,20 +766,35 @@ class KissToyProtocolTest {
 
     private fun assertKissToyAesCcmBasicControlData(packet: ByteArray, content: List<Int>) {
         assertEquals(5, content.size)
-        assertEquals(29, packet.size)
+        assertKissToyAesCcmPacket(
+            packet = packet,
+            cmdId = 0x02,
+            subId = 0x01,
+            plaintext = content,
+        )
+    }
+
+    private fun assertKissToyAesCcmPacket(
+        packet: ByteArray,
+        cmdId: Int,
+        subId: Int,
+        plaintext: List<Int>,
+    ) {
+        val expectedPayloadLength = 12 + plaintext.size + 8
+        assertEquals(4 + expectedPayloadLength, packet.size)
         assertEquals(0x60, packet[0].toInt() and 0xff)
-        assertEquals(0x02, packet[1].toInt() and 0xff)
-        assertEquals(0x01, packet[2].toInt() and 0xff)
-        assertEquals(0x19, packet[3].toInt() and 0xff)
+        assertEquals(cmdId, packet[1].toInt() and 0xff)
+        assertEquals(subId, packet[2].toInt() and 0xff)
+        assertEquals(expectedPayloadLength, packet[3].toInt() and 0xff)
         val nonce = packet.copyOfRange(4, 16)
         val encrypted = packet.copyOfRange(16, packet.size)
-        val plaintext = kissToyAesCcmDecrypt(
+        val decrypted = kissToyAesCcmDecrypt(
             key = KISS_TOY_AES_CCM_KEY,
             nonce = nonce,
             encrypted = encrypted,
             tagSize = 8,
         )
-        assertEquals(content, plaintext.map { it.toInt() and 0xff })
+        assertEquals(plaintext, decrypted.map { it.toInt() and 0xff })
     }
 
     private fun decryptKissToyBleEncryption(encryptedBytes: ByteArray): List<Int> {

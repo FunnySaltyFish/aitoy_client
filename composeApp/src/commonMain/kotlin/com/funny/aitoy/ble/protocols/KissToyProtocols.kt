@@ -127,10 +127,15 @@ internal object KissToyOfficialV2Protocol : BleDeviceProtocol {
                 fingerprint.kissToyOfficialV2Profile()?.code == profile.code
 
         override fun initialize(fingerprint: BleGattFingerprint): List<BleProtocolOperation> =
-            route.notifyUuid
-                ?.takeIf { route.subscribeNotifyOnInit }
-                ?.let { listOf(BleProtocolOperation.SubscribeNotify(it)) }
-                ?: emptyList()
+            buildList {
+                route.notifyUuid
+                    ?.takeIf { route.subscribeNotifyOnInit }
+                    ?.let { add(BleProtocolOperation.SubscribeNotify(it)) }
+                if (profile.bleHeader == KISS_TOY_AES_CCM_HEADER) {
+                    add(write(kissToyAesCcmGetDeviceMacAddressPacket()))
+                    add(BleProtocolOperation.Sleep(KISS_TOY_AES_CCM_DEVICE_INFO_SETTLE_MS))
+                }
+            }
 
         override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
             profile.commandsForOfficialV2(
@@ -435,6 +440,17 @@ internal fun kissToyAesCcmBuildPacket(
     return byteArrayOf(header.toByte(), cmdId.toByte(), subId.toByte(), length.toByte()) + nonce + encrypted
 }
 
+internal fun kissToyAesCcmGetDeviceMacAddressPacket(
+    nonce: ByteArray = kissToyAesCcmNonce(),
+): ByteArray =
+    kissToyAesCcmBuildPacket(
+        header = KISS_TOY_AES_CCM_HEADER,
+        cmdId = KISS_TOY_AES_CCM_DEVICE_INFO_CMD,
+        subId = KISS_TOY_AES_CCM_GET_DEVICE_MAC_SUB_ID,
+        plaintext = byteArrayOf(),
+        nonce = nonce,
+    )
+
 internal fun kissToyAesCcmEncrypt(
     key: ByteArray,
     nonce: ByteArray,
@@ -608,6 +624,9 @@ private const val KISS_TOY_AES_CCM_NONCE_SIZE = 12
 private const val KISS_TOY_AES_CCM_DEVICE_ID_SIZE = 6
 private const val KISS_TOY_AES_CCM_TIME_NONCE_SIZE = KISS_TOY_AES_CCM_NONCE_SIZE - KISS_TOY_AES_CCM_DEVICE_ID_SIZE
 private const val KISS_TOY_AES_CCM_LENGTH_FIELD_SIZE = 3
+private const val KISS_TOY_AES_CCM_DEVICE_INFO_CMD = 0x00
+private const val KISS_TOY_AES_CCM_GET_DEVICE_MAC_SUB_ID = 0xf1
+private const val KISS_TOY_AES_CCM_DEVICE_INFO_SETTLE_MS = 500L
 internal val KISS_TOY_AES_CCM_KEY = bytes(0x7d, 0xbf, 0x2c, 0x2b, 0x97, 0x74, 0xb8, 0x86, 0xaa, 0xdb, 0xbc, 0x32, 0x36, 0xc3, 0x60, 0xf0)
 private val KISS_TOY_AES_CCM_DEFAULT_DEVICE_ID = ByteArray(KISS_TOY_AES_CCM_DEVICE_ID_SIZE) { 0xff.toByte() }
 internal val KISS_TOY_BLE_ENCRYPTION_KEY_TAB = arrayOf(
