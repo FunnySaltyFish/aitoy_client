@@ -1780,13 +1780,10 @@ class BridgeViewModel : ViewModel() {
         busyHint = "设备正在运行"
         controlTrialJob?.cancel()
         controlTrialJob = viewModelScope.launch {
-            delay(localControlDebounceMs(protocolStatus))
+            delay(250L)
             pendingControlAction?.let(::sendLocalControlAction)
         }
     }
-
-    private fun localControlDebounceMs(status: BleProtocolStatus): Long =
-        if (status.id.endsWith("_advertise")) 80L else 250L
 
     private fun sendLocalControlAction(action: ToyControlAction) {
         runCatching {
