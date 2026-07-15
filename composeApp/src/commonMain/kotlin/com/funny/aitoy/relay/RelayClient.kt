@@ -66,6 +66,7 @@ data class RelayDeviceFeature(
     val max: Int,
     val index: Int,
     val label: String = "",
+    val modeMax: Int = 0,
 )
 
 class RelayClient(
@@ -423,6 +424,7 @@ class RelayClient(
                         put("max", feature.max)
                         put("index", feature.index)
                         put("label", feature.label)
+                        if (feature.modeMax > 0) put("modeMax", feature.modeMax)
                     }
                 )
             }

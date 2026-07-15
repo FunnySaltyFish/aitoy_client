@@ -122,6 +122,7 @@ class SvakomQhSx007eProtocolTest {
         assertEquals(listOf("吮吸"), protocol.status.channelNames)
         assertEquals(8, protocol.status.modeMax)
         assertEquals(10, protocol.status.features.first { it.type == "constrict" }.max)
+        assertEquals(8, protocol.status.features.first { it.type == "constrict" }.modeMax)
         assertEquals(emptyList(), protocol.initialize(fingerprint))
 
         val suck = protocol.commandsFor(ToyControlAction.Combined(mode = 3 * 100 + 8, intensity = 10))
@@ -140,6 +141,7 @@ class SvakomQhSx007eProtocolTest {
         assertEquals(listOf("震动"), protocol.status.channelNames)
         assertEquals(9, protocol.status.modeMax)
         assertEquals(10, protocol.status.features.first { it.type == "vibrate" }.max)
+        assertEquals(9, protocol.status.features.first { it.type == "vibrate" }.modeMax)
         assertEquals(listOf(BleProtocolOperation.SubscribeNotify(NOTIFY_UUID)), protocol.initialize(fingerprint))
 
         val vibrate = protocol.commandsFor(ToyControlAction.Combined(mode = 2 * 100 + 9, intensity = 10))

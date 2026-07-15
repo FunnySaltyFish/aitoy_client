@@ -71,6 +71,12 @@ private const val DefaultCommunityUrl = "https://qm.qq.com/q/ytRVIe6O7m"
 private const val DefaultTutorialUrl = "https://docs.qq.com/s/4dhBqBSu1u5900Qh7qvYHW/folder/YFZTdLuzaIxv"
 private const val ProtocolExhaustedFeedbackMessage =
     "已尝试所有协议，目前仍不支持。请在群里反馈，并附上官方 App 截图或产品说明书，说明设备可用的档位和模式；同时提供你在本 App 内的操作时间，方便查找日志。"
+private val ActiveManagedConnectionStates = setOf(
+    BleConnectionState.Connecting,
+    BleConnectionState.Discovering,
+    BleConnectionState.Ready,
+    BleConnectionState.Disconnecting,
+)
 
 @OptIn(ExperimentalUuidApi::class)
 private fun generateDefaultUserToken(): String = "ut_${Uuid.random().toString().replace("-", "")}"
@@ -189,11 +195,8 @@ class BridgeViewModel : ViewModel() {
     val managedToys: List<ManagedToy>
         get() {
             val saved = rememberedDevices
-            val addresses = linkedSetOf<String>()
-            saved.forEach { addresses += it.address }
-            controllers.keys.forEach { addresses += it }
-            deviceRuntimeStore.keys.forEach { addresses += it }
-            if (selectedAddress.isNotBlank()) addresses += selectedAddress
+            val savedAddresses = saved.mapTo(mutableSetOf()) { it.address }
+            val addresses = managedDeviceAddresses(saved, savedAddresses)
             val rows = saved.map { toy ->
                 ManagedToy(
                     name = toy.name,
@@ -659,9 +662,9 @@ class BridgeViewModel : ViewModel() {
             currentDeviceSaved = false
             controlTrialStarted = false
             updateTraceContext()
-            syncRelayDevice()
-            autoOfflineWhenNoConnectedSavedDevice()
         }
+        syncRelayDevice()
+        autoOfflineWhenNoConnectedSavedDevice()
         busyHint = "已移除设备"
     }
 
@@ -1055,7 +1058,6 @@ class BridgeViewModel : ViewModel() {
         val resolvedDevice = if (index >= 0) devices[index].mergeScanUpdate(device) else device
         if (index >= 0) devices[index] = resolvedDevice else devices.add(resolvedDevice)
         devices.sortByDescending { it.rssi }
-        deviceRuntimeStore.ensure(resolvedDevice.address)
     }
 
     private fun ScannedBleDevice.scanIdentityKey(): String {
@@ -1119,12 +1121,12 @@ class BridgeViewModel : ViewModel() {
 
     private fun syncRelayDevice() {
         val saved = rememberedDevices
-        val addresses = linkedSetOf<String>()
-        saved.forEach { addresses += it.address }
-        controllers.keys.forEach { addresses += it }
-        deviceRuntimeStore.keys.forEach { addresses += it }
-        if (selectedAddress.isNotBlank()) addresses += selectedAddress
-        if (addresses.isEmpty()) return
+        val savedAddresses = saved.mapTo(mutableSetOf()) { it.address }
+        val addresses = managedDeviceAddresses(saved, savedAddresses)
+        if (addresses.isEmpty()) {
+            if (relayState == "已在线") relay.syncDevices(emptyList())
+            return
+        }
         val defaultAddress = defaultConnectedAddress().ifBlank { saved.firstOrNull()?.address.orEmpty() }
         relay.syncDevices(
             addresses.map { address ->
@@ -1166,6 +1168,7 @@ class BridgeViewModel : ViewModel() {
                             max = feature.max,
                             index = feature.index,
                             label = feature.label,
+                            modeMax = feature.modeMax,
                         )
                     },
                 )
@@ -1565,13 +1568,36 @@ class BridgeViewModel : ViewModel() {
     }
 
     private fun addressForDeviceId(deviceId: String): String? {
-        val addresses = linkedSetOf<String>()
-        rememberedDevices.forEach { addresses += it.address }
-        controllers.keys.forEach { addresses += it }
-        devices.forEach { addresses += it.address }
-        deviceRuntimeStore.keys.forEach { addresses += it }
-        selectedAddress.takeIf { it.isNotBlank() }?.let { addresses += it }
+        val savedAddresses = rememberedDevices.mapTo(mutableSetOf()) { it.address }
+        val addresses = managedDeviceAddresses(rememberedDevices, savedAddresses)
         return addresses.firstOrNull { deviceIdForAddress(it) == deviceId }
+    }
+
+    private fun managedDeviceAddresses(
+        saved: List<RememberedToy>,
+        savedAddresses: Set<String>,
+    ): LinkedHashSet<String> {
+        val addresses = linkedSetOf<String>()
+        saved.forEach { addresses += it.address }
+        deviceRuntimeStore.keys
+            .filter { address -> shouldExposeManagedAddress(address, savedAddresses) }
+            .forEach { addresses += it }
+        selectedAddress
+            .takeIf { it.isNotBlank() && shouldExposeSelectedAddress(it, savedAddresses) }
+            ?.let { addresses += it }
+        return addresses
+    }
+
+    private fun shouldExposeManagedAddress(address: String, savedAddresses: Set<String>): Boolean {
+        if (address.isBlank()) return false
+        if (address in savedAddresses) return true
+        if (address == selectedAddress) return shouldExposeSelectedAddress(address, savedAddresses)
+        return deviceRuntimeStore.connectionState(address) in ActiveManagedConnectionStates
+    }
+
+    private fun shouldExposeSelectedAddress(address: String, savedAddresses: Set<String>): Boolean {
+        if (address in savedAddresses) return true
+        return deviceRuntimeStore.connectionState(address) in ActiveManagedConnectionStates
     }
 
     private fun defaultConnectedAddress(): String =

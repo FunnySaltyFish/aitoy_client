@@ -1,6 +1,8 @@
 package com.funny.aitoy
 
 import com.funny.aitoy.ble.BleProtocolFeature
+import com.funny.aitoy.ble.BleProtocolStatus
+import com.funny.aitoy.ble.independentFunctionModeMax
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -20,5 +22,13 @@ class RelayScalarFeatureValueTest {
 
         assertEquals(6, mapScalarFeatureValue(6, vibrate))
         assertEquals(10, mapScalarFeatureValue(100, vibrate))
+    }
+
+    @Test
+    fun independentFunctionModeUsesFeatureSpecificModeMax() {
+        val status = BleProtocolStatus(id = "beyourlover_va617a_vibrate", modeMax = 9)
+        val vibrate = BleProtocolFeature(type = "vibrate", min = 0, max = 10, index = 0, label = "震动", modeMax = 9)
+
+        assertEquals(9, status.independentFunctionModeMax(vibrate))
     }
 }

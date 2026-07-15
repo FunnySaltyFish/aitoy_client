@@ -104,5 +104,5 @@ internal fun BleProtocolStatus.independentFunctionModeMax(feature: BleProtocolFe
         CachitoDaxiuBroadcastProtocol.status.id -> 0
         SosexyBoboBeiProtocol.status.id -> 1
         SistalkPopocatProtocol.status.id -> 1
-        else -> svakomV2FunctionModeMax(feature.type)
+        else -> feature.modeMax.takeIf { it > 0 } ?: svakomV2FunctionModeMax(feature.type)
     }

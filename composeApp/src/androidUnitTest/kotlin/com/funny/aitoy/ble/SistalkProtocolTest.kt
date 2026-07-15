@@ -70,25 +70,30 @@ class SistalkProtocolTest {
 
         assertEquals("sistalk_popocat", protocol.status.id)
         assertEquals(ToyControlStyle.IndependentFunctions, protocol.status.controlStyle)
-        assertEquals(listOf("吮吸", "猫头震动"), protocol.status.channelNames)
+        assertEquals(listOf("吮吸", "猫头震动", "拓展震动"), protocol.status.channelNames)
         assertEquals("constrict", protocol.status.features[0].type)
         assertEquals("vibrate", protocol.status.features[1].type)
+        assertEquals("vibrate", protocol.status.features[2].type)
 
         val suction = protocol.commandsFor(ToyControlAction.Combined(mode = 100, intensity = 25))
         val suctionWrite = assertIs<BleProtocolOperation.Write>(suction.single())
-        assertEquals("A098020019", suctionWrite.bytes.hexUpper())
+        assertEquals("A0A003001900", suctionWrite.bytes.hexUpper())
 
         val catHead = protocol.commandsFor(ToyControlAction.Combined(mode = 200, intensity = 70))
         val catHeadWrite = assertIs<BleProtocolOperation.Write>(catHead.single())
-        assertEquals("A098024619", catHeadWrite.bytes.hexUpper())
+        assertEquals("A0A003461900", catHeadWrite.bytes.hexUpper())
+
+        val expansion = protocol.commandsFor(ToyControlAction.Combined(mode = 300, intensity = 60))
+        val expansionWrite = assertIs<BleProtocolOperation.Write>(expansion.single())
+        assertEquals("A0A00346193C", expansionWrite.bytes.hexUpper())
 
         val dual = protocol.commandsFor(ToyControlAction.DualMotor(mode = 1, internalIntensity = 30, externalIntensity = 80))
         val dualWrite = assertIs<BleProtocolOperation.Write>(dual.single())
-        assertEquals("A09802501E", dualWrite.bytes.hexUpper())
+        assertEquals("A0A003501E3C", dualWrite.bytes.hexUpper())
 
         val stop = protocol.commandsFor(ToyControlAction.Stop)
         val stopWrite = assertIs<BleProtocolOperation.Write>(stop.single())
-        assertEquals("A098020000", stopWrite.bytes.hexUpper())
+        assertEquals("A0A003000000", stopWrite.bytes.hexUpper())
     }
 
     @Test

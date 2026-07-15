@@ -259,15 +259,16 @@ internal object SistalkPopocatProtocol : BleDeviceProtocol {
     }
 
     private fun motorCommand(): BleProtocolOperation.Write =
+        functionCommand(
+            currentLevels[PopocatFunction.CatHeadVibration.index],
+            currentLevels[PopocatFunction.Suction.index],
+            currentLevels[PopocatFunction.ExpansionVibration.index],
+        )
+
+    private fun functionCommand(vararg motorLevels: Int): BleProtocolOperation.Write =
         BleProtocolOperation.Write(
             characteristicUuid = functionUuid,
-            bytes = bytes(
-                COMMAND_MOTOR,
-                (3 shl 3) or 0x80,
-                0x02,
-                currentLevels[PopocatFunction.CatHeadVibration.index],
-                currentLevels[PopocatFunction.Suction.index],
-            ),
+            bytes = bytes(COMMAND_MOTOR, ((motorLevels.size + 1) shl 3) or 0x80, motorLevels.size, *motorLevels),
             withResponse = false,
         )
 
@@ -293,7 +294,8 @@ private enum class PopocatFunction(
     val label: String,
 ) {
     Suction(1, "constrict", "吮吸"),
-    CatHeadVibration(2, "vibrate", "猫头震动");
+    CatHeadVibration(2, "vibrate", "猫头震动"),
+    ExpansionVibration(3, "vibrate", "拓展震动");
 
     val index: Int = functionCode - 1
 }

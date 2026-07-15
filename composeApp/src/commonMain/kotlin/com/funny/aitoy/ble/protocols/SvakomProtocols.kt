@@ -523,6 +523,7 @@ internal fun svakomV2Status(
                 max = function.intensityMax,
                 index = index,
                 label = function.label,
+                modeMax = function.modeMax,
             )
         },
         automatic = true,
