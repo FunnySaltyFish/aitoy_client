@@ -10,6 +10,7 @@ internal data class BleAdvertiseOperation(
     val serviceData: ByteArray = byteArrayOf(),
     val manufacturerId: Int? = null,
     val manufacturerData: ByteArray = byteArrayOf(),
+    val channelKey: String = "default",
 )
 
 internal interface BleBroadcastProtocol {
@@ -862,14 +863,20 @@ internal object CachitoDaxiuBroadcastProtocol : BleBroadcastProtocol {
             CachitoDaxiuFunction.EnterStrength -> enterStrengthTemplate(progress)
             CachitoDaxiuFunction.Temperature -> temperatureTemplate(progress)
         }
-        return listOf(BleAdvertiseOperation(CachitoBroadcastCodec.finalUuid(template)))
+        return listOf(operation(template, selected.function.channelKey))
     }
 
     private fun stop(): List<BleAdvertiseOperation> =
         listOf(
-            BleAdvertiseOperation(CachitoBroadcastCodec.finalUuid(thrustStopTemplate())),
-            BleAdvertiseOperation(CachitoBroadcastCodec.finalUuid(enterStrengthStopTemplate())),
-            BleAdvertiseOperation(CachitoBroadcastCodec.finalUuid(temperatureStopTemplate())),
+            operation(thrustStopTemplate(), CachitoDaxiuFunction.Depth.channelKey),
+            operation(enterStrengthStopTemplate(), CachitoDaxiuFunction.EnterStrength.channelKey),
+            operation(temperatureStopTemplate(), CachitoDaxiuFunction.Temperature.channelKey),
+        )
+
+    private fun operation(template: String, channelKey: String): BleAdvertiseOperation =
+        BleAdvertiseOperation(
+            serviceUuid = CachitoBroadcastCodec.finalUuid(template),
+            channelKey = "cachito_daxiu_$channelKey",
         )
 
     private fun thrustTemplate(): String =
@@ -930,7 +937,16 @@ internal object CachitoDaxiuBroadcastProtocol : BleBroadcastProtocol {
         EnterStrength,
         Temperature,
     }
-}
+
+    private val CachitoDaxiuFunction.channelKey: String
+        get() = when (this) {
+            CachitoDaxiuFunction.Depth,
+            CachitoDaxiuFunction.ExtendSpeed,
+            CachitoDaxiuFunction.RetractSpeed -> "motion"
+            CachitoDaxiuFunction.EnterStrength -> "enter"
+            CachitoDaxiuFunction.Temperature -> "heat"
+        }
+    }
 
 private object CachitoBroadcastCodec {
     private const val CONTROL_DEVICE_ID_KEY = "CACHITO_CONTROL_DEVICE_ID"

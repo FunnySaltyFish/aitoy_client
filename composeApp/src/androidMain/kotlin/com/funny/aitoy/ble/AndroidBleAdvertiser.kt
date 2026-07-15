@@ -23,41 +23,43 @@ internal class AndroidBleAdvertiser(
     private val adapter = context.getSystemService(BluetoothManager::class.java).adapter
     private val advertiser get() = adapter?.bluetoothLeAdvertiser
     private val handler = Handler(Looper.getMainLooper())
-    private val pendingOperations = ArrayDeque<BleAdvertiseOperation>()
-    private var advertiseCallback: AdvertiseCallback? = null
-    private var advertisingSetCallback: AdvertisingSetCallback? = null
-    private var advertisingSet: AdvertisingSet? = null
-    private var draining = false
+    private val channels = mutableMapOf<String, AdvertiserChannelState>()
 
     fun start(operation: BleAdvertiseOperation) {
-        pendingOperations.addLast(operation)
-        if (!draining) {
-            drainNext()
+        val channel = channelFor(operation.channelKey)
+        channel.pendingOperations.addLast(operation)
+        if (!channel.draining) {
+            drainNext(channel)
         }
     }
 
-    private fun drainNext() {
-        val operation = pendingOperations.removeFirstOrNull()
+    private fun channelFor(channelKey: String): AdvertiserChannelState =
+        channels.getOrPut(channelKey.ifBlank { DEFAULT_CHANNEL_KEY }) {
+            AdvertiserChannelState(channelKey.ifBlank { DEFAULT_CHANNEL_KEY })
+        }
+
+    private fun drainNext(channel: AdvertiserChannelState) {
+        val operation = channel.pendingOperations.removeFirstOrNull()
         if (operation == null) {
-            draining = false
+            channel.draining = false
             return
         }
-        draining = true
-        advertise(operation)
+        channel.draining = true
+        advertise(channel, operation)
     }
 
-    private fun advertise(operation: BleAdvertiseOperation) {
+    private fun advertise(channel: AdvertiserChannelState, operation: BleAdvertiseOperation) {
         val currentAdvertiser = advertiser
         if (currentAdvertiser == null) {
             onLog("当前手机不支持 BLE 广播发送")
-            scheduleNext()
+            scheduleNext(channel)
             return
         }
         val uuid = operation.serviceUuid.takeIf { it.isNotBlank() }?.let { serviceUuid ->
             runCatching { ParcelUuid.fromString(serviceUuid) }
                 .getOrElse {
                     onLog("广播指令格式不正确：$serviceUuid")
-                    scheduleNext()
+                    scheduleNext(channel)
                     return
                 }
         }
@@ -65,7 +67,7 @@ internal class AndroidBleAdvertiser(
             runCatching { ParcelUuid.fromString(serviceUuid) }
                 .getOrElse {
                     onLog("广播指令格式不正确：$serviceUuid")
-                    scheduleNext()
+                    scheduleNext(channel)
                     return
                 }
         }
@@ -81,29 +83,31 @@ internal class AndroidBleAdvertiser(
             ?: operation.manufacturerId?.let { "manufacturer=0x${it.toString(16)}" }
             ?: "<empty>"
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val currentSet = advertisingSet
+            val currentSet = channel.advertisingSet
             if (currentSet != null) {
                 runCatching {
                     currentSet.setAdvertisingData(data)
                 }.onSuccess {
                     onLog("广播已更新 $summary")
-                    scheduleNext()
+                    scheduleNext(channel)
                 }.onFailure {
                     onLog("广播更新失败：${it.message.orEmpty()}")
-                    stopCurrentAdvertising()
-                    startAdvertisingSet(currentAdvertiser, data, summary)
+                    stopCurrentAdvertising(currentAdvertiser, channel)
+                    startAdvertisingSet(currentAdvertiser, channel, operation, data, summary)
                 }
             } else {
-                startAdvertisingSet(currentAdvertiser, data, summary)
+                startAdvertisingSet(currentAdvertiser, channel, operation, data, summary)
             }
         } else {
-            stopCompatAdvertising(currentAdvertiser)
-            startCompatAdvertising(currentAdvertiser, data, summary)
+            stopCompatAdvertising(currentAdvertiser, channel)
+            startCompatAdvertising(currentAdvertiser, channel, operation, data, summary)
         }
     }
 
     private fun startAdvertisingSet(
         currentAdvertiser: BluetoothLeAdvertiser,
+        channel: AdvertiserChannelState,
+        operation: BleAdvertiseOperation,
         data: AdvertiseData,
         summary: String,
     ) {
@@ -113,16 +117,18 @@ internal class AndroidBleAdvertiser(
                 txPower: Int,
                 status: Int,
             ) {
-                this@AndroidBleAdvertiser.advertisingSet = advertisingSet
                 if (status == AdvertisingSetCallback.ADVERTISE_SUCCESS) {
+                    channel.advertisingSet = advertisingSet
                     onLog("广播已发送 $summary")
                 } else {
+                    channel.advertisingSet = null
                     onLog("广播发送失败 status=$status")
+                    retryOnDefaultChannel(channel, operation)
                 }
-                scheduleNext()
+                scheduleNext(channel)
             }
         }
-        advertisingSetCallback = callback
+        channel.advertisingSetCallback = callback
         currentAdvertiser.startAdvertisingSet(
             AdvertisingSetParameters.Builder()
                 .setLegacyMode(true)
@@ -141,21 +147,24 @@ internal class AndroidBleAdvertiser(
 
     private fun startCompatAdvertising(
         currentAdvertiser: BluetoothLeAdvertiser,
+        channel: AdvertiserChannelState,
+        operation: BleAdvertiseOperation,
         data: AdvertiseData,
         summary: String,
     ) {
         val callback = object : AdvertiseCallback() {
             override fun onStartSuccess(settingsInEffect: AdvertiseSettings) {
                 onLog("广播已发送 $summary")
-                scheduleNext()
+                scheduleNext(channel)
             }
 
             override fun onStartFailure(errorCode: Int) {
                 onLog("广播发送失败 errorCode=$errorCode")
-                scheduleNext()
+                retryOnDefaultChannel(channel, operation)
+                scheduleNext(channel)
             }
         }
-        advertiseCallback = callback
+        channel.advertiseCallback = callback
         currentAdvertiser.startAdvertising(
             AdvertiseSettings.Builder()
                 .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
@@ -168,41 +177,70 @@ internal class AndroidBleAdvertiser(
         )
     }
 
-    private fun scheduleNext() {
-        if (pendingOperations.isEmpty()) {
-            draining = false
+    private fun retryOnDefaultChannel(
+        channel: AdvertiserChannelState,
+        operation: BleAdvertiseOperation,
+    ) {
+        if (channel.key == DEFAULT_CHANNEL_KEY) return
+        start(operation.copy(channelKey = DEFAULT_CHANNEL_KEY))
+    }
+
+    private fun scheduleNext(channel: AdvertiserChannelState) {
+        if (channel.pendingOperations.isEmpty()) {
+            channel.draining = false
             return
         }
-        handler.postDelayed(::drainNext, COMMAND_HOLD_MS)
+        handler.postDelayed({ drainNext(channel) }, COMMAND_HOLD_MS)
     }
 
     fun stop() {
         handler.removeCallbacksAndMessages(null)
-        pendingOperations.clear()
-        draining = false
-        stopCurrentAdvertising()
+        val currentAdvertiser = advertiser
+        channels.values.forEach { channel ->
+            channel.pendingOperations.clear()
+            channel.draining = false
+            if (currentAdvertiser != null) {
+                stopCurrentAdvertising(currentAdvertiser, channel)
+            }
+        }
+        channels.clear()
     }
 
-    private fun stopCurrentAdvertising() {
-        val currentAdvertiser = advertiser ?: return
+    private fun stopCurrentAdvertising(
+        currentAdvertiser: BluetoothLeAdvertiser,
+        channel: AdvertiserChannelState,
+    ) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            advertisingSetCallback?.let { callback ->
+            channel.advertisingSetCallback?.let { callback ->
                 runCatching { currentAdvertiser.stopAdvertisingSet(callback) }
             }
-            advertisingSet = null
-            advertisingSetCallback = null
+            channel.advertisingSet = null
+            channel.advertisingSetCallback = null
         }
-        stopCompatAdvertising(currentAdvertiser)
+        stopCompatAdvertising(currentAdvertiser, channel)
     }
 
-    private fun stopCompatAdvertising(currentAdvertiser: BluetoothLeAdvertiser) {
-        advertiseCallback?.let { callback ->
+    private fun stopCompatAdvertising(
+        currentAdvertiser: BluetoothLeAdvertiser,
+        channel: AdvertiserChannelState,
+    ) {
+        channel.advertiseCallback?.let { callback ->
             runCatching { currentAdvertiser.stopAdvertising(callback) }
         }
-        advertiseCallback = null
+        channel.advertiseCallback = null
     }
 
+    private data class AdvertiserChannelState(
+        val key: String,
+        val pendingOperations: ArrayDeque<BleAdvertiseOperation> = ArrayDeque(),
+        var advertiseCallback: AdvertiseCallback? = null,
+        var advertisingSetCallback: AdvertisingSetCallback? = null,
+        var advertisingSet: AdvertisingSet? = null,
+        var draining: Boolean = false,
+    )
+
     companion object {
+        private const val DEFAULT_CHANNEL_KEY = "default"
         private const val COMMAND_HOLD_MS = 160L
     }
 }
