@@ -93,6 +93,15 @@ internal fun BleProtocolStatus.independentFunctionCode(feature: BleProtocolFeatu
     when (id) {
         AnkniMxProtocol.status.id -> feature.index + 1
         CachitoDaxiuBroadcastProtocol.status.id -> feature.index + 1
+        MesanelProtocol.status.id,
+        "mesanel_coco",
+        "mesanel_cocopro",
+        "mesanel_super",
+        "mesanel_handou",
+        "mesanel_cisecat",
+        "mesanel_pinkpo",
+        "mesanel_bosscat",
+        "mesanel_generic" -> mesanelFunctionCodeForFeature(feature)
         SosexyBoboBeiProtocol.status.id -> feature.index + 1
         SistalkPopocatProtocol.status.id -> feature.index + 1
         else -> svakomV2FunctionCode(feature.type)
