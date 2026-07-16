@@ -25,6 +25,9 @@ actual fun rememberKmpNavBackStack(vararg elements: NavKey): NavBackStack<NavKey
     }
 }
 
+@Composable
+actual fun NavigatorBackHandler(navigator: Navigator) = Unit
+
 // copied from androidx.navigation3.runtime.serialization
 @OptIn(InternalSerializationApi::class)
 public open class NavKeySerializer<T : NavKey> : KSerializer<T> {

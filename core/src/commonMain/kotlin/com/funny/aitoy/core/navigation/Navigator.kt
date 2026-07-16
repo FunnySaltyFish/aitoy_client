@@ -40,6 +40,7 @@ class Navigator internal constructor(
     }
 
     fun popBackStack(): Boolean {
+        if (!canGoBack) return false
         val oldSize = backStack.size
         val popped = backStack.removeLastOrNull() != null
         if (popped) resolveByPoppedDepth(oldSize, result = null)
@@ -47,6 +48,7 @@ class Navigator internal constructor(
     }
 
     fun popWithResult(result: Any? = null): Boolean {
+        if (!canGoBack) return false
         val oldSize = backStack.size
         val popped = backStack.removeLastOrNull() != null
         if (popped) resolveByPoppedDepth(oldSize, result = result)
@@ -96,6 +98,9 @@ fun NavigatorProvider(
         content()
     }
 }
+
+@Composable
+expect fun NavigatorBackHandler(navigator: Navigator)
 
 @OptIn(ExperimentalMaterial3AdaptiveApi::class)
 @Composable

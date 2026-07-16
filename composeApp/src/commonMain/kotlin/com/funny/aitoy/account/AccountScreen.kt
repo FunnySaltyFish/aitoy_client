@@ -67,6 +67,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.compose.AsyncImage
 import com.attafitamim.krop.core.crop.CircleCropShape
 import com.attafitamim.krop.core.crop.CropError
@@ -91,10 +92,11 @@ import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.painterResource
 
 @Composable
-internal fun AccountScreen(vm: AccountViewModel) {
+internal fun AccountScreen() {
+    val actions = LocalAccountActions.current
+    val homeVm = viewModel { AccountHomeViewModel(actions) }
+    val billingVm = viewModel { AccountBillingViewModel(actions) }
     val navigator = LocalNavigator.current
-    val homeVm = vm.homeVm
-    val billingVm = vm.billingVm
     val products = homeVm.products
     val monthlyProducts = products.filter { it.type == "monthly" }
     val addonProducts = products.filter { it.type == "addon" }
@@ -129,11 +131,11 @@ internal fun AccountScreen(vm: AccountViewModel) {
                 AccountHeader(
                     vm = homeVm,
                     onAvatarClick = launchAvatarPicker,
-                    onRedeemClick = { navigator.navigate(AiToyRoute.AccountRedeem) },
+                    onRedeemClick = { navigator.navigate(AiToyRoute.Account.Redeem()) },
                 )
             }
             item { SectionTitle("控制额度", "连接、待机和停止不消耗额度") }
-            item { UsageSummaryCard(vm = homeVm, onDetailClick = { navigator.navigate(AiToyRoute.AccountUsage) }) }
+            item { UsageSummaryCard(vm = homeVm, onDetailClick = { navigator.navigate(AiToyRoute.Account.Usage) }) }
             item { CampaignStrip(products = products) }
             item { SectionTitle("会员与加量", "按需要选择，不用提前囤积") }
             item {

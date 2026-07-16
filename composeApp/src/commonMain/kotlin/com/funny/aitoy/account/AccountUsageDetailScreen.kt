@@ -25,10 +25,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.funny.aitoy.core.navigation.LocalNavigator
 
 @Composable
-internal fun AccountUsageDetailScreen(vm: AccountUsageViewModel) {
+internal fun AccountUsageDetailScreen() {
+    val actions = LocalAccountActions.current
+    val vm = viewModel { AccountUsageViewModel(actions) }
     val navigator = LocalNavigator.current
     val ent = vm.user.entitlement
     LazyColumn(

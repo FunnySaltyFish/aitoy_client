@@ -1,5 +1,6 @@
 package com.funny.aitoy.account
 
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -8,6 +9,10 @@ import androidx.lifecycle.ViewModel
 import com.funny.aitoy.BridgeViewModel
 import com.funny.aitoy.core.model.UserProfile
 import com.funny.aitoy.network.api.service.Product
+
+internal val LocalAccountActions = compositionLocalOf<AccountActions> {
+    error("LocalAccountActions 未提供")
+}
 
 internal interface AccountActions {
     val user: UserProfile
@@ -57,18 +62,9 @@ internal class BridgeAccountActions(
     override fun redeemCode(code: String, onSuccess: () -> Unit) = bridgeVm.redeemCode(code, onSuccess)
 }
 
-internal class AccountViewModel(
-    actions: AccountActions,
-) : ViewModel() {
-    val homeVm = AccountHomeViewModel(actions)
-    val usageVm = AccountUsageViewModel(actions)
-    val billingVm = AccountBillingViewModel(actions)
-    val redeemVm = AccountRedeemViewModel(actions)
-}
-
 internal class AccountHomeViewModel(
     internal val actions: AccountActions,
-) {
+) : ViewModel() {
     val user: UserProfile
         get() = actions.user
     val loading: Boolean
@@ -86,14 +82,14 @@ internal class AccountHomeViewModel(
 
 internal class AccountUsageViewModel(
     private val actions: AccountActions,
-) {
+) : ViewModel() {
     val user: UserProfile
         get() = actions.user
 }
 
 internal class AccountBillingViewModel(
     private val actions: AccountActions,
-) {
+) : ViewModel() {
     var purchaseMode by mutableStateOf(PurchaseMode.Monthly)
         private set
     var selectedMonthlyId by mutableStateOf("")
@@ -184,7 +180,7 @@ internal class AccountBillingViewModel(
 
 internal class AccountRedeemViewModel(
     private val actions: AccountActions,
-) {
+) : ViewModel() {
     var codeDraft by mutableStateOf("")
         private set
 

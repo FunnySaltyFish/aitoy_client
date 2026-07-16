@@ -27,13 +27,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.funny.aitoy.core.navigation.LocalNavigator
 
 @Composable
 internal fun AccountRedeemCodeScreen(
-    vm: AccountRedeemViewModel,
     initialCode: String = "",
 ) {
+    val actions = LocalAccountActions.current
+    val vm = viewModel { AccountRedeemViewModel(actions) }
     val navigator = LocalNavigator.current
     LaunchedEffect(initialCode) {
         if (initialCode.isNotBlank()) vm.setInitialCode(initialCode)

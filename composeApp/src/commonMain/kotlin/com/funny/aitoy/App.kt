@@ -57,6 +57,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -86,8 +87,8 @@ import androidx.navigation3.runtime.NavKey
 import com.funny.aitoy.account.AccountRedeemCodeScreen
 import com.funny.aitoy.account.AccountScreen
 import com.funny.aitoy.account.AccountUsageDetailScreen
-import com.funny.aitoy.account.AccountViewModel
 import com.funny.aitoy.account.BridgeAccountActions
+import com.funny.aitoy.account.LocalAccountActions
 import com.funny.aitoy.ble.BleBroadcastProtocolRegistry
 import com.funny.aitoy.ble.BleConnectionState
 import com.funny.aitoy.ble.BleProtocolStatus
@@ -97,6 +98,7 @@ import com.funny.aitoy.ble.ToyControlStyle
 import com.funny.aitoy.ble.independentFunctionCode
 import com.funny.aitoy.ble.independentFunctionModeMax
 import com.funny.aitoy.core.navigation.Navigator
+import com.funny.aitoy.core.navigation.NavigatorBackHandler
 import com.funny.aitoy.core.navigation.NavigatorProvider
 import com.funny.aitoy.core.navigation.rememberNavigator
 import com.funny.aitoy.model.ManagedToy
@@ -127,29 +129,31 @@ internal sealed interface AiToyRoute : NavKey {
     data object Guide : AiToyRoute
 
     @Serializable
-    data object Account : AiToyRoute
+    sealed interface Account : AiToyRoute {
+        @Serializable
+        data object Home : Account
 
-    @Serializable
-    data object AccountUsage : AiToyRoute
+        @Serializable
+        data object Usage : Account
 
-    @Serializable
-    data object AccountRedeem : AiToyRoute
+        @Serializable
+        data class Redeem(val initialCode: String = "") : Account
+    }
 }
 
 @Composable
 fun App() {
     val vm = viewModel { BridgeViewModel() }
-    val accountVm = viewModel { AccountViewModel(BridgeAccountActions(vm)) }
+    val accountActions = remember(vm) { BridgeAccountActions(vm) }
     val navigator = rememberNavigator(AiToyRoute.Device)
     val currentRoute = navigator.currentRoute
     LaunchedEffect(Unit) {
         AppDeepLinks.events.collect { target ->
             when (target) {
-                AppDeepLinkTarget.Pay -> navigator.replaceTop(AiToyRoute.Account)
-                is AppDeepLinkTarget.Redeem -> {
-                    accountVm.redeemVm.updateCode(target.code)
-                    navigator.replaceTop(AiToyRoute.AccountRedeem)
-                }
+                AppDeepLinkTarget.Pay -> navigator.replaceTop(AiToyRoute.Account.Home)
+                is AppDeepLinkTarget.Redeem -> navigator.navigateToAccountChild(
+                    AiToyRoute.Account.Redeem(target.code),
+                )
             }
         }
     }
@@ -168,46 +172,49 @@ fun App() {
         ),
     ) {
         NavigatorProvider(navigator) {
-            Scaffold(
-                containerColor = Ink,
-                bottomBar = {
-                    NavigationBar(containerColor = Velvet) {
-                        NavigationItem(
-                            navigator = navigator,
-                            currentRoute = currentRoute,
-                            route = AiToyRoute.Device,
-                            icon = Icons.Outlined.SettingsRemote,
-                            label = "设备",
-                        )
-                        NavigationItem(
-                            navigator = navigator,
-                            currentRoute = currentRoute,
-                            route = AiToyRoute.Guide,
-                            icon = Icons.Outlined.Link,
-                            label = "教程",
-                        )
-                        NavigationItem(
-                            navigator = navigator,
-                            currentRoute = currentRoute,
-                            route = AiToyRoute.Account,
-                            icon = Icons.Outlined.AutoAwesome,
-                            label = "我的",
-                        )
+            CompositionLocalProvider(LocalAccountActions provides accountActions) {
+                NavigatorBackHandler(navigator)
+                Scaffold(
+                    containerColor = Ink,
+                    bottomBar = {
+                        NavigationBar(containerColor = Velvet) {
+                            NavigationItem(
+                                navigator = navigator,
+                                currentRoute = currentRoute,
+                                route = AiToyRoute.Device,
+                                icon = Icons.Outlined.SettingsRemote,
+                                label = "设备",
+                            )
+                            NavigationItem(
+                                navigator = navigator,
+                                currentRoute = currentRoute,
+                                route = AiToyRoute.Guide,
+                                icon = Icons.Outlined.Link,
+                                label = "教程",
+                            )
+                            NavigationItem(
+                                navigator = navigator,
+                                currentRoute = currentRoute,
+                                route = AiToyRoute.Account.Home,
+                                icon = Icons.Outlined.AutoAwesome,
+                                label = "我的",
+                            )
+                        }
+                    },
+                ) { padding ->
+                    Surface(color = Ink, modifier = Modifier
+                        .fillMaxSize()
+                        .padding(padding)) {
+                        when (val route = currentRoute) {
+                            AiToyRoute.Device -> DeviceHome()
+                            AiToyRoute.Guide -> McpGuideScreen()
+                            AiToyRoute.Account.Home -> AccountScreen()
+                            AiToyRoute.Account.Usage -> AccountUsageDetailScreen()
+                            is AiToyRoute.Account.Redeem -> AccountRedeemCodeScreen(route.initialCode)
+                        }
                     }
-                },
-            ) { padding ->
-                Surface(color = Ink, modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding)) {
-                    when (currentRoute) {
-                        AiToyRoute.Device -> DeviceHome(vm)
-                        AiToyRoute.Guide -> McpGuideScreen(vm)
-                        AiToyRoute.Account -> AccountScreen(accountVm)
-                        AiToyRoute.AccountUsage -> AccountUsageDetailScreen(accountVm.usageVm)
-                        AiToyRoute.AccountRedeem -> AccountRedeemCodeScreen(accountVm.redeemVm)
-                    }
+                    UpdateDialog(vm)
                 }
-                UpdateDialog(vm)
             }
         }
     }
@@ -222,7 +229,7 @@ private fun NavigationItem(
     icon: ImageVector,
     label: String,
 ) {
-    val selected = currentRoute == route || (route == AiToyRoute.Account && currentRoute.isAccountRoute())
+    val selected = currentRoute == route || (route is AiToyRoute.Account && currentRoute.isAccountRoute())
     Column(
         modifier = modifier
             .clickable {
@@ -269,10 +276,18 @@ private val Navigator.currentRoute: AiToyRoute
     get() = backStack.lastOrNull() as? AiToyRoute ?: AiToyRoute.Device
 
 private fun AiToyRoute.isAccountRoute(): Boolean =
-    this == AiToyRoute.Account || this == AiToyRoute.AccountUsage || this == AiToyRoute.AccountRedeem
+    this is AiToyRoute.Account
+
+private fun Navigator.navigateToAccountChild(route: AiToyRoute.Account) {
+    if (currentRoute !is AiToyRoute.Account) {
+        navigate(AiToyRoute.Account.Home)
+    }
+    navigate(route)
+}
 
 @Composable
-private fun McpGuideScreen(vm: BridgeViewModel) {
+private fun McpGuideScreen() {
+    val vm = viewModel { BridgeViewModel() }
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -319,7 +334,8 @@ private fun McpGuideScreen(vm: BridgeViewModel) {
 }
 
 @Composable
-private fun DeviceHome(vm: BridgeViewModel) {
+private fun DeviceHome() {
+    val vm = viewModel { BridgeViewModel() }
     Column(
         modifier = Modifier
             .fillMaxSize()
