@@ -34,8 +34,7 @@ import com.funny.aitoy.core.navigation.LocalNavigator
 internal fun AccountRedeemCodeScreen(
     initialCode: String = "",
 ) {
-    val actions = LocalAccountActions.current
-    val vm = viewModel { AccountRedeemViewModel(actions) }
+    val vm = viewModel { AccountRedeemViewModel() }
     val navigator = LocalNavigator.current
     LaunchedEffect(initialCode) {
         if (initialCode.isNotBlank()) vm.setInitialCode(initialCode)

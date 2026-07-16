@@ -57,7 +57,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -87,8 +86,6 @@ import androidx.navigation3.runtime.NavKey
 import com.funny.aitoy.account.AccountRedeemCodeScreen
 import com.funny.aitoy.account.AccountScreen
 import com.funny.aitoy.account.AccountUsageDetailScreen
-import com.funny.aitoy.account.BridgeAccountActions
-import com.funny.aitoy.account.LocalAccountActions
 import com.funny.aitoy.ble.BleBroadcastProtocolRegistry
 import com.funny.aitoy.ble.BleConnectionState
 import com.funny.aitoy.ble.BleProtocolStatus
@@ -144,7 +141,6 @@ internal sealed interface AiToyRoute : NavKey {
 @Composable
 fun App() {
     val vm = viewModel { BridgeViewModel() }
-    val accountActions = remember(vm) { BridgeAccountActions(vm) }
     val navigator = rememberNavigator(AiToyRoute.Device)
     val currentRoute = navigator.currentRoute
     LaunchedEffect(Unit) {
@@ -172,49 +168,47 @@ fun App() {
         ),
     ) {
         NavigatorProvider(navigator) {
-            CompositionLocalProvider(LocalAccountActions provides accountActions) {
-                NavigatorBackHandler(navigator)
-                Scaffold(
-                    containerColor = Ink,
-                    bottomBar = {
-                        NavigationBar(containerColor = Velvet) {
-                            NavigationItem(
-                                navigator = navigator,
-                                currentRoute = currentRoute,
-                                route = AiToyRoute.Device,
-                                icon = Icons.Outlined.SettingsRemote,
-                                label = "设备",
-                            )
-                            NavigationItem(
-                                navigator = navigator,
-                                currentRoute = currentRoute,
-                                route = AiToyRoute.Guide,
-                                icon = Icons.Outlined.Link,
-                                label = "教程",
-                            )
-                            NavigationItem(
-                                navigator = navigator,
-                                currentRoute = currentRoute,
-                                route = AiToyRoute.Account.Home,
-                                icon = Icons.Outlined.AutoAwesome,
-                                label = "我的",
-                            )
-                        }
-                    },
-                ) { padding ->
-                    Surface(color = Ink, modifier = Modifier
-                        .fillMaxSize()
-                        .padding(padding)) {
-                        when (val route = currentRoute) {
-                            AiToyRoute.Device -> DeviceHome()
-                            AiToyRoute.Guide -> McpGuideScreen()
-                            AiToyRoute.Account.Home -> AccountScreen()
-                            AiToyRoute.Account.Usage -> AccountUsageDetailScreen()
-                            is AiToyRoute.Account.Redeem -> AccountRedeemCodeScreen(route.initialCode)
-                        }
+            NavigatorBackHandler(navigator)
+            Scaffold(
+                containerColor = Ink,
+                bottomBar = {
+                    NavigationBar(containerColor = Velvet) {
+                        NavigationItem(
+                            navigator = navigator,
+                            currentRoute = currentRoute,
+                            route = AiToyRoute.Device,
+                            icon = Icons.Outlined.SettingsRemote,
+                            label = "设备",
+                        )
+                        NavigationItem(
+                            navigator = navigator,
+                            currentRoute = currentRoute,
+                            route = AiToyRoute.Guide,
+                            icon = Icons.Outlined.Link,
+                            label = "教程",
+                        )
+                        NavigationItem(
+                            navigator = navigator,
+                            currentRoute = currentRoute,
+                            route = AiToyRoute.Account.Home,
+                            icon = Icons.Outlined.AutoAwesome,
+                            label = "我的",
+                        )
                     }
-                    UpdateDialog(vm)
                 }
+            ) { padding ->
+                Surface(color = Ink, modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)) {
+                    when (val route = currentRoute) {
+                        AiToyRoute.Device -> DeviceHome()
+                        AiToyRoute.Guide -> McpGuideScreen()
+                        AiToyRoute.Account.Home -> AccountScreen()
+                        AiToyRoute.Account.Usage -> AccountUsageDetailScreen()
+                        is AiToyRoute.Account.Redeem -> AccountRedeemCodeScreen(route.initialCode)
+                    }
+                }
+                UpdateDialog(vm)
             }
         }
     }

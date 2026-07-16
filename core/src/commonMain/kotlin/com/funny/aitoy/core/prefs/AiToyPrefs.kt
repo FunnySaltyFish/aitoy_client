@@ -2,14 +2,16 @@ package com.funny.aitoy.core.prefs
 
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import com.funny.data_saver.core.mutableDataSaverStateOf
 import com.funny.aitoy.core.device.DeviceIdProvider
 import com.funny.aitoy.core.model.UserProfile
+import com.funny.data_saver.core.mutableDataSaverStateOf
 
 object AiToyPrefs {
     init {
         AiToyPrefsInit.init()
     }
+
+    fun ensureInitialized() = Unit
 
     var serverBaseUrl: String by mutableDataSaverStateOf(
         DataSaverUtils,
@@ -26,6 +28,12 @@ object AiToyPrefs {
     var authToken: String by mutableDataSaverStateOf(
         DataSaverUtils,
         key = "AUTH_TOKEN",
+        initialValue = "",
+    )
+
+    var userToken: String by mutableDataSaverStateOf(
+        DataSaverUtils,
+        key = "AITOY_USER_TOKEN",
         initialValue = "",
     )
 

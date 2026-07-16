@@ -462,7 +462,7 @@ internal fun CheckoutBar(
         }
         Spacer(Modifier.height(6.dp))
         Button(
-            onClick = { vm.startPurchase(product, quantityCap) },
+            onClick = { vm.startPurchase(product) },
             enabled = canPay,
             colors = ButtonDefaults.buttonColors(containerColor = Rose, contentColor = Ink, disabledContainerColor = Line),
             shape = RoundedCornerShape(50),

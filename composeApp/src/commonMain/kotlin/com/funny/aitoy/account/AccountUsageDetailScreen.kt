@@ -30,8 +30,7 @@ import com.funny.aitoy.core.navigation.LocalNavigator
 
 @Composable
 internal fun AccountUsageDetailScreen() {
-    val actions = LocalAccountActions.current
-    val vm = viewModel { AccountUsageViewModel(actions) }
+    val vm = viewModel { AccountUsageViewModel() }
     val navigator = LocalNavigator.current
     val ent = vm.user.entitlement
     LazyColumn(

@@ -6,10 +6,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.funny.aitoy.ble.BleBroadcastProtocolRegistry
 import com.funny.aitoy.ble.BleConnectionState
 import com.funny.aitoy.ble.BleController
 import com.funny.aitoy.ble.BleControllerFactory
-import com.funny.aitoy.ble.BleBroadcastProtocolRegistry
 import com.funny.aitoy.ble.BleProtocolFeature
 import com.funny.aitoy.ble.BleProtocolStatus
 import com.funny.aitoy.ble.ProtocolAttemptStatus
@@ -39,7 +39,6 @@ import com.funny.aitoy.model.lastSeenKey
 import com.funny.aitoy.network.OkHttpUtils
 import com.funny.aitoy.network.api.AiToyServices
 import com.funny.aitoy.network.api.apiRequest
-import com.funny.aitoy.network.api.service.Product
 import com.funny.aitoy.relay.MaxSequenceDurationSec
 import com.funny.aitoy.relay.RelayClient
 import com.funny.aitoy.relay.RelayCommand
@@ -57,9 +56,6 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.MultipartBody
-import okhttp3.RequestBody.Companion.toRequestBody
 import kotlin.math.roundToInt
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
@@ -132,29 +128,11 @@ class BridgeViewModel : ViewModel() {
         "DEVELOPER_MODE",
         false,
     )
-    var userToken: String by mutableDataSaverStateOf(
-        DataSaverUtils,
-        "AITOY_USER_TOKEN",
-        "",
-    )
-    var accountUser
-        get() = AiToyPrefs.user
+    var userToken: String
+        get() = AiToyPrefs.userToken
         set(value) {
-            AiToyPrefs.user = value
+            AiToyPrefs.userToken = value
         }
-    var accountLoading by mutableStateOf(false)
-        private set
-    var accountMessage by mutableStateOf("")
-        private set
-    var memberProducts by mutableStateOf<List<Product>>(emptyList())
-        private set
-    var pendingOrderNo by mutableStateOf("")
-        private set
-
-    fun showAccountMessage(message: String) {
-        accountMessage = message
-    }
-
     var rememberedDevicesJson: String by mutableDataSaverStateOf(
         DataSaverUtils,
         "BLE_REMEMBERED_DEVICES",
@@ -276,7 +254,6 @@ class BridgeViewModel : ViewModel() {
         refreshBaseUrlState()
         ensureDefaultUserToken()
         userTokenDraft = userToken
-        bootstrapAccount()
         updateTraceContext()
         checkAppConfig()
     }
@@ -785,204 +762,7 @@ class BridgeViewModel : ViewModel() {
         userToken = token
         userTokenDraft = token
         updateTraceContext()
-        bootstrapAccount()
         baseUrlMessage = "Token 已保存；手机已经上线时，请重新上线。"
-    }
-
-    fun bootstrapAccount() {
-        if (userToken.isBlank()) return
-        accountLoading = true
-        viewModelScope.launch {
-            runCatching {
-                apiRequest {
-                    AiToyServices.authService.bootstrap(
-                        userToken = userToken,
-                        deviceId = AiToyPrefs.deviceId,
-                    )
-                }
-            }.onSuccess { payload ->
-                AiToyPrefs.authToken = payload.token
-                AiToyPrefs.user = payload.user
-                accountUser = payload.user
-                accountMessage = ""
-                refreshProducts()
-            }.onFailure {
-                accountMessage = "账号同步失败，请稍后重试。"
-            }
-            accountLoading = false
-        }
-    }
-
-    fun refreshAccount() {
-        accountLoading = true
-        viewModelScope.launch {
-            runCatching {
-                apiRequest { AiToyServices.userService.me() }
-            }.onSuccess { payload ->
-                AiToyPrefs.user = payload.user
-                accountUser = payload.user
-                accountMessage = ""
-            }.onFailure {
-                if (AiToyPrefs.authToken.isBlank()) {
-                    bootstrapAccount()
-                } else {
-                    accountMessage = "刷新失败，请稍后再试。"
-                }
-            }
-            accountLoading = false
-        }
-    }
-
-    fun refreshProducts() {
-        viewModelScope.launch {
-            runCatching {
-                apiRequest { AiToyServices.payService.products() }
-            }.onSuccess { payload ->
-                memberProducts = payload.products
-            }
-        }
-    }
-
-    fun saveProfile(displayName: String) {
-        val name = displayName.trim()
-        if (name.isBlank()) {
-            accountMessage = "请填写昵称。"
-            return
-        }
-        if (name.length > 12) {
-            accountMessage = "昵称最多 12 个字。"
-            return
-        }
-        accountLoading = true
-        viewModelScope.launch {
-            runCatching {
-                apiRequest {
-                    AiToyServices.userService.updateProfile(
-                        displayName = name,
-                    )
-                }
-            }.onSuccess { payload ->
-                AiToyPrefs.user = payload.user
-                accountUser = payload.user
-                accountMessage = "资料已保存。"
-            }.onFailure {
-                accountMessage = "保存失败，请稍后再试。"
-            }
-            accountLoading = false
-        }
-    }
-
-    fun uploadAvatar(fileName: String, bytes: ByteArray) {
-        if (bytes.isEmpty()) {
-            accountMessage = "请选择可用的头像图片。"
-            return
-        }
-        accountLoading = true
-        viewModelScope.launch {
-            runCatching {
-                val safeName = fileName.ifBlank { "avatar.jpg" }
-                val contentType = when (safeName.substringAfterLast('.', "").lowercase()) {
-                    "png" -> "image/png"
-                    "webp" -> "image/webp"
-                    else -> "image/jpeg"
-                }
-                val part = MultipartBody.Part.createFormData(
-                    name = "file",
-                    filename = safeName,
-                    body = bytes.toRequestBody(contentType.toMediaType()),
-                )
-                apiRequest { AiToyServices.userService.uploadAvatar(part) }
-            }.onSuccess { payload ->
-                AiToyPrefs.user = payload.user
-                accountUser = payload.user
-                accountMessage = "头像已更新。"
-            }.onFailure {
-                accountMessage = "头像更新失败，请稍后再试。"
-            }
-            accountLoading = false
-        }
-    }
-
-    fun openMembershipAgreement() {
-        val prefix = AiToyPrefs.apiPrefix.trim().trim('/')
-        BridgePlatform.openUrl(OkHttpUtils.externalUrl("$prefix/pay/membership-agreement"))
-    }
-
-    fun startMembershipPurchase(
-        productId: String,
-        payType: String,
-        months: Int = 1,
-        quantity: Int = 1,
-    ) {
-        accountLoading = true
-        viewModelScope.launch {
-            runCatching {
-                apiRequest {
-                    AiToyServices.payService.createOrder(
-                        productId = productId,
-                        payType = payType,
-                        months = months.coerceIn(1, 12),
-                        quantity = quantity.coerceIn(1, 99),
-                    )
-                }
-            }.onSuccess { payload ->
-                pendingOrderNo = payload.orderNo
-                accountMessage = "订单已创建，完成支付后回到 App 刷新。"
-                if (payload.payUrl.isNotBlank()) {
-                    BridgePlatform.openUrl(payload.payUrl)
-                }
-            }.onFailure {
-                accountMessage = "暂时无法发起支付，请稍后再试。"
-            }
-            accountLoading = false
-        }
-    }
-
-    fun refreshPendingOrder() {
-        val orderNo = pendingOrderNo
-        if (orderNo.isBlank()) {
-            refreshAccount()
-            return
-        }
-        accountLoading = true
-        viewModelScope.launch {
-            runCatching {
-                apiRequest { AiToyServices.payService.queryOrder(orderNo) }
-            }.onSuccess { payload ->
-                payload.user?.let {
-                    AiToyPrefs.user = it
-                    accountUser = it
-                }
-                accountMessage = if (payload.status == "paid") "会员已生效。" else "订单还未完成。"
-            }.onFailure {
-                accountMessage = "订单刷新失败，请稍后再试。"
-            }
-            accountLoading = false
-        }
-    }
-
-    fun redeemCode(codeDraft: String, onSuccess: () -> Unit = {}) {
-        val code = codeDraft.trim()
-        if (code.isBlank()) {
-            accountMessage = "请输入兑换码。"
-            return
-        }
-        accountLoading = true
-        viewModelScope.launch {
-            runCatching {
-                apiRequest { AiToyServices.payService.redeemCode(code) }
-            }.onSuccess { payload ->
-                payload.user?.let {
-                    AiToyPrefs.user = it
-                    accountUser = it
-                }
-                accountMessage = payload.message.ifBlank { "兑换成功，额度已到账。" }
-                onSuccess()
-            }.onFailure {
-                accountMessage = it.message ?: "兑换失败，请检查兑换码。"
-            }
-            accountLoading = false
-        }
     }
 
     fun downloadAndInstallUpdate() {

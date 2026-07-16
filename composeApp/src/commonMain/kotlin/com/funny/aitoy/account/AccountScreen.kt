@@ -52,6 +52,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -93,23 +94,32 @@ import org.jetbrains.compose.resources.painterResource
 
 @Composable
 internal fun AccountScreen() {
-    val actions = LocalAccountActions.current
-    val homeVm = viewModel { AccountHomeViewModel(actions) }
-    val billingVm = viewModel { AccountBillingViewModel(actions) }
+    val homeVm = viewModel { AccountHomeViewModel() }
+    val billingVm = viewModel { AccountBillingViewModel() }
     val navigator = LocalNavigator.current
-    val products = homeVm.products
-    val monthlyProducts = products.filter { it.type == "monthly" }
-    val addonProducts = products.filter { it.type == "addon" }
+    val user = homeVm.user
+    val products by remember(homeVm) {
+        derivedStateOf { homeVm.products.ifEmpty { defaultProducts() } }
+    }
+    val monthlyProducts by remember(homeVm) {
+        derivedStateOf { products.filter { it.type == "monthly" } }
+    }
+    val addonProducts by remember(homeVm) {
+        derivedStateOf { products.filter { it.type == "addon" } }
+    }
+    val selectedProduct = billingVm.selectedProduct
+    val quantityCap = billingVm.quantityCap
     var launchAvatarPicker by remember { mutableStateOf<() -> Unit>({}) }
 
-    LaunchedEffect(monthlyProducts, addonProducts) {
-        billingVm.syncProducts(monthlyProducts, addonProducts)
+    LaunchedEffect(monthlyProducts, addonProducts, user.entitlement) {
+        billingVm.syncAccountData(
+            monthlyProducts = monthlyProducts,
+            addonProducts = addonProducts,
+        )
     }
 
-    val selectedProduct = billingVm.selectedProduct(monthlyProducts, addonProducts)
-    val quantityCap = selectedProduct?.let { quantityCap(it, billingVm.user.entitlement) } ?: 1
-    LaunchedEffect(selectedProduct?.id, quantityCap) {
-        billingVm.syncQuantity(quantityCap)
+    LaunchedEffect(quantityCap) {
+        billingVm.syncQuantity()
     }
 
     Box(
@@ -153,8 +163,11 @@ internal fun AccountScreen() {
                     onMonthlySelected = billingVm::selectMonthly,
                     onAddonSelected = billingVm::selectAddon,
                     onMonthsChanged = billingVm::setMonths,
-                    onQuantityChanged = { billingVm.setQuantity(it, quantityCap) },
+                    onQuantityChanged = billingVm::setQuantity,
                 )
+            }
+            if (billingVm.message.isNotBlank()) {
+                item { Text(billingVm.message, color = Honey, style = MaterialTheme.typography.bodyMedium) }
             }
             item { ResponsibleNotice() }
         }
