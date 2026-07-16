@@ -83,6 +83,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation3.runtime.NavKey
+import com.funny.aitoy.account.AccountScreen
 import com.funny.aitoy.ble.BleBroadcastProtocolRegistry
 import com.funny.aitoy.ble.BleConnectionState
 import com.funny.aitoy.ble.BleProtocolStatus

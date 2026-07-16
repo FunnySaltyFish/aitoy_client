@@ -1,4 +1,4 @@
-package com.funny.aitoy
+package com.funny.aitoy.account
 
 import ai_toy_bridge.composeapp.generated.resources.Res
 import ai_toy_bridge.composeapp.generated.resources.account_header_bg
@@ -81,30 +81,7 @@ import com.attafitamim.krop.filekit.ImageFormat
 import com.attafitamim.krop.filekit.encodeToByteArray
 import com.attafitamim.krop.filekit.toImageSrc
 import com.attafitamim.krop.ui.ImageCropperDialog
-import com.funny.aitoy.account.BillingPanel
-import com.funny.aitoy.account.CheckoutBar
-import com.funny.aitoy.account.Honey
-import com.funny.aitoy.account.Ink
-import com.funny.aitoy.account.Line
-import com.funny.aitoy.account.Mint
-import com.funny.aitoy.account.Panel
-import com.funny.aitoy.account.PurchaseMode
-import com.funny.aitoy.account.ResponsibleNotice
-import com.funny.aitoy.account.Rose
-import com.funny.aitoy.account.RoseDeep
-import com.funny.aitoy.account.SelectorChip
-import com.funny.aitoy.account.TextMain
-import com.funny.aitoy.account.TextSoft
-import com.funny.aitoy.account.Velvet
-import com.funny.aitoy.account.activeCampaign
-import com.funny.aitoy.account.defaultProducts
-import com.funny.aitoy.account.displayInitial
-import com.funny.aitoy.account.displayName
-import com.funny.aitoy.account.formatMinuteNumber
-import com.funny.aitoy.account.formatMinutes
-import com.funny.aitoy.account.formatPrice
-import com.funny.aitoy.account.quantityCap
-import com.funny.aitoy.account.totalRemainingSeconds
+import com.funny.aitoy.BridgeViewModel
 import com.funny.aitoy.core.utils.nowMs
 import com.funny.aitoy.network.api.service.Product
 import io.github.vinceglb.filekit.dialogs.FileKitType
