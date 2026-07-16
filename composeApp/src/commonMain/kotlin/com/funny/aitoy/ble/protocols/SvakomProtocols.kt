@@ -149,9 +149,9 @@ internal object SvakomVibrateSuckProtocol : BleDeviceProtocol {
         }
 }
 
-// 礼物猫 / BeYourLover 大人铃：官方产品码 62=VA617A_V（震动端）、63=VA617A_S（吮吸端）。
-// 这两个端点使用 SVA V2 广播前缀和 FFE0/FFE1 写入通道，但名称可能在 VA617A-* / 大人铃之间变化。
-internal object BeYourLoverVa617aProtocol : BleDeviceProtocol {
+// 礼物猫 / BeYourLover：官方 ProductCodeMapper.BE_YOUR_LOVER_MAP 产品码表。
+// 设备使用 SVA V2 广播前缀和 FFE0/FFE1 写入通道；分流只看官方产品码和功能表，不按中文商品名匹配。
+internal object BeYourLoverProtocol : BleDeviceProtocol {
     private val serviceUuid = Uuid.parse("0000ffe0-0000-1000-8000-00805f9b34fb")
     private val writeUuid = Uuid.parse("0000ffe1-0000-1000-8000-00805f9b34fb")
 
@@ -161,18 +161,14 @@ internal object BeYourLoverVa617aProtocol : BleDeviceProtocol {
         val productCode = fingerprint.svakomProductCode()
         val hasWriteGatt = fingerprint.serviceUuids.contains(serviceUuid) &&
                 fingerprint.characteristicUuids.contains(writeUuid)
-        return productCode in setOf(62, 63) &&
+        return productCode != null &&
+                BeYourLoverProfiles.containsKey(productCode) &&
                 hasWriteGatt &&
                 fingerprint.hasSvakomManufacturerData()
     }
 
     override fun createInstance(fingerprint: BleGattFingerprint): BleDeviceProtocol =
-        SvakomV2Session(
-            when (fingerprint.svakomProductCode()) {
-                62 -> BE_YOUR_LOVER_VA617A_VIBRATE
-                else -> BE_YOUR_LOVER_VA617A_SUCK
-            }
-        )
+        SvakomV2Session(BeYourLoverProfiles[fingerprint.svakomProductCode()] ?: BE_YOUR_LOVER_VA617A_SUCK)
 
     override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> = emptyList()
 }
@@ -284,15 +280,11 @@ internal class SvakomV2Session(
         val usesStrength = strengthDriven && state.mode > strengthDisabledThroughMode
         val active = if (usesStrength) state.intensity > 0 else state.mode > 0
         val level = if (usesStrength && active) state.intensity else 0
-        return bytes(
-            0x55,
-            command,
-            0x00,
-            0x00,
-            if (active) state.mode.coerceAtLeast(1) else 0,
-            level,
-            0x00,
-        )
+        val mode = if (active) state.mode.coerceAtLeast(1) else 0
+        return when (frameLayout) {
+            SvakomV2FrameLayout.Standard -> bytes(0x55, command, head, 0x00, mode, level, 0x00)
+            SvakomV2FrameLayout.Rotate -> bytes(0x55, command, mode, level, 0x00, 0x00, 0x00)
+        }
     }
 
     private fun stopAll(): List<BleProtocolOperation> {
@@ -458,7 +450,14 @@ internal data class SvakomV2Function(
     val strengthDriven: Boolean = true,
     /** 某些型号在低档模式不显示强度滑杆，命令的强度字节必须固定为 0。 */
     val strengthDisabledThroughMode: Int = 0,
+    val head: Int = 0,
+    val frameLayout: SvakomV2FrameLayout = SvakomV2FrameLayout.Standard,
 )
+
+internal enum class SvakomV2FrameLayout {
+    Standard,
+    Rotate,
+}
 
 internal data class SvakomV2FunctionState(
     // 初始 mode=0 表示未启动：强度型看 intensity>0，模式型看 mode>0，两种模型下空闲都判定为停止。
@@ -479,6 +478,8 @@ internal val SvakomV2Heat = SvakomV2Function(5, "heat", "加热", 0x05, modeMax 
 // 舔（LICKING）：官方 AutoV2ModeView case 5 命令字 0x14(=20)，帧仍是通用 55 CMD 00 00 <档> <强> 00。
 // ST462A 官方 case 82 的舔为 setLicking_num(10) + setLicking_strong_max(10)，10 档 + 0..10 强度滑杆。
 internal val SvakomV2Lick = SvakomV2Function(6, "lick", "舔", 0x14, modeMax = 10)
+internal val SvakomV2Rotate = SvakomV2Function(7, "rotate", "旋转", 0x0d, modeMax = 5, frameLayout = SvakomV2FrameLayout.Rotate)
+internal val SvakomV2Occlusion = SvakomV2Function(8, "occlusion", "收缩", 0x15, modeMax = 10)
 
 private val svakomV2SuckVibrateDualControl = SvakomV2PairedDualControl(
     internalType = "constrict",
@@ -489,7 +490,16 @@ private val svakomV2SuckVibrateDualControl = SvakomV2PairedDualControl(
 const val SvakomV2HeatFunctionCode: Int = 5
 
 internal val svakomV2FunctionsByType: Map<String, SvakomV2Function> =
-    listOf(SvakomV2Stretch, SvakomV2Vibrate, SvakomV2Suck, SvakomV2Flap, SvakomV2Heat, SvakomV2Lick)
+    listOf(
+        SvakomV2Stretch,
+        SvakomV2Vibrate,
+        SvakomV2Suck,
+        SvakomV2Flap,
+        SvakomV2Heat,
+        SvakomV2Lick,
+        SvakomV2Rotate,
+        SvakomV2Occlusion,
+    )
         .associateBy { it.type }
 
 /** 按功能类型返回多功能协议的功能码；未知类型回退到伸缩。 */
@@ -524,6 +534,7 @@ internal fun svakomV2Status(
                 index = index,
                 label = function.label,
                 modeMax = function.modeMax,
+                functionCode = function.code,
             )
         },
         automatic = true,
@@ -676,6 +687,160 @@ internal object BE_YOUR_LOVER_VA617A_VIBRATE : SvakomV2Profile(
     functions = listOf(BeYourLoverVa617aVibrate),
     defaultFunction = BeYourLoverVa617aVibrate,
     writeCurrentStateOnUpdate = false,
+)
+
+private class StaticSvakomV2Profile(
+    status: BleProtocolStatus,
+    functions: List<SvakomV2Function>,
+    defaultFunction: SvakomV2Function = functions.first(),
+    writeCurrentStateOnUpdate: Boolean = false,
+    pairedDualControl: SvakomV2PairedDualControl? = null,
+) : SvakomV2Profile(
+    status = status,
+    functions = functions,
+    defaultFunction = defaultFunction,
+    writeCurrentStateOnUpdate = writeCurrentStateOnUpdate,
+    pairedDualControl = pairedDualControl,
+)
+
+private data class BeYourLoverFunctionSpec(
+    val type: String,
+    val label: String,
+    val command: Int,
+    val modeMax: Int,
+    val intensityMax: Int?,
+    val head: Int = 0,
+    val frameLayout: SvakomV2FrameLayout = SvakomV2FrameLayout.Standard,
+)
+
+private fun BeYourLoverFunctionSpec.toFunction(code: Int, labelOverride: String? = null, headOverride: Int? = null): SvakomV2Function =
+    SvakomV2Function(
+        code = code,
+        type = type,
+        label = labelOverride ?: label,
+        command = command,
+        modeMax = modeMax,
+        intensityMax = intensityMax ?: 1,
+        head = headOverride ?: head,
+        frameLayout = frameLayout,
+        strengthDriven = intensityMax != null,
+    )
+
+private fun bylSuck(mode: Int, strength: Int?) =
+    BeYourLoverFunctionSpec("constrict", "吮吸", 0x09, mode, strength)
+
+private fun bylVibrate(mode: Int, strength: Int?, head: Int = 0, label: String = "震动") =
+    BeYourLoverFunctionSpec("vibrate", label, 0x03, mode, strength, head = head)
+
+private fun bylDoubleVibrate(mode: Int, strength: Int?) =
+    listOf(
+        bylVibrate(mode, strength, head = 1, label = "震动 1"),
+        bylVibrate(mode, strength, head = 2, label = "震动 2"),
+    )
+
+private fun bylStretch(mode: Int, strength: Int?) =
+    BeYourLoverFunctionSpec("oscillate", "伸缩", 0x08, mode, strength)
+
+private fun bylFlap(mode: Int, strength: Int?) =
+    BeYourLoverFunctionSpec("flap", "拍打", 0x07, mode, strength)
+
+private fun bylRotate(mode: Int, strength: Int?) =
+    BeYourLoverFunctionSpec("rotate", "旋转", 0x0d, mode, strength, frameLayout = SvakomV2FrameLayout.Rotate)
+
+private fun bylLick(mode: Int, strength: Int?) =
+    BeYourLoverFunctionSpec("lick", "舔", 0x14, mode, strength)
+
+private fun bylOcclusion(mode: Int, strength: Int?) =
+    BeYourLoverFunctionSpec("occlusion", "收缩", 0x15, mode, strength)
+
+private fun beYourLoverProfile(model: String, vararg specs: BeYourLoverFunctionSpec): SvakomV2Profile {
+    var vibrateOrdinal = 0
+    val vibrateCount = specs.count { it.type == "vibrate" }
+    val functions = specs.mapIndexed { index, spec ->
+        val headOverride: Int?
+        val labelOverride: String?
+        if (spec.type == "vibrate" && vibrateCount > 1) {
+            vibrateOrdinal += 1
+            headOverride = spec.head.takeIf { it > 0 } ?: vibrateOrdinal
+            labelOverride = spec.label.takeUnless { it == "震动" } ?: "震动 $vibrateOrdinal"
+        } else {
+            headOverride = null
+            labelOverride = null
+        }
+        spec.toFunction(code = index + 1, labelOverride = labelOverride, headOverride = headOverride)
+    }
+    return StaticSvakomV2Profile(
+        status = svakomV2Status(
+            id = "beyourlover_${model.lowercase()}",
+            displayName = "礼物猫 $model",
+            functions = functions,
+        ),
+        functions = functions,
+        defaultFunction = functions.first(),
+        pairedDualControl = if (functions.any { it.type == "constrict" } && functions.any { it.type == "vibrate" }) {
+            svakomV2SuckVibrateDualControl
+        } else {
+            null
+        },
+    )
+}
+
+private fun beYourLoverProfile(model: String, specs: List<BeYourLoverFunctionSpec>): SvakomV2Profile =
+    beYourLoverProfile(model, *specs.toTypedArray())
+
+internal val BeYourLoverProfiles: Map<Int, SvakomV2Profile> = mapOf(
+    26 to beYourLoverProfile("CX492B", bylSuck(5, 10), bylVibrate(11, 10)),
+    50 to beYourLoverProfile("SA251B_S", bylSuck(8, 10)),
+    51 to beYourLoverProfile("SA251B_V", bylVibrate(9, 10)),
+    58 to beYourLoverProfile("CA594B", bylFlap(5, 10), bylVibrate(11, 10)),
+    62 to BE_YOUR_LOVER_VA617A_VIBRATE,
+    63 to BE_YOUR_LOVER_VA617A_SUCK,
+    65 to beYourLoverProfile("MW35", bylSuck(5, null), bylVibrate(5, 10)),
+    72 to beYourLoverProfile("TX640A", bylSuck(6, null), bylVibrate(10, null), bylFlap(5, null)),
+    78 to beYourLoverProfile("TX752B", bylSuck(10, 5), bylVibrate(10, null)),
+    83 to beYourLoverProfile("ST629B", bylRotate(5, 10), bylVibrate(11, 10)),
+    86 to beYourLoverProfile("VX737B", bylDoubleVibrate(12, 10)),
+    91 to beYourLoverProfile("CL279B_V", bylStretch(10, null), bylVibrate(10, 10)),
+    92 to beYourLoverProfile("CL279B_S", bylSuck(10, 10)),
+    95 to beYourLoverProfile("MW36B", bylStretch(8, 5), bylVibrate(11, 10)),
+    96 to beYourLoverProfile("MW36A", bylSuck(8, null), bylVibrate(11, 10)),
+    97 to beYourLoverProfile("VP753A", bylStretch(5, null), bylVibrate(8, null)),
+    103 to beYourLoverProfile("SF030C", bylRotate(5, 10), bylSuck(10, null)),
+    105 to beYourLoverProfile("QL169C_V", bylStretch(7, null), bylVibrate(10, 10)),
+    106 to beYourLoverProfile("QL169C_F", bylFlap(7, null)),
+    118 to beYourLoverProfile("VX736A", listOf(bylOcclusion(10, 10), bylSuck(3, 10)) + bylDoubleVibrate(10, 10)),
+    266 to beYourLoverProfile("VX586A", bylSuck(5, 5)),
+    267 to beYourLoverProfile("VX688A_S", bylSuck(5, 5)),
+    268 to beYourLoverProfile("VX586D", bylSuck(8, null)),
+    274 to beYourLoverProfile("TL278B_V", bylStretch(7, null), bylVibrate(10, 10)),
+    275 to beYourLoverProfile("TL278B_S", bylSuck(5, 10)),
+    309 to beYourLoverProfile("TL278J", bylSuck(5, 10)),
+    314 to beYourLoverProfile("VX719A", bylSuck(10, 10), bylStretch(6, 10), bylVibrate(10, 10)),
+    316 to beYourLoverProfile("CA755B_V", bylVibrate(8, 10), bylVibrate(8, 10)),
+    317 to beYourLoverProfile("CA755B_V_2", bylVibrate(8, 10)),
+    323 to beYourLoverProfile("S106C", bylSuck(6, null), bylFlap(6, null), bylStretch(6, null)),
+    335 to beYourLoverProfile("VX723A", bylLick(10, 10), bylSuck(3, null), bylVibrate(10, 10)),
+    337 to beYourLoverProfile("VP757A", bylStretch(6, null), bylVibrate(8, null)),
+    338 to beYourLoverProfile("MW655A", bylSuck(8, null), bylVibrate(11, 10)),
+    339 to beYourLoverProfile("MW520A", bylSuck(8, null), bylVibrate(11, 10)),
+    340 to beYourLoverProfile("MW820A", bylSuck(8, null), bylVibrate(11, 10)),
+    341 to beYourLoverProfile("MW655B", bylStretch(8, 5), bylVibrate(11, 10)),
+    342 to beYourLoverProfile("MW520B", bylStretch(8, 5), bylVibrate(11, 10)),
+    343 to beYourLoverProfile("MW820B", bylStretch(8, 5), bylVibrate(11, 10)),
+    356 to beYourLoverProfile("VX688A_V", bylVibrate(5, 5)),
+    361 to beYourLoverProfile("HX029A", bylSuck(10, 10)),
+    362 to beYourLoverProfile("TX218A", bylSuck(7, 10), bylVibrate(6, 10)),
+    363 to beYourLoverProfile("VF721A", bylSuck(5, null), bylStretch(5, null), bylVibrate(8, null)),
+    367 to beYourLoverProfile("SG02A", bylVibrate(10, 10)),
+    374 to beYourLoverProfile("VX219A", bylVibrate(10, 10)),
+    376 to beYourLoverProfile("VX586C", bylSuck(8, null)),
+    378 to beYourLoverProfile("VX760A_V", bylVibrate(10, null)),
+    379 to beYourLoverProfile("VX760A_S", bylSuck(10, null)),
+    380 to beYourLoverProfile("VA733B", bylStretch(10, 10), bylVibrate(10, 10)),
+    381 to beYourLoverProfile("VP625B", bylStretch(5, 10), bylVibrate(10, 10)),
+    382 to beYourLoverProfile("VX737C", bylDoubleVibrate(12, 10)),
+    383 to beYourLoverProfile("S137P", bylVibrate(10, 10), bylVibrate(10, 10)),
+    392 to beYourLoverProfile("VX607P", bylSuck(10, 10), bylVibrate(10, 10)),
 )
 
 internal fun Int?.svakomV2Profile(): SvakomV2Profile =

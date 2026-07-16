@@ -104,7 +104,7 @@ internal fun BleProtocolStatus.independentFunctionCode(feature: BleProtocolFeatu
         "mesanel_generic" -> mesanelFunctionCodeForFeature(feature)
         SosexyBoboBeiProtocol.status.id -> feature.index + 1
         SistalkPopocatProtocol.status.id -> feature.index + 1
-        else -> svakomV2FunctionCode(feature.type)
+        else -> feature.functionCode.takeIf { it > 0 } ?: svakomV2FunctionCode(feature.type)
     }
 
 internal fun BleProtocolStatus.independentFunctionModeMax(feature: BleProtocolFeature): Int =

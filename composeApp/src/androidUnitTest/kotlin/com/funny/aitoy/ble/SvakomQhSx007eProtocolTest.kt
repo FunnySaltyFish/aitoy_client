@@ -162,6 +162,48 @@ class SvakomQhSx007eProtocolTest {
     }
 
     @Test
+    fun beYourLoverVx736aResolvesOfficialMultiFunctionProfile() {
+        val protocol = BleProtocolRegistry.resolveNative(beYourLoverFingerprint(productCode = 118, name = "VX736A"))
+            ?: error("VX736A protocol not resolved")
+
+        assertEquals("beyourlover_vx736a", protocol.status.id)
+        assertEquals(listOf("收缩", "吮吸", "震动 1", "震动 2"), protocol.status.channelNames)
+        assertEquals(10, protocol.status.modeMax)
+        assertEquals(4, protocol.status.features.size)
+
+        val occlusion = protocol.commandsFor(ToyControlAction.Combined(mode = 1 * 100 + 10, intensity = 10))
+        assertEquals("551500000A0A00", assertIs<BleProtocolOperation.Write>(occlusion[0]).bytes.hexUpper())
+
+        val secondVibrate = protocol.commandsFor(ToyControlAction.Combined(mode = 4 * 100 + 10, intensity = 10))
+        assertEquals("550302000A0A00", assertIs<BleProtocolOperation.Write>(secondVibrate[0]).bytes.hexUpper())
+    }
+
+    @Test
+    fun beYourLoverSt629bRotateUsesOfficialRotateFrameLayout() {
+        val protocol = BleProtocolRegistry.resolveNative(beYourLoverFingerprint(productCode = 83, name = "ST629B"))
+            ?: error("ST629B protocol not resolved")
+
+        assertEquals("beyourlover_st629b", protocol.status.id)
+        assertEquals(listOf("旋转", "震动"), protocol.status.channelNames)
+
+        val rotate = protocol.commandsFor(ToyControlAction.Combined(mode = 1 * 100 + 5, intensity = 10))
+        assertEquals("550D050A000000", assertIs<BleProtocolOperation.Write>(rotate[0]).bytes.hexUpper())
+    }
+
+    @Test
+    fun beYourLoverTx640aFunctionsWithoutStrengthKeepLevelZero() {
+        val protocol = BleProtocolRegistry.resolveNative(beYourLoverFingerprint(productCode = 72, name = "TX640A"))
+            ?: error("TX640A protocol not resolved")
+
+        assertEquals("beyourlover_tx640a", protocol.status.id)
+        assertEquals(listOf("吮吸", "震动", "拍打"), protocol.status.channelNames)
+        assertEquals(1, protocol.status.features.first { it.type == "vibrate" }.max)
+
+        val vibrate = protocol.commandsFor(ToyControlAction.Combined(mode = 2 * 100 + 10, intensity = 10))
+        assertEquals("550300000A0000", assertIs<BleProtocolOperation.Write>(vibrate[0]).bytes.hexUpper())
+    }
+
+    @Test
     fun st462aStopSendsAllThreeChannelStopsAndGlobalFallback() {
         val protocol = BleProtocolRegistry.resolveNative(st462aFingerprint())
             ?: error("ST462A protocol not resolved")
@@ -331,6 +373,22 @@ class SvakomQhSx007eProtocolTest {
         serviceUuids = setOf(SERVICE_UUID),
         characteristicUuids = setOf(WRITE_UUID, NOTIFY_UUID),
     )
+
+    private fun beYourLoverFingerprint(
+        productCode: Int,
+        name: String,
+    ) = BleGattFingerprint(
+        name = name,
+        address = "FF:25:06:B7:61:D5",
+        manufacturerData = "0x32:53 56 41 02 FF 32 25 06 B7 61 D5 FF 32 ${productCode.v2ProductCodeHex()} 00 00 BB",
+        scanRecordHex = "",
+        serviceUuids = setOf(SERVICE_UUID),
+        characteristicUuids = setOf(WRITE_UUID, NOTIFY_UUID),
+    )
+
+    private fun Int.v2ProductCodeHex(): String =
+        listOf((this ushr 16) and 0xff, (this ushr 8) and 0xff, this and 0xff)
+            .joinToString(" ") { "%02X".format(it) }
 
     private fun ByteArray.hexUpper(): String =
         joinToString("") { byte -> "%02X".format(byte.toInt() and 0xff) }

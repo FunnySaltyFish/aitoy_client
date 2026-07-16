@@ -136,6 +136,7 @@ data class BleProtocolFeature(
     val index: Int,
     val label: String = "",
     val modeMax: Int = 0,
+    val functionCode: Int = 0,
 )
 
 data class ProtocolAttemptStatus(
