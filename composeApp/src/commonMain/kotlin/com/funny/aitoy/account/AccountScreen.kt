@@ -123,17 +123,18 @@ internal fun AccountScreen() {
         billingVm.syncQuantity()
     }
 
-    Box(
+    Column(
         modifier = Modifier.fillMaxSize(),
     ) {
         LazyColumn(
             modifier = Modifier
-                .fillMaxSize()
+                .weight(1f)
                 .statusBarsPadding()
                 .padding(horizontal = 18.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
-            contentPadding = PaddingValues(bottom = if (selectedProduct != null) 148.dp else 24.dp),
+            contentPadding = PaddingValues(bottom = 14.dp),
         ) {
+            item { AccountPreviewNotice() }
             item {
                 AvatarPickerAndCropper(
                     vm = homeVm,
@@ -180,7 +181,40 @@ internal fun AccountScreen() {
                 quantityCap = quantityCap,
                 agreementChecked = billingVm.agreementChecked,
                 onAgreementChanged = billingVm::updateAgreementChecked,
-                modifier = Modifier.align(Alignment.BottomCenter),
+            )
+        }
+    }
+}
+
+@Composable
+private fun AccountPreviewNotice() {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(Brush.linearGradient(listOf(RoseDeep.copy(alpha = 0.34f), Ink.copy(alpha = 0.82f))))
+            .border(1.dp, Honey.copy(alpha = 0.36f), RoundedCornerShape(14.dp))
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = Icons.Outlined.EventAvailable,
+            contentDescription = null,
+            tint = Honey,
+            modifier = Modifier.size(22.dp),
+        )
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = "账号页面开发中",
+                color = TextMain,
+                fontWeight = FontWeight.Black,
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                text = "当前内容暂不可使用，仅供预览。目前并未收费，可放心使用。",
+                color = TextSoft,
+                style = MaterialTheme.typography.bodyMedium,
             )
         }
     }

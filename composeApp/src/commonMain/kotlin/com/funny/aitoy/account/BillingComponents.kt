@@ -42,6 +42,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -71,7 +72,7 @@ internal fun BillingPanel(
     onMonthsChanged: (Int) -> Unit,
     onQuantityChanged: (Int) -> Unit,
 ) {
-    Panel(title = "会员与加量", action = "用完再买") {
+    Panel(title = "", action = "") {
         ModeTabs(purchaseMode, onModeChanged)
         Spacer(Modifier.height(14.dp))
         AnimatedContent(targetState = purchaseMode, label = "billing-mode") { mode ->
@@ -92,9 +93,9 @@ internal fun BillingPanel(
                         MonthSelector(selectedMonths, onMonthsChanged)
                     }
                     PurchaseMode.Addon -> {
-                        val validDays = addonProducts.firstOrNull()?.validDays ?: 180
-                        Text("有效期 $validDays 天", color = TextSoft, style = MaterialTheme.typography.labelMedium)
-                        Spacer(Modifier.height(10.dp))
+                        val validDays = remember(addonProducts) {
+                            addonProducts.firstOrNull()?.validDays ?: 180
+                        }
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             items(addonProducts) { product ->
                                 AddonPackCard(
@@ -105,6 +106,8 @@ internal fun BillingPanel(
                                 )
                             }
                         }
+                        Spacer(Modifier.height(10.dp))
+                        Text("有效期 $validDays 天", color = TextSoft, style = MaterialTheme.typography.labelMedium)
                         Spacer(Modifier.height(12.dp))
                         QuantitySelector(
                             quantity = selectedQuantity,
@@ -132,11 +135,13 @@ internal fun Panel(title: String, action: String, content: @Composable ColumnSco
             .border(1.dp, Line, RoundedCornerShape(16.dp))
             .padding(16.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(title, color = TextMain, fontWeight = FontWeight.Black, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
-            Text(action, color = TextSoft, style = MaterialTheme.typography.labelMedium)
+        if (title.isNotEmpty() && action.isNotEmpty()) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(title, color = TextMain, fontWeight = FontWeight.Black, style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
+                Text(action, color = TextSoft, style = MaterialTheme.typography.labelMedium)
+            }
+            Spacer(Modifier.height(12.dp))
         }
-        Spacer(Modifier.height(12.dp))
         content()
     }
 }
