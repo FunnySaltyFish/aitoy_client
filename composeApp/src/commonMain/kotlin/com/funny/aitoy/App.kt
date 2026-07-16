@@ -83,7 +83,11 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation3.runtime.NavKey
+import com.funny.aitoy.account.AccountRedeemCodeScreen
 import com.funny.aitoy.account.AccountScreen
+import com.funny.aitoy.account.AccountUsageDetailScreen
+import com.funny.aitoy.account.AccountViewModel
+import com.funny.aitoy.account.BridgeAccountActions
 import com.funny.aitoy.ble.BleBroadcastProtocolRegistry
 import com.funny.aitoy.ble.BleConnectionState
 import com.funny.aitoy.ble.BleProtocolStatus
@@ -115,7 +119,7 @@ internal val Line = Color(0xFF41323D)
 internal val Danger = Color(0xFFFF5E76)
 
 @Serializable
-private sealed interface AiToyRoute : NavKey {
+internal sealed interface AiToyRoute : NavKey {
     @Serializable
     data object Device : AiToyRoute
 
@@ -124,11 +128,18 @@ private sealed interface AiToyRoute : NavKey {
 
     @Serializable
     data object Account : AiToyRoute
+
+    @Serializable
+    data object AccountUsage : AiToyRoute
+
+    @Serializable
+    data object AccountRedeem : AiToyRoute
 }
 
 @Composable
 fun App() {
     val vm = viewModel { BridgeViewModel() }
+    val accountVm = viewModel { AccountViewModel(BridgeAccountActions(vm)) }
     val navigator = rememberNavigator(AiToyRoute.Device)
     val currentRoute = navigator.currentRoute
     LaunchedEffect(Unit) {
@@ -136,8 +147,8 @@ fun App() {
             when (target) {
                 AppDeepLinkTarget.Pay -> navigator.replaceTop(AiToyRoute.Account)
                 is AppDeepLinkTarget.Redeem -> {
-                    vm.redeemCodeDraft = target.code
-                    navigator.replaceTop(AiToyRoute.Account)
+                    accountVm.redeemVm.updateCode(target.code)
+                    navigator.replaceTop(AiToyRoute.AccountRedeem)
                 }
             }
         }
@@ -191,7 +202,9 @@ fun App() {
                     when (currentRoute) {
                         AiToyRoute.Device -> DeviceHome(vm)
                         AiToyRoute.Guide -> McpGuideScreen(vm)
-                        AiToyRoute.Account -> AccountScreen(vm)
+                        AiToyRoute.Account -> AccountScreen(accountVm)
+                        AiToyRoute.AccountUsage -> AccountUsageDetailScreen(accountVm.usageVm)
+                        AiToyRoute.AccountRedeem -> AccountRedeemCodeScreen(accountVm.redeemVm)
                     }
                 }
                 UpdateDialog(vm)
@@ -209,7 +222,7 @@ private fun NavigationItem(
     icon: ImageVector,
     label: String,
 ) {
-    val selected = currentRoute == route
+    val selected = currentRoute == route || (route == AiToyRoute.Account && currentRoute.isAccountRoute())
     Column(
         modifier = modifier
             .clickable {
@@ -254,6 +267,9 @@ private fun RowScope.NavigationItem(
 
 private val Navigator.currentRoute: AiToyRoute
     get() = backStack.lastOrNull() as? AiToyRoute ?: AiToyRoute.Device
+
+private fun AiToyRoute.isAccountRoute(): Boolean =
+    this == AiToyRoute.Account || this == AiToyRoute.AccountUsage || this == AiToyRoute.AccountRedeem
 
 @Composable
 private fun McpGuideScreen(vm: BridgeViewModel) {

@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
@@ -42,8 +43,6 @@ import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.outlined.Timer
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -54,7 +53,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -81,7 +79,8 @@ import com.attafitamim.krop.filekit.ImageFormat
 import com.attafitamim.krop.filekit.encodeToByteArray
 import com.attafitamim.krop.filekit.toImageSrc
 import com.attafitamim.krop.ui.ImageCropperDialog
-import com.funny.aitoy.BridgeViewModel
+import com.funny.aitoy.AiToyRoute
+import com.funny.aitoy.core.navigation.LocalNavigator
 import com.funny.aitoy.core.utils.nowMs
 import com.funny.aitoy.network.api.service.Product
 import io.github.vinceglb.filekit.dialogs.FileKitType
@@ -92,45 +91,23 @@ import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.painterResource
 
 @Composable
-internal fun AccountScreen(vm: BridgeViewModel) {
-    var showUsageDetail by remember { mutableStateOf(false) }
-    val products = vm.memberProducts.ifEmpty { defaultProducts() }
+internal fun AccountScreen(vm: AccountViewModel) {
+    val navigator = LocalNavigator.current
+    val homeVm = vm.homeVm
+    val billingVm = vm.billingVm
+    val products = homeVm.products
     val monthlyProducts = products.filter { it.type == "monthly" }
     val addonProducts = products.filter { it.type == "addon" }
-    var purchaseMode by remember { mutableStateOf(PurchaseMode.Monthly) }
-    var selectedMonthlyId by remember { mutableStateOf("") }
-    var selectedAddonId by remember { mutableStateOf("") }
-    var selectedMonths by remember { mutableIntStateOf(1) }
-    var selectedQuantity by remember { mutableIntStateOf(1) }
-    var agreementChecked by remember { mutableStateOf(false) }
     var launchAvatarPicker by remember { mutableStateOf<() -> Unit>({}) }
 
-    LaunchedEffect(products) {
-        if (selectedMonthlyId.isBlank() || monthlyProducts.none { it.id == selectedMonthlyId }) {
-            selectedMonthlyId = monthlyProducts.firstOrNull { it.highlight }?.id
-                ?: monthlyProducts.firstOrNull { it.purchasable }?.id
-                        ?: monthlyProducts.firstOrNull()?.id.orEmpty()
-        }
-        if (selectedAddonId.isBlank() || addonProducts.none { it.id == selectedAddonId }) {
-            selectedAddonId = addonProducts.firstOrNull { it.highlight }?.id
-                ?: addonProducts.firstOrNull()?.id.orEmpty()
-        }
+    LaunchedEffect(monthlyProducts, addonProducts) {
+        billingVm.syncProducts(monthlyProducts, addonProducts)
     }
 
-    if (showUsageDetail) {
-        Box(Modifier.fillMaxSize()) {
-            UsageDetailScreen(vm = vm, onBack = { showUsageDetail = false })
-        }
-        return
-    }
-
-    val selectedProduct = when (purchaseMode) {
-        PurchaseMode.Monthly -> monthlyProducts.firstOrNull { it.id == selectedMonthlyId }
-        PurchaseMode.Addon -> addonProducts.firstOrNull { it.id == selectedAddonId }
-    } ?: products.firstOrNull()
-    val quantityCap = selectedProduct?.let { quantityCap(it, vm.accountUser.entitlement) } ?: 1
+    val selectedProduct = billingVm.selectedProduct(monthlyProducts, addonProducts)
+    val quantityCap = selectedProduct?.let { quantityCap(it, billingVm.user.entitlement) } ?: 1
     LaunchedEffect(selectedProduct?.id, quantityCap) {
-        selectedQuantity = selectedQuantity.coerceIn(1, quantityCap.coerceAtLeast(1))
+        billingVm.syncQuantity(quantityCap)
     }
 
     Box(
@@ -142,58 +119,54 @@ internal fun AccountScreen(vm: BridgeViewModel) {
                 .statusBarsPadding()
                 .padding(horizontal = 18.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
+            contentPadding = PaddingValues(bottom = if (selectedProduct != null) 148.dp else 24.dp),
         ) {
             item {
                 AvatarPickerAndCropper(
-                    vm = vm,
+                    vm = homeVm,
                     onLauncherReady = { launchAvatarPicker = it },
                 )
-                AccountHeader(vm = vm, onAvatarClick = launchAvatarPicker)
+                AccountHeader(
+                    vm = homeVm,
+                    onAvatarClick = launchAvatarPicker,
+                    onRedeemClick = { navigator.navigate(AiToyRoute.AccountRedeem) },
+                )
             }
             item { SectionTitle("控制额度", "连接、待机和停止不消耗额度") }
-            item { UsageSummaryCard(vm = vm, onDetailClick = { showUsageDetail = true }) }
+            item { UsageSummaryCard(vm = homeVm, onDetailClick = { navigator.navigate(AiToyRoute.AccountUsage) }) }
             item { CampaignStrip(products = products) }
             item { SectionTitle("会员与加量", "按需要选择，不用提前囤积") }
             item {
                 BillingPanel(
-                    vm = vm,
+                    vm = billingVm,
                     monthlyProducts = monthlyProducts,
                     addonProducts = addonProducts,
-                    purchaseMode = purchaseMode,
-                    selectedMonthlyId = selectedMonthlyId,
-                    selectedAddonId = selectedAddonId,
-                    selectedMonths = selectedMonths,
-                    selectedQuantity = selectedQuantity,
+                    purchaseMode = billingVm.purchaseMode,
+                    selectedMonthlyId = billingVm.selectedMonthlyId,
+                    selectedAddonId = billingVm.selectedAddonId,
+                    selectedMonths = billingVm.selectedMonths,
+                    selectedQuantity = billingVm.selectedQuantity,
                     quantityCap = quantityCap,
-                    onModeChanged = { purchaseMode = it },
-                    onMonthlySelected = {
-                        purchaseMode = PurchaseMode.Monthly
-                        selectedMonthlyId = it
-                    },
-                    onAddonSelected = {
-                        purchaseMode = PurchaseMode.Addon
-                        selectedAddonId = it
-                    },
-                    onMonthsChanged = { selectedMonths = it },
-                    onQuantityChanged = { selectedQuantity = it },
+                    onModeChanged = billingVm::selectMode,
+                    onMonthlySelected = billingVm::selectMonthly,
+                    onAddonSelected = billingVm::selectAddon,
+                    onMonthsChanged = billingVm::setMonths,
+                    onQuantityChanged = { billingVm.setQuantity(it, quantityCap) },
                 )
             }
-            item { SectionTitle("兑换与说明", "活动额度会自动加入当前账号") }
-            item { RedeemCodePanel(vm = vm) }
             item { ResponsibleNotice() }
-            item { Spacer(Modifier.height(132.dp)) }
         }
 
         if (selectedProduct != null) {
             CheckoutBar(
-                vm = vm,
+                vm = billingVm,
                 product = selectedProduct,
-                mode = purchaseMode,
-                months = selectedMonths,
-                quantity = selectedQuantity,
+                mode = billingVm.purchaseMode,
+                months = billingVm.selectedMonths,
+                quantity = billingVm.selectedQuantity,
                 quantityCap = quantityCap,
-                agreementChecked = agreementChecked,
-                onAgreementChanged = { agreementChecked = it },
+                agreementChecked = billingVm.agreementChecked,
+                onAgreementChanged = billingVm::updateAgreementChecked,
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
         }
@@ -201,7 +174,7 @@ internal fun AccountScreen(vm: BridgeViewModel) {
 }
 
 @Composable
-private fun AvatarPickerAndCropper(vm: BridgeViewModel, onLauncherReady: (() -> Unit) -> Unit) {
+private fun AvatarPickerAndCropper(vm: AccountHomeViewModel, onLauncherReady: (() -> Unit) -> Unit) {
     val scope = rememberCoroutineScope()
     val imageCropper = rememberImageCropper()
     val picker = rememberFilePickerLauncher(type = FileKitType.Image) { image ->
@@ -209,8 +182,8 @@ private fun AvatarPickerAndCropper(vm: BridgeViewModel, onLauncherReady: (() -> 
         scope.launch {
             when (val result = imageCropper.crop(image.toImageSrc())) {
                 CropResult.Cancelled -> Unit
-                CropError.LoadingError -> vm.showAccountMessage("图片读取失败，请换一张再试。")
-                CropError.SavingError -> vm.showAccountMessage("图片处理失败，请换一张再试。")
+                CropError.LoadingError -> vm.showMessage("图片读取失败，请换一张再试。")
+                CropError.SavingError -> vm.showMessage("图片处理失败，请换一张再试。")
                 is CropResult.Success -> {
                     val bytes = result.bitmap.encodeToByteArray(ImageFormat.JPEG, quality = 88)
                     vm.uploadAvatar(image.name.ifBlank { "avatar.jpg" }, bytes)
@@ -237,37 +210,12 @@ private fun AvatarPickerAndCropper(vm: BridgeViewModel, onLauncherReady: (() -> 
 }
 
 @Composable
-private fun RedeemCodePanel(vm: BridgeViewModel) {
-    Panel(title = "兑换码", action = "朋友赠送或活动发放") {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            OutlinedTextField(
-                value = vm.redeemCodeDraft,
-                onValueChange = { vm.redeemCodeDraft = it.uppercase().filter { ch -> ch.isLetterOrDigit() }.take(32) },
-                singleLine = true,
-                placeholder = { Text("输入兑换码", color = TextSoft) },
-                modifier = Modifier.weight(1f),
-            )
-            Spacer(Modifier.width(10.dp))
-            Button(
-                onClick = vm::redeemCode,
-                enabled = !vm.accountLoading && vm.redeemCodeDraft.isNotBlank(),
-                colors = ButtonDefaults.buttonColors(containerColor = Honey, contentColor = Ink, disabledContainerColor = Line),
-                shape = RoundedCornerShape(50),
-            ) {
-                Text("兑换", fontWeight = FontWeight.Black)
-            }
-        }
-        Spacer(Modifier.height(8.dp))
-        Text("兑换成功后，额度会自动加入当前账号。", color = TextSoft, style = MaterialTheme.typography.bodyMedium)
-    }
-}
-
-@Composable
-private fun AccountHeader(vm: BridgeViewModel, onAvatarClick: () -> Unit) {
-    val user = vm.accountUser
+private fun AccountHeader(
+    vm: AccountHomeViewModel,
+    onAvatarClick: () -> Unit,
+    onRedeemClick: () -> Unit,
+) {
+    val user = vm.user
     var editingName by remember(user.uid) { mutableStateOf(false) }
     var nameDraft by remember(user.displayName, user.username) {
         mutableStateOf(displayName(user.displayName, user.username))
@@ -322,8 +270,7 @@ private fun AccountHeader(vm: BridgeViewModel, onAvatarClick: () -> Unit) {
                                 onValueChange = { nameDraft = it.take(12) },
                                 singleLine = true,
                                 keyboardActions = KeyboardActions(onDone = {
-                                    vm.profileNameDraft = nameDraft.trim()
-                                    vm.saveProfile()
+                                    vm.saveProfile(nameDraft)
                                     editingName = false
                                 }),
                                 modifier = Modifier.weight(1f),
@@ -333,8 +280,7 @@ private fun AccountHeader(vm: BridgeViewModel, onAvatarClick: () -> Unit) {
                                 ),
                             )
                             IconButton(onClick = {
-                                vm.profileNameDraft = nameDraft.trim()
-                                vm.saveProfile()
+                                vm.saveProfile(nameDraft)
                                 editingName = false
                             }) {
                                 Icon(Icons.Outlined.Done, null, tint = Mint)
@@ -373,24 +319,24 @@ private fun AccountHeader(vm: BridgeViewModel, onAvatarClick: () -> Unit) {
                         style = MaterialTheme.typography.labelMedium,
                     )
                 }
-                IconButton(onClick = vm::refreshAccount, enabled = !vm.accountLoading) {
+                IconButton(onClick = vm::refreshAccount, enabled = !vm.loading) {
                     Icon(Icons.Outlined.Refresh, null, tint = TextSoft)
                 }
             }
-            AccountHeroStats(vm)
+            AccountHeroStats(vm, onRedeemClick)
         }
     }
-    if (vm.accountLoading) {
+    if (vm.loading) {
         LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = Rose)
     }
-    if (vm.accountMessage.isNotBlank()) {
-        Text(vm.accountMessage, color = Honey, style = MaterialTheme.typography.bodyMedium)
+    if (vm.message.isNotBlank()) {
+        Text(vm.message, color = Honey, style = MaterialTheme.typography.bodyMedium)
     }
 }
 
 @Composable
-private fun AccountHeroStats(vm: BridgeViewModel) {
-    val ent = vm.accountUser.entitlement
+private fun AccountHeroStats(vm: AccountHomeViewModel, onRedeemClick: () -> Unit) {
+    val ent = vm.user.entitlement
     FlowRow(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -408,15 +354,21 @@ private fun AccountHeroStats(vm: BridgeViewModel) {
             icon = { Icon(Icons.Outlined.Shield, null, tint = Honey, modifier = Modifier.size(16.dp)) },
             label = "停止不消耗",
         )
+        HeroPill(
+            icon = { Icon(Icons.Outlined.CardGiftcard, null, tint = Mint, modifier = Modifier.size(16.dp)) },
+            label = "兑换码",
+            onClick = onRedeemClick,
+        )
     }
 }
 
 @Composable
-private fun HeroPill(icon: @Composable () -> Unit, label: String) {
+private fun HeroPill(icon: @Composable () -> Unit, label: String, onClick: (() -> Unit)? = null) {
     Row(
         modifier = Modifier
             .background(Ink.copy(alpha = 0.58f), RoundedCornerShape(50))
             .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(50))
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(horizontal = 10.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -462,8 +414,8 @@ private fun AvatarBox(name: String, avatarUrl: String, onClick: () -> Unit) {
 }
 
 @Composable
-private fun UsageSummaryCard(vm: BridgeViewModel, onDetailClick: () -> Unit) {
-    val ent = vm.accountUser.entitlement
+private fun UsageSummaryCard(vm: AccountHomeViewModel, onDetailClick: () -> Unit) {
+    val ent = vm.user.entitlement
     val total = (ent.aiQuotaSecondsMonthly + ent.aiAddonSecondsRemaining).coerceAtLeast(1)
     val remaining = totalRemainingSeconds(ent)
     val used = (total - remaining).coerceAtLeast(0)
@@ -623,83 +575,5 @@ private fun TimeCell(value: Int, label: String) {
             modifier = Modifier.background(Ink.copy(alpha = 0.62f), RoundedCornerShape(7.dp)).padding(horizontal = 6.dp, vertical = 4.dp),
         )
         Text(label, color = TextSoft, style = MaterialTheme.typography.labelSmall)
-    }
-}
-
-@Composable
-private fun UsageDetailScreen(vm: BridgeViewModel, onBack: () -> Unit) {
-    val ent = vm.accountUser.entitlement
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .statusBarsPadding()
-            .padding(horizontal = 18.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        item {
-            Row(modifier = Modifier.padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                OutlinedButton(onClick = onBack, shape = RoundedCornerShape(50)) { Text("返回") }
-                Spacer(Modifier.width(12.dp))
-                Text("控制明细", color = TextMain, fontWeight = FontWeight.Black, style = MaterialTheme.typography.headlineSmall)
-            }
-        }
-        item {
-            Panel(title = "额度汇总", action = "按实际控制结算") {
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    SummaryMetric(
-                        "本月剩余",
-                        formatMinutes(ent.aiQuotaSecondsRemaining),
-                        Modifier.weight(1f)
-                    )
-                    SummaryMetric(
-                        "永久包",
-                        formatMinutes(ent.aiAddonSecondsRemaining),
-                        Modifier.weight(1f)
-                    )
-                    SummaryMetric(
-                        "总可用",
-                        formatMinutes(totalRemainingSeconds(ent)),
-                        Modifier.weight(1f)
-                    )
-                }
-                Spacer(Modifier.height(10.dp))
-                Text(
-                    "明细页后续会展示每日汇总、每次 AI 控制会话和结算分钟数。",
-                    color = TextSoft,
-                    style = MaterialTheme.typography.bodyMedium
-                )
-            }
-        }
-        item {
-            Panel(title = "记录", action = "可筛选") {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf("全部", "今天", "本周").forEachIndexed { index, text ->
-                        SelectorChip(text, index == 0) {}
-                    }
-                }
-                Spacer(Modifier.height(12.dp))
-                Column(
-                    modifier = Modifier.fillMaxWidth().background(Color.White.copy(alpha = 0.045f), RoundedCornerShape(14.dp)).padding(16.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    Text("暂无可查看的控制记录", color = TextMain, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(6.dp))
-                    Text("产生 AI 控制消耗后，会在这里按天和会话展示。", color = TextSoft, style = MaterialTheme.typography.bodyMedium)
-                }
-            }
-        }
-        item { Spacer(Modifier.height(24.dp)) }
-    }
-}
-
-@Composable
-private fun SummaryMetric(label: String, value: String, modifier: Modifier = Modifier) {
-    Column(
-        modifier = modifier
-            .background(Color.White.copy(alpha = 0.055f), RoundedCornerShape(12.dp))
-            .padding(12.dp),
-    ) {
-        Text(label, color = TextSoft, style = MaterialTheme.typography.labelMedium)
-        Text(value, color = TextMain, fontWeight = FontWeight.Black, maxLines = 1)
     }
 }

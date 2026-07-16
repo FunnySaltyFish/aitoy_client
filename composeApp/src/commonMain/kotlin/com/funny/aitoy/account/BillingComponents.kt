@@ -1,5 +1,6 @@
 package com.funny.aitoy.account
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -50,13 +51,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
-import com.funny.aitoy.BridgeViewModel
 import com.funny.aitoy.core.model.Entitlement
 import com.funny.aitoy.network.api.service.Product
 
 @Composable
 internal fun BillingPanel(
-    vm: BridgeViewModel,
+    vm: AccountBillingViewModel,
     monthlyProducts: List<Product>,
     addonProducts: List<Product>,
     purchaseMode: PurchaseMode,
@@ -71,48 +71,51 @@ internal fun BillingPanel(
     onMonthsChanged: (Int) -> Unit,
     onQuantityChanged: (Int) -> Unit,
 ) {
-    Panel(title = "会员与加量", action = "理性消费，用完再买") {
+    Panel(title = "会员与加量", action = "用完再买") {
         ModeTabs(purchaseMode, onModeChanged)
         Spacer(Modifier.height(14.dp))
-        Text("月度会员计划", color = TextMain, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleLarge)
-        Spacer(Modifier.height(10.dp))
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            items(monthlyProducts) { product ->
-                MonthlyPlanCard(
-                    product = product,
-                    selected = purchaseMode == PurchaseMode.Monthly && product.id == selectedMonthlyId,
-                    currentLevel = vm.accountUser.entitlement.membershipLevel,
-                    onClick = { onMonthlySelected(product.id) },
-                )
+        AnimatedContent(targetState = purchaseMode, label = "billing-mode") { mode ->
+            Column {
+                when (mode) {
+                    PurchaseMode.Monthly -> {
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            items(monthlyProducts) { product ->
+                                MonthlyPlanCard(
+                                    product = product,
+                                    selected = product.id == selectedMonthlyId,
+                                    currentLevel = vm.user.entitlement.membershipLevel,
+                                    onClick = { onMonthlySelected(product.id) },
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(12.dp))
+                        MonthSelector(selectedMonths, onMonthsChanged)
+                    }
+                    PurchaseMode.Addon -> {
+                        val validDays = addonProducts.firstOrNull()?.validDays ?: 180
+                        Text("有效期 $validDays 天", color = TextSoft, style = MaterialTheme.typography.labelMedium)
+                        Spacer(Modifier.height(10.dp))
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            items(addonProducts) { product ->
+                                AddonPackCard(
+                                    product = product,
+                                    selected = product.id == selectedAddonId,
+                                    heldSeconds = vm.user.entitlement.aiAddonSecondsRemaining,
+                                    onClick = { onAddonSelected(product.id) },
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(12.dp))
+                        QuantitySelector(
+                            quantity = selectedQuantity,
+                            cap = quantityCap,
+                            enabled = true,
+                            onChanged = onQuantityChanged,
+                        )
+                    }
+                }
             }
         }
-        Spacer(Modifier.height(12.dp))
-        MonthSelector(selectedMonths, onMonthsChanged)
-        Spacer(Modifier.height(18.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("永久加量包", color = TextMain, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleLarge)
-            Spacer(Modifier.width(8.dp))
-            val validDays = addonProducts.firstOrNull()?.validDays ?: 180
-            Text("有效期 $validDays 天", color = TextSoft, style = MaterialTheme.typography.labelMedium)
-        }
-        Spacer(Modifier.height(10.dp))
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            items(addonProducts) { product ->
-                AddonPackCard(
-                    product = product,
-                    selected = purchaseMode == PurchaseMode.Addon && product.id == selectedAddonId,
-                    heldSeconds = vm.accountUser.entitlement.aiAddonSecondsRemaining,
-                    onClick = { onAddonSelected(product.id) },
-                )
-            }
-        }
-        Spacer(Modifier.height(12.dp))
-        QuantitySelector(
-            quantity = selectedQuantity,
-            cap = quantityCap,
-            enabled = purchaseMode == PurchaseMode.Addon,
-            onChanged = onQuantityChanged,
-        )
         Spacer(Modifier.height(14.dp))
         PaymentSelector(vm)
         Spacer(Modifier.height(12.dp))
@@ -184,11 +187,10 @@ private fun MonthlyPlanCard(product: Product, selected: Boolean, currentLevel: S
     ) {
         Text(product.name, color = if (downgrade) TextSoft else TextMain, fontWeight = FontWeight.Black)
         Spacer(Modifier.height(10.dp))
-        Text(formatMinuteNumber(product.aiControlSeconds), color = if (selected) TextMain else Honey, fontWeight = FontWeight.Black, style = MaterialTheme.typography.headlineLarge)
+        Text(formatMinuteNumber(product.aiControlSeconds), color = Honey, fontWeight = FontWeight.Black, style = MaterialTheme.typography.headlineLarge)
         Text("分钟/月", color = TextSoft)
         Spacer(Modifier.weight(1f))
         PriceBlock(product)
-        if (selected) SelectedMark()
     }
 }
 
@@ -208,12 +210,11 @@ private fun AddonPackCard(product: Product, selected: Boolean, heldSeconds: Int,
     ) {
         Text(product.name, color = TextMain, fontWeight = FontWeight.Black)
         Spacer(Modifier.height(12.dp))
-        Text(formatMinuteNumber(product.aiControlSeconds), color = if (selected) Ink else TextMain, fontWeight = FontWeight.Black, style = MaterialTheme.typography.headlineMedium)
-        Text("分钟", color = if (selected) Ink.copy(alpha = 0.72f) else TextSoft)
+        Text(formatMinuteNumber(product.aiControlSeconds), color = Honey, fontWeight = FontWeight.Black, style = MaterialTheme.typography.headlineMedium)
+        Text("分钟", color = TextSoft)
         Spacer(Modifier.weight(1f))
         PriceBlock(product)
-        Text("有效期 ${product.validDays} 天", color = if (selected) Ink.copy(alpha = 0.7f) else TextSoft, style = MaterialTheme.typography.labelSmall)
-        if (selected) SelectedMark()
+        Text("有效期 ${product.validDays} 天", color = TextSoft, style = MaterialTheme.typography.labelSmall)
     }
 }
 
@@ -230,8 +231,8 @@ private fun PriceCardFrame(
             .width(142.dp)
             .height(202.dp)
             .clip(RoundedCornerShape(8.dp))
-            .background(if (selected) Brush.linearGradient(listOf(Rose, Color(0xFFE6799D))) else Brush.linearGradient(listOf(Color(0xFF2B2228), Color(0xFF211820))))
-            .border(1.dp, if (selected) Rose.copy(alpha = 0.95f) else Line, RoundedCornerShape(8.dp))
+            .background(Brush.linearGradient(listOf(Color(0xFF2B2228), Color(0xFF211820))))
+            .border(1.5.dp, if (selected) Honey else Line, RoundedCornerShape(8.dp))
             .clickable(enabled = enabled, onClick = onClick),
     ) {
         Column(
@@ -246,10 +247,10 @@ private fun PriceCardFrame(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .clip(RoundedCornerShape(topEnd = 8.dp, bottomStart = 8.dp))
-                    .background(if (selected) Ink.copy(alpha = 0.82f) else Honey)
+                    .background(Honey)
                     .padding(horizontal = 8.dp, vertical = 4.dp),
             ) {
-                Text(ribbon, color = if (selected) TextMain else Ink, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall)
+                Text(ribbon, color = Ink, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall)
             }
         }
     }
@@ -270,20 +271,6 @@ private fun PriceBlock(product: Product) {
             textDecoration = TextDecoration.LineThrough,
             style = MaterialTheme.typography.labelMedium,
         )
-    }
-}
-
-@Composable
-private fun SelectedMark() {
-    Box(
-        modifier = Modifier
-            .size(34.dp)
-            .clip(CircleShape)
-            .background(TextMain)
-            .padding(6.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(Icons.Outlined.Done, null, tint = RoseDeep)
     }
 }
 
@@ -340,14 +327,10 @@ internal fun SelectorChip(text: String, selected: Boolean, onClick: () -> Unit) 
 }
 
 @Composable
-private fun PaymentSelector(vm: BridgeViewModel) {
+private fun PaymentSelector(vm: AccountBillingViewModel) {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        PayTypeChip("支付宝", selected = vm.selectedPayType == "alipay", modifier = Modifier.weight(1f)) {
-            vm.selectedPayType = "alipay"
-        }
-        PayTypeChip("微信支付", selected = vm.selectedPayType == "wxpay", modifier = Modifier.weight(1f)) {
-            vm.selectedPayType = "wxpay"
-        }
+        PayTypeChip("支付宝", selected = vm.selectedPayType == "alipay", modifier = Modifier.weight(1f)) { vm.setPayType("alipay") }
+        PayTypeChip("微信支付", selected = vm.selectedPayType == "wxpay", modifier = Modifier.weight(1f)) { vm.setPayType("wxpay") }
     }
 }
 
@@ -425,7 +408,7 @@ internal fun ResponsibleNotice() {
 
 @Composable
 internal fun CheckoutBar(
-    vm: BridgeViewModel,
+    vm: AccountBillingViewModel,
     product: Product,
     mode: PurchaseMode,
     months: Int,
@@ -437,15 +420,15 @@ internal fun CheckoutBar(
 ) {
     val boundedQuantity = quantity.coerceIn(1, quantityCap.coerceAtLeast(1))
     val checkout = checkoutSummary(product, months, boundedQuantity)
-    val downgrade = mode == PurchaseMode.Monthly && isDowngrade(vm.accountUser.entitlement.membershipLevel, product.level)
-    val canPay = agreementChecked && product.purchasable && !downgrade && !vm.accountLoading && quantityCap > 0
+    val downgrade = mode == PurchaseMode.Monthly && isDowngrade(vm.user.entitlement.membershipLevel, product.level)
+    val canPay = agreementChecked && product.purchasable && !downgrade && !vm.loading && quantityCap > 0
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .background(Velvet.copy(alpha = 0.98f), RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp))
-            .border(1.dp, Line, RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp))
+            .background(Velvet.copy(alpha = 0.98f), RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
+            .border(1.dp, Line, RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp))
             .navigationBarsPadding()
-            .padding(horizontal = 18.dp, vertical = 12.dp),
+            .padding(horizontal = 18.dp, vertical = 9.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -477,20 +460,13 @@ internal fun CheckoutBar(
                 Text("会员购买协议", color = Rose)
             }
         }
-        Text("虚拟商品购买后不支持退换。", color = TextSoft, style = MaterialTheme.typography.labelMedium)
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(6.dp))
         Button(
-            onClick = {
-                vm.startMembershipPurchase(
-                    productId = product.id,
-                    months = months,
-                    quantity = boundedQuantity,
-                )
-            },
+            onClick = { vm.startPurchase(product, quantityCap) },
             enabled = canPay,
             colors = ButtonDefaults.buttonColors(containerColor = Rose, contentColor = Ink, disabledContainerColor = Line),
             shape = RoundedCornerShape(50),
-            modifier = Modifier.fillMaxWidth().defaultMinSize(minHeight = 52.dp),
+            modifier = Modifier.fillMaxWidth().defaultMinSize(minHeight = 46.dp),
         ) {
             Text(
                 when {
@@ -503,7 +479,7 @@ internal fun CheckoutBar(
             )
         }
         if (vm.pendingOrderNo.isNotBlank()) {
-            TextButton(onClick = vm::refreshPendingOrder, enabled = !vm.accountLoading, modifier = Modifier.align(Alignment.CenterHorizontally)) {
+            TextButton(onClick = vm::refreshPendingOrder, enabled = !vm.loading, modifier = Modifier.align(Alignment.CenterHorizontally)) {
                 Icon(Icons.Outlined.CheckCircle, null, tint = Rose)
                 Spacer(Modifier.width(6.dp))
                 Text("我已完成支付", color = Rose)

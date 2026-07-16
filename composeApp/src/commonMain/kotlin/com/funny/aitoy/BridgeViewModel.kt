@@ -146,12 +146,8 @@ class BridgeViewModel : ViewModel() {
         private set
     var accountMessage by mutableStateOf("")
         private set
-    var profileNameDraft by mutableStateOf("")
-    var profileAvatarDraft by mutableStateOf("")
     var memberProducts by mutableStateOf<List<Product>>(emptyList())
         private set
-    var selectedPayType by mutableStateOf("alipay")
-    var redeemCodeDraft by mutableStateOf("")
     var pendingOrderNo by mutableStateOf("")
         private set
 
@@ -808,8 +804,6 @@ class BridgeViewModel : ViewModel() {
                 AiToyPrefs.authToken = payload.token
                 AiToyPrefs.user = payload.user
                 accountUser = payload.user
-                profileNameDraft = payload.user.displayName.ifBlank { payload.user.username }
-                profileAvatarDraft = payload.user.avatarUrl
                 accountMessage = ""
                 refreshProducts()
             }.onFailure {
@@ -827,8 +821,6 @@ class BridgeViewModel : ViewModel() {
             }.onSuccess { payload ->
                 AiToyPrefs.user = payload.user
                 accountUser = payload.user
-                profileNameDraft = payload.user.displayName.ifBlank { payload.user.username }
-                profileAvatarDraft = payload.user.avatarUrl
                 accountMessage = ""
             }.onFailure {
                 if (AiToyPrefs.authToken.isBlank()) {
@@ -851,8 +843,8 @@ class BridgeViewModel : ViewModel() {
         }
     }
 
-    fun saveProfile() {
-        val name = profileNameDraft.trim()
+    fun saveProfile(displayName: String) {
+        val name = displayName.trim()
         if (name.isBlank()) {
             accountMessage = "请填写昵称。"
             return
@@ -867,7 +859,6 @@ class BridgeViewModel : ViewModel() {
                 apiRequest {
                     AiToyServices.userService.updateProfile(
                         displayName = name,
-                        avatarUrl = profileAvatarDraft.trim().ifBlank { null },
                     )
                 }
             }.onSuccess { payload ->
@@ -904,7 +895,6 @@ class BridgeViewModel : ViewModel() {
             }.onSuccess { payload ->
                 AiToyPrefs.user = payload.user
                 accountUser = payload.user
-                profileAvatarDraft = payload.user.avatarUrl
                 accountMessage = "头像已更新。"
             }.onFailure {
                 accountMessage = "头像更新失败，请稍后再试。"
@@ -918,14 +908,19 @@ class BridgeViewModel : ViewModel() {
         BridgePlatform.openUrl(OkHttpUtils.externalUrl("$prefix/pay/membership-agreement"))
     }
 
-    fun startMembershipPurchase(productId: String, months: Int = 1, quantity: Int = 1) {
+    fun startMembershipPurchase(
+        productId: String,
+        payType: String,
+        months: Int = 1,
+        quantity: Int = 1,
+    ) {
         accountLoading = true
         viewModelScope.launch {
             runCatching {
                 apiRequest {
                     AiToyServices.payService.createOrder(
                         productId = productId,
-                        payType = selectedPayType,
+                        payType = payType,
                         months = months.coerceIn(1, 12),
                         quantity = quantity.coerceIn(1, 99),
                     )
@@ -966,8 +961,8 @@ class BridgeViewModel : ViewModel() {
         }
     }
 
-    fun redeemCode() {
-        val code = redeemCodeDraft.trim()
+    fun redeemCode(codeDraft: String, onSuccess: () -> Unit = {}) {
+        val code = codeDraft.trim()
         if (code.isBlank()) {
             accountMessage = "请输入兑换码。"
             return
@@ -981,8 +976,8 @@ class BridgeViewModel : ViewModel() {
                     AiToyPrefs.user = it
                     accountUser = it
                 }
-                redeemCodeDraft = ""
                 accountMessage = payload.message.ifBlank { "兑换成功，额度已到账。" }
+                onSuccess()
             }.onFailure {
                 accountMessage = it.message ?: "兑换失败，请检查兑换码。"
             }
@@ -1744,7 +1739,7 @@ class BridgeViewModel : ViewModel() {
         val feature = status.features.getOrNull(step.featureIndex)
             ?: status.features.firstOrNull()
             ?: return ToyControlAction.Intensity(mapIntensityPercent(step.value, address))
-        val functionCode = status.independentFunctionCode(feature).coerceIn(1, 9)
+        val functionCode = status.independentFunctionCode(feature).coerceAtLeast(1)
         val safeMode = step.mode.coerceIn(0, status.independentFunctionModeMax(feature).coerceAtLeast(1))
         return ToyControlAction.Combined(
             mode = functionCode * 100 + safeMode,
