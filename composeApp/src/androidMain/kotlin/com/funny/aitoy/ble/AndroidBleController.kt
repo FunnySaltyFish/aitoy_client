@@ -835,7 +835,14 @@ class AndroidBleController(
             ),
         )
         onProtocol(protocol.status)
-        enqueue(protocol.initialize(fingerprint))
+        val initOperations = protocol.initialize(fingerprint)
+        trace(
+            "协议初始化操作 protocol=${protocol.status.id} count=${initOperations.size} ops=${initOperations.joinToString { it.describe() }}",
+            type = "ble_protocol_init",
+            uploadPolicy = AiToyTraceUploadPolicy.SessionOnce,
+            key = "ble_protocol_init:$operationId:${protocol.status.id}",
+        )
+        enqueue(initOperations)
         if (operationQueue.isEmpty()) {
             protocolReady = true
             gattReadyAtMs = System.currentTimeMillis()

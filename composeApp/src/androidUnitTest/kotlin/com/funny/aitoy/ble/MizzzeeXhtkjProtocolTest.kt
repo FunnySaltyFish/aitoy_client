@@ -24,7 +24,9 @@ class MizzzeeXhtkjProtocolTest {
         val init = protocol.initialize(fingerprint)
         val initSubscribe = assertIs<BleProtocolOperation.SubscribeNotify>(init[0])
         assertEquals(NOTIFY_UUID, initSubscribe.characteristicUuid)
-        val initWrite = assertIs<BleProtocolOperation.Write>(init[1])
+        val initRead = assertIs<BleProtocolOperation.Read>(init[1])
+        assertEquals(DEVICE_INFO_UUID, initRead.characteristicUuid)
+        val initWrite = assertIs<BleProtocolOperation.Write>(init[2])
         assertEquals(WRITE_UUID, initWrite.characteristicUuid)
         assertFalse(initWrite.withResponse)
         assertEquals("0312F600", initWrite.bytes.hexUpper())
@@ -57,7 +59,8 @@ class MizzzeeXhtkjProtocolTest {
         val protocol = protocols.first()
         val init = protocol.initialize(fingerprint)
         assertEquals(NOTIFY_UUID, assertIs<BleProtocolOperation.SubscribeNotify>(init[0]).characteristicUuid)
-        assertEquals("0312F600", assertIs<BleProtocolOperation.Write>(init[1]).bytes.hexUpper())
+        assertEquals(DEVICE_INFO_UUID, assertIs<BleProtocolOperation.Read>(init[1]).characteristicUuid)
+        assertEquals("0312F600", assertIs<BleProtocolOperation.Write>(init[2]).bytes.hexUpper())
 
         val strength = assertIs<BleProtocolOperation.Write>(
             protocol.commandsFor(ToyControlAction.Intensity(50)).single(),
@@ -70,6 +73,7 @@ class MizzzeeXhtkjProtocolTest {
         val fingerprint = mizzzeeXhtkjFingerprint(
             name = "XHTKJ",
             includeNotify = false,
+            includeDeviceInfo = false,
         )
         val protocol = BleProtocolRegistry.resolveNative(fingerprint)
             ?: error("Mizzzee XHTKJ protocol not resolved")
@@ -83,6 +87,7 @@ class MizzzeeXhtkjProtocolTest {
         name: String,
         manufacturerData: String = "",
         includeNotify: Boolean = true,
+        includeDeviceInfo: Boolean = true,
     ): BleGattFingerprint =
         BleGattFingerprint(
             name = name,
@@ -92,6 +97,7 @@ class MizzzeeXhtkjProtocolTest {
             characteristicUuids = buildSet {
                 add(WRITE_UUID)
                 if (includeNotify) add(NOTIFY_UUID)
+                if (includeDeviceInfo) add(DEVICE_INFO_UUID)
             },
         )
 
@@ -102,5 +108,6 @@ class MizzzeeXhtkjProtocolTest {
         val SERVICE_UUID: Uuid = Uuid.parse("0000ff10-0000-1000-8000-00805f9b34fb")
         val NOTIFY_UUID: Uuid = Uuid.parse("0000ff11-0000-1000-8000-00805f9b34fb")
         val WRITE_UUID: Uuid = Uuid.parse("0000ff12-0000-1000-8000-00805f9b34fb")
+        val DEVICE_INFO_UUID: Uuid = Uuid.parse("00002a50-0000-1000-8000-00805f9b34fb")
     }
 }

@@ -58,6 +58,7 @@ internal object MizzzeeXhtkjProtocol : BleDeviceProtocol {
     private val serviceUuid = Uuid.parse("0000ff10-0000-1000-8000-00805f9b34fb")
     private val notifyUuid = Uuid.parse("0000ff11-0000-1000-8000-00805f9b34fb")
     private val writeUuid = Uuid.parse("0000ff12-0000-1000-8000-00805f9b34fb")
+    private val deviceInfoUuid = Uuid.parse("00002a50-0000-1000-8000-00805f9b34fb")
 
     override val status = BleProtocolStatus(
         id = "mizzzee_xhtkj",
@@ -83,6 +84,9 @@ internal object MizzzeeXhtkjProtocol : BleDeviceProtocol {
         buildList {
             if (fingerprint.characteristicUuids.contains(notifyUuid)) {
                 add(BleProtocolOperation.SubscribeNotify(notifyUuid))
+            }
+            if (fingerprint.characteristicUuids.contains(deviceInfoUuid)) {
+                add(BleProtocolOperation.Read(deviceInfoUuid))
             }
             add(write(byteArrayOf(0x03, 0x12, 0xf6.toByte(), 0x00)))
         }
