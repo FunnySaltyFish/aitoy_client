@@ -7,6 +7,8 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.funny.aitoy.BridgePlatform
+import com.funny.aitoy.core.kmp.ToastType
+import com.funny.aitoy.core.kmp.toast
 import com.funny.aitoy.core.model.UserProfile
 import com.funny.aitoy.core.prefs.AiToyPrefs
 import com.funny.aitoy.network.OkHttpUtils
@@ -23,18 +25,12 @@ internal class AccountHomeViewModel : ViewModel() {
         get() = AiToyPrefs.user
     var loading by mutableStateOf(false)
         private set
-    var message by mutableStateOf("")
-        private set
 
     var products by mutableStateOf<List<Product>>(emptyList())
         private set
 
     init {
         bootstrapAccount()
-    }
-
-    fun showMessage(message: String) {
-        this.message = message
     }
 
     fun bootstrapAccount() {
@@ -47,10 +43,9 @@ internal class AccountHomeViewModel : ViewModel() {
             runCatching {
                 bootstrapAccountFromToken()
             }.onSuccess {
-                message = ""
                 refreshProducts()
             }.onFailure {
-                message = "账号同步失败，请稍后重试。"
+                toast("账号同步失败，请稍后重试。", ToastType.Error)
             }
             loading = false
         }
@@ -63,16 +58,12 @@ internal class AccountHomeViewModel : ViewModel() {
                 apiRequest { AiToyServices.userService.me() }.user
             }.onSuccess { payloadUser ->
                 saveUser(payloadUser)
-                message = ""
             }.onFailure {
                 if (AiToyPrefs.authToken.isBlank()) {
                     runCatching { bootstrapAccountFromToken() }
-                        .onSuccess {
-                            message = ""
-                        }
-                        .onFailure { message = "刷新失败，请稍后再试。" }
+                        .onFailure { toast("刷新失败，请稍后再试。", ToastType.Error) }
                 } else {
-                    message = "刷新失败，请稍后再试。"
+                    toast("刷新失败，请稍后再试。", ToastType.Error)
                 }
             }
             loading = false
@@ -92,11 +83,11 @@ internal class AccountHomeViewModel : ViewModel() {
     fun saveProfile(displayName: String) {
         val name = displayName.trim()
         if (name.isBlank()) {
-            message = "请填写昵称。"
+            toast("请填写昵称。", ToastType.Warning)
             return
         }
         if (name.length > 12) {
-            message = "昵称最多 12 个字。"
+            toast("昵称最多 12 个字。", ToastType.Warning)
             return
         }
         loading = true
@@ -107,9 +98,9 @@ internal class AccountHomeViewModel : ViewModel() {
                 }.user
             }.onSuccess { payloadUser ->
                 saveUser(payloadUser)
-                message = "资料已保存。"
+                toast("资料已保存。", ToastType.Success)
             }.onFailure {
-                message = "保存失败，请稍后再试。"
+                toast("保存失败，请稍后再试。", ToastType.Error)
             }
             loading = false
         }
@@ -117,7 +108,7 @@ internal class AccountHomeViewModel : ViewModel() {
 
     fun uploadAvatar(fileName: String, bytes: ByteArray) {
         if (bytes.isEmpty()) {
-            message = "请选择可用的头像图片。"
+            toast("请选择可用的头像图片。", ToastType.Warning)
             return
         }
         loading = true
@@ -137,9 +128,9 @@ internal class AccountHomeViewModel : ViewModel() {
                 apiRequest { AiToyServices.userService.uploadAvatar(part) }.user
             }.onSuccess { payloadUser ->
                 saveUser(payloadUser)
-                message = "头像已更新。"
+                toast("头像已更新。", ToastType.Success)
             }.onFailure {
-                message = "头像更新失败，请稍后再试。"
+                toast("头像更新失败，请稍后再试。", ToastType.Error)
             }
             loading = false
         }
@@ -150,8 +141,6 @@ internal class AccountUsageViewModel : ViewModel() {
     val user: UserProfile
         get() = AiToyPrefs.user
     var loading by mutableStateOf(false)
-        private set
-    var message by mutableStateOf("")
         private set
 
     init {
@@ -165,9 +154,8 @@ internal class AccountUsageViewModel : ViewModel() {
                 apiRequest { AiToyServices.userService.me() }.user
             }.onSuccess { payloadUser ->
                 saveUser(payloadUser)
-                message = ""
             }.onFailure {
-                message = "刷新失败，请稍后再试。"
+                toast("刷新失败，请稍后再试。", ToastType.Error)
             }
             loading = false
         }
@@ -192,8 +180,6 @@ internal class AccountBillingViewModel : ViewModel() {
     val user: UserProfile
         get() = AiToyPrefs.user
     var loading by mutableStateOf(false)
-        private set
-    var message by mutableStateOf("")
         private set
     var pendingOrderNo by mutableStateOf("")
         private set
@@ -267,12 +253,12 @@ internal class AccountBillingViewModel : ViewModel() {
                 }
             }.onSuccess { payload ->
                 pendingOrderNo = payload.orderNo
-                message = "订单已创建，完成支付后回到 App 刷新。"
+                toast("订单已创建，完成支付后回到 App 刷新。", ToastType.Success)
                 if (payload.payUrl.isNotBlank()) {
                     BridgePlatform.openUrl(payload.payUrl)
                 }
             }.onFailure {
-                message = "暂时无法发起支付，请稍后再试。"
+                toast("暂时无法发起支付，请稍后再试。", ToastType.Error)
             }
             loading = false
         }
@@ -290,9 +276,12 @@ internal class AccountBillingViewModel : ViewModel() {
                     saveUser(it)
                 }
                 syncSelectionState()
-                message = if (payload.status == "paid") "会员已生效。" else "订单还未完成。"
+                toast(
+                    if (payload.status == "paid") "会员已生效。" else "订单还未完成。",
+                    if (payload.status == "paid") ToastType.Success else ToastType.Info,
+                )
             }.onFailure {
-                message = "订单刷新失败，请稍后再试。"
+                toast("订单刷新失败，请稍后再试。", ToastType.Error)
             }
             loading = false
         }
@@ -329,8 +318,6 @@ internal class AccountRedeemViewModel : ViewModel() {
         private set
     var loading by mutableStateOf(false)
         private set
-    var message by mutableStateOf("")
-        private set
 
     fun setInitialCode(code: String) {
         if (codeDraft.isBlank()) updateCode(code)
@@ -343,7 +330,7 @@ internal class AccountRedeemViewModel : ViewModel() {
     fun redeem() {
         val code = codeDraft.trim()
         if (code.isBlank()) {
-            message = "请输入兑换码。"
+            toast("请输入兑换码。", ToastType.Warning)
             return
         }
         loading = true
@@ -352,10 +339,10 @@ internal class AccountRedeemViewModel : ViewModel() {
                 apiRequest { AiToyServices.payService.redeemCode(code) }
             }.onSuccess { payload ->
                 payload.user?.let(::saveUser)
-                message = payload.message.ifBlank { "兑换成功，额度已到账。" }
+                toast(payload.message.ifBlank { "兑换成功，额度已到账。" }, ToastType.Success)
                 codeDraft = ""
             }.onFailure {
-                message = it.message ?: "兑换失败，请检查兑换码。"
+                toast(it.message ?: "兑换失败，请检查兑换码。", ToastType.Error)
             }
             loading = false
         }

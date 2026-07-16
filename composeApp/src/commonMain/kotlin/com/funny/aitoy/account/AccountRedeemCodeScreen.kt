@@ -89,9 +89,6 @@ internal fun AccountRedeemCodeScreen(
         if (vm.loading) {
             item { LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = Rose) }
         }
-        if (vm.message.isNotBlank()) {
-            item { Text(vm.message, color = Honey, style = MaterialTheme.typography.bodyMedium) }
-        }
         item {
             Panel(title = "兑换说明", action = "使用前确认") {
                 Text("兑换码只能使用一次，请确认当前账号无误后再兑换。", color = TextMain)

@@ -82,6 +82,7 @@ import com.attafitamim.krop.filekit.encodeToByteArray
 import com.attafitamim.krop.filekit.toImageSrc
 import com.attafitamim.krop.ui.ImageCropperDialog
 import com.funny.aitoy.AiToyRoute
+import com.funny.aitoy.core.kmp.toast
 import com.funny.aitoy.core.navigation.LocalNavigator
 import com.funny.aitoy.core.utils.nowMs
 import com.funny.aitoy.network.api.service.Product
@@ -166,9 +167,6 @@ internal fun AccountScreen() {
                     onQuantityChanged = billingVm::setQuantity,
                 )
             }
-            if (billingVm.message.isNotBlank()) {
-                item { Text(billingVm.message, color = Honey, style = MaterialTheme.typography.bodyMedium) }
-            }
             item { ResponsibleNotice() }
         }
 
@@ -197,8 +195,8 @@ private fun AvatarPickerAndCropper(vm: AccountHomeViewModel, onLauncherReady: ((
         scope.launch {
             when (val result = imageCropper.crop(image.toImageSrc())) {
                 CropResult.Cancelled -> Unit
-                CropError.LoadingError -> vm.showMessage("图片读取失败，请换一张再试。")
-                CropError.SavingError -> vm.showMessage("图片处理失败，请换一张再试。")
+                CropError.LoadingError -> toast("图片读取失败，请换一张再试。")
+                CropError.SavingError -> toast("图片处理失败，请换一张再试。")
                 is CropResult.Success -> {
                     val bytes = result.bitmap.encodeToByteArray(ImageFormat.JPEG, quality = 88)
                     vm.uploadAvatar(image.name.ifBlank { "avatar.jpg" }, bytes)
@@ -343,9 +341,6 @@ private fun AccountHeader(
     }
     if (vm.loading) {
         LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = Rose)
-    }
-    if (vm.message.isNotBlank()) {
-        Text(vm.message, color = Honey, style = MaterialTheme.typography.bodyMedium)
     }
 }
 
