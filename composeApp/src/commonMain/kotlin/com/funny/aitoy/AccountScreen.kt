@@ -1,19 +1,24 @@
 package com.funny.aitoy
 
+import ai_toy_bridge.composeapp.generated.resources.Res
+import ai_toy_bridge.composeapp.generated.resources.account_header_bg
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -26,13 +31,17 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.CardGiftcard
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Done
 import androidx.compose.material.icons.outlined.Edit
-import androidx.compose.material.icons.outlined.KeyboardArrowRight
+import androidx.compose.material.icons.outlined.EventAvailable
 import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Shield
+import androidx.compose.material.icons.outlined.Timer
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -52,11 +61,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -105,6 +112,7 @@ import io.github.vinceglb.filekit.dialogs.compose.rememberFilePickerLauncher
 import io.github.vinceglb.filekit.name
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import org.jetbrains.compose.resources.painterResource
 
 @Composable
 internal fun AccountScreen(vm: BridgeViewModel) {
@@ -134,14 +142,7 @@ internal fun AccountScreen(vm: BridgeViewModel) {
 
     if (showUsageDetail) {
         Box(Modifier.fillMaxSize()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .blur(6.dp),
-            ) {
-                UsageDetailScreen(vm = vm, onBack = { showUsageDetail = false })
-            }
-            AccountDevelopingOverlay()
+            UsageDetailScreen(vm = vm, onBack = { showUsageDetail = false })
         }
         return
     }
@@ -158,110 +159,65 @@ internal fun AccountScreen(vm: BridgeViewModel) {
     Box(
         modifier = Modifier.fillMaxSize(),
     ) {
-        Box(
+        LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .blur(6.dp),
+                .statusBarsPadding()
+                .padding(horizontal = 18.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .statusBarsPadding()
-                    .padding(horizontal = 18.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                item {
-                    AvatarPickerAndCropper(
-                        vm = vm,
-                        onLauncherReady = { launchAvatarPicker = it },
-                    )
-                    AccountHeader(vm = vm, onAvatarClick = launchAvatarPicker)
-                }
-                item { UsageSummaryCard(vm = vm, onDetailClick = { showUsageDetail = true }) }
-                item { RedeemCodePanel(vm = vm) }
-                item { CampaignStrip(products = products) }
-                item {
-                    BillingPanel(
-                        vm = vm,
-                        monthlyProducts = monthlyProducts,
-                        addonProducts = addonProducts,
-                        purchaseMode = purchaseMode,
-                        selectedMonthlyId = selectedMonthlyId,
-                        selectedAddonId = selectedAddonId,
-                        selectedMonths = selectedMonths,
-                        selectedQuantity = selectedQuantity,
-                        quantityCap = quantityCap,
-                        onModeChanged = { purchaseMode = it },
-                        onMonthlySelected = {
-                            purchaseMode = PurchaseMode.Monthly
-                            selectedMonthlyId = it
-                        },
-                        onAddonSelected = {
-                            purchaseMode = PurchaseMode.Addon
-                            selectedAddonId = it
-                        },
-                        onMonthsChanged = { selectedMonths = it },
-                        onQuantityChanged = { selectedQuantity = it },
-                    )
-                }
-                item { ResponsibleNotice() }
-                item { Spacer(Modifier.height(132.dp)) }
-            }
-
-            if (selectedProduct != null) {
-                CheckoutBar(
+            item {
+                AvatarPickerAndCropper(
                     vm = vm,
-                    product = selectedProduct,
-                    mode = purchaseMode,
-                    months = selectedMonths,
-                    quantity = selectedQuantity,
+                    onLauncherReady = { launchAvatarPicker = it },
+                )
+                AccountHeader(vm = vm, onAvatarClick = launchAvatarPicker)
+            }
+            item { SectionTitle("控制额度", "连接、待机和停止不消耗额度") }
+            item { UsageSummaryCard(vm = vm, onDetailClick = { showUsageDetail = true }) }
+            item { CampaignStrip(products = products) }
+            item { SectionTitle("会员与加量", "按需要选择，不用提前囤积") }
+            item {
+                BillingPanel(
+                    vm = vm,
+                    monthlyProducts = monthlyProducts,
+                    addonProducts = addonProducts,
+                    purchaseMode = purchaseMode,
+                    selectedMonthlyId = selectedMonthlyId,
+                    selectedAddonId = selectedAddonId,
+                    selectedMonths = selectedMonths,
+                    selectedQuantity = selectedQuantity,
                     quantityCap = quantityCap,
-                    agreementChecked = agreementChecked,
-                    onAgreementChanged = { agreementChecked = it },
-                    modifier = Modifier.align(Alignment.BottomCenter),
+                    onModeChanged = { purchaseMode = it },
+                    onMonthlySelected = {
+                        purchaseMode = PurchaseMode.Monthly
+                        selectedMonthlyId = it
+                    },
+                    onAddonSelected = {
+                        purchaseMode = PurchaseMode.Addon
+                        selectedAddonId = it
+                    },
+                    onMonthsChanged = { selectedMonths = it },
+                    onQuantityChanged = { selectedQuantity = it },
                 )
             }
+            item { SectionTitle("兑换与说明", "活动额度会自动加入当前账号") }
+            item { RedeemCodePanel(vm = vm) }
+            item { ResponsibleNotice() }
+            item { Spacer(Modifier.height(132.dp)) }
         }
-        AccountDevelopingOverlay()
-    }
-}
 
-@Composable
-private fun AccountDevelopingOverlay() {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Ink.copy(alpha = 0.72f))
-            .pointerInput(Unit) {
-                awaitPointerEventScope {
-                    while (true) {
-                        val event = awaitPointerEvent()
-                        event.changes.forEach { it.consume() }
-                    }
-                }
-            },
-        contentAlignment = Alignment.Center,
-    ) {
-        Column(
-            modifier = Modifier
-                .padding(horizontal = 28.dp)
-                .clip(RoundedCornerShape(18.dp))
-                .background(Velvet.copy(alpha = 0.94f))
-                .border(1.dp, Line, RoundedCornerShape(18.dp))
-                .padding(horizontal = 22.dp, vertical = 20.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Text(
-                text = "开发中",
-                color = Honey,
-                fontWeight = FontWeight.Black,
-                style = MaterialTheme.typography.headlineSmall,
-            )
-            Spacer(Modifier.height(8.dp))
-            Text(
-                text = "页面仅供预览，暂不可操作。",
-                color = TextSoft,
-                style = MaterialTheme.typography.bodyMedium,
+        if (selectedProduct != null) {
+            CheckoutBar(
+                vm = vm,
+                product = selectedProduct,
+                mode = purchaseMode,
+                months = selectedMonths,
+                quantity = selectedQuantity,
+                quantityCap = quantityCap,
+                agreementChecked = agreementChecked,
+                onAgreementChanged = { agreementChecked = it },
+                modifier = Modifier.align(Alignment.BottomCenter),
             )
         }
     }
@@ -340,79 +296,111 @@ private fun AccountHeader(vm: BridgeViewModel, onAvatarClick: () -> Unit) {
         mutableStateOf(displayName(user.displayName, user.username))
     }
 
-    Row(
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 14.dp, bottom = 2.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .padding(top = 14.dp, bottom = 2.dp)
+            .height(190.dp)
+            .clip(RoundedCornerShape(22.dp))
+            .background(Velvet),
     ) {
-        AvatarBox(
-            name = displayName(user.displayName, user.username),
-            avatarUrl = user.avatarUrl,
-            onClick = onAvatarClick,
+        Image(
+            painter = painterResource(Res.drawable.account_header_bg),
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize(),
         )
-        Spacer(Modifier.width(14.dp))
-        Column(Modifier.weight(1f)) {
-            if (editingName) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedTextField(
-                        value = nameDraft,
-                        onValueChange = { nameDraft = it.take(12) },
-                        singleLine = true,
-                        keyboardActions = KeyboardActions(onDone = {
-                            vm.profileNameDraft = nameDraft.trim()
-                            vm.saveProfile()
-                            editingName = false
-                        }),
-                        modifier = Modifier.weight(1f),
-                        textStyle = MaterialTheme.typography.titleLarge.copy(
-                            color = TextMain,
-                            fontWeight = FontWeight.Bold,
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.horizontalGradient(
+                        listOf(
+                            Ink.copy(alpha = 0.92f),
+                            Ink.copy(alpha = 0.52f),
+                            Ink.copy(alpha = 0.18f),
                         ),
-                    )
-                    IconButton(onClick = {
-                        vm.profileNameDraft = nameDraft.trim()
-                        vm.saveProfile()
-                        editingName = false
-                    }) {
-                        Icon(Icons.Outlined.Done, null, tint = Mint)
+                    ),
+                ),
+        )
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .border(1.dp, Line.copy(alpha = 0.72f), RoundedCornerShape(22.dp))
+                .padding(16.dp),
+            verticalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Row(verticalAlignment = Alignment.Top) {
+                AvatarBox(
+                    name = displayName(user.displayName, user.username),
+                    avatarUrl = user.avatarUrl,
+                    onClick = onAvatarClick,
+                )
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    if (editingName) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            OutlinedTextField(
+                                value = nameDraft,
+                                onValueChange = { nameDraft = it.take(12) },
+                                singleLine = true,
+                                keyboardActions = KeyboardActions(onDone = {
+                                    vm.profileNameDraft = nameDraft.trim()
+                                    vm.saveProfile()
+                                    editingName = false
+                                }),
+                                modifier = Modifier.weight(1f),
+                                textStyle = MaterialTheme.typography.titleLarge.copy(
+                                    color = TextMain,
+                                    fontWeight = FontWeight.Bold,
+                                ),
+                            )
+                            IconButton(onClick = {
+                                vm.profileNameDraft = nameDraft.trim()
+                                vm.saveProfile()
+                                editingName = false
+                            }) {
+                                Icon(Icons.Outlined.Done, null, tint = Mint)
+                            }
+                            IconButton(onClick = {
+                                nameDraft = displayName(user.displayName, user.username)
+                                editingName = false
+                            }) {
+                                Icon(Icons.Outlined.Close, null, tint = TextSoft)
+                            }
+                        }
+                    } else {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = displayName(user.displayName, user.username),
+                                color = TextMain,
+                                fontWeight = FontWeight.Black,
+                                style = MaterialTheme.typography.headlineSmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false),
+                            )
+                            IconButton(onClick = { editingName = true }, modifier = Modifier.size(36.dp)) {
+                                Icon(Icons.Outlined.Edit, null, tint = TextSoft)
+                            }
+                        }
                     }
-                    IconButton(onClick = {
-                        nameDraft = displayName(user.displayName, user.username)
-                        editingName = false
-                    }) {
-                        Icon(Icons.Outlined.Close, null, tint = TextSoft)
-                    }
-                }
-            } else {
-                Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = displayName(user.displayName, user.username),
-                        color = TextMain,
-                        fontWeight = FontWeight.Black,
-                        style = MaterialTheme.typography.headlineSmall,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false),
+                        text = user.entitlement.membershipName.ifBlank { "免费版" },
+                        color = Honey,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .background(Honey.copy(alpha = 0.14f), RoundedCornerShape(50))
+                            .border(1.dp, Honey.copy(alpha = 0.34f), RoundedCornerShape(50))
+                            .padding(horizontal = 10.dp, vertical = 5.dp),
+                        style = MaterialTheme.typography.labelMedium,
                     )
-                    IconButton(onClick = { editingName = true }, modifier = Modifier.size(36.dp)) {
-                        Icon(Icons.Outlined.Edit, null, tint = TextSoft)
-                    }
+                }
+                IconButton(onClick = vm::refreshAccount, enabled = !vm.accountLoading) {
+                    Icon(Icons.Outlined.Refresh, null, tint = TextSoft)
                 }
             }
-            Text(
-                text = user.entitlement.membershipName.ifBlank { "免费版" },
-                color = Honey,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier
-                    .background(Honey.copy(alpha = 0.12f), RoundedCornerShape(50))
-                    .border(1.dp, Honey.copy(alpha = 0.32f), RoundedCornerShape(50))
-                    .padding(horizontal = 10.dp, vertical = 5.dp),
-                style = MaterialTheme.typography.labelMedium,
-            )
-        }
-        IconButton(onClick = vm::refreshAccount, enabled = !vm.accountLoading) {
-            Icon(Icons.Outlined.Refresh, null, tint = TextSoft)
+            AccountHeroStats(vm)
         }
     }
     if (vm.accountLoading) {
@@ -420,6 +408,44 @@ private fun AccountHeader(vm: BridgeViewModel, onAvatarClick: () -> Unit) {
     }
     if (vm.accountMessage.isNotBlank()) {
         Text(vm.accountMessage, color = Honey, style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+@Composable
+private fun AccountHeroStats(vm: BridgeViewModel) {
+    val ent = vm.accountUser.entitlement
+    FlowRow(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        HeroPill(
+            icon = { Icon(Icons.Outlined.Timer, null, tint = Rose, modifier = Modifier.size(16.dp)) },
+            label = "可用 ${formatMinutes(totalRemainingSeconds(ent))}",
+        )
+        HeroPill(
+            icon = { Icon(Icons.Outlined.EventAvailable, null, tint = Mint, modifier = Modifier.size(16.dp)) },
+            label = "本月 ${formatMinutes(ent.aiQuotaSecondsRemaining)}",
+        )
+        HeroPill(
+            icon = { Icon(Icons.Outlined.Shield, null, tint = Honey, modifier = Modifier.size(16.dp)) },
+            label = "停止不消耗",
+        )
+    }
+}
+
+@Composable
+private fun HeroPill(icon: @Composable () -> Unit, label: String) {
+    Row(
+        modifier = Modifier
+            .background(Ink.copy(alpha = 0.58f), RoundedCornerShape(50))
+            .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(50))
+            .padding(horizontal = 10.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        icon()
+        Spacer(Modifier.width(6.dp))
+        Text(label, color = TextMain, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -484,7 +510,7 @@ private fun UsageSummaryCard(vm: BridgeViewModel, onDetailClick: () -> Unit) {
             }
             OutlinedButton(onClick = onDetailClick, shape = RoundedCornerShape(50)) {
                 Text("明细")
-                Icon(Icons.Outlined.KeyboardArrowRight, null)
+                Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null)
             }
         }
         Spacer(Modifier.height(12.dp))
@@ -495,21 +521,64 @@ private fun UsageSummaryCard(vm: BridgeViewModel, onDetailClick: () -> Unit) {
             trackColor = Honey.copy(alpha = 0.35f),
         )
         Spacer(Modifier.height(10.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            BalanceDot("本月剩余 ${formatMinutes(ent.aiQuotaSecondsRemaining)}", Rose)
-            BalanceDot("永久包 ${formatMinutes(ent.aiAddonSecondsRemaining)}", Honey)
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            AccountMetric(
+                title = "本月剩余",
+                value = formatMinutes(ent.aiQuotaSecondsRemaining),
+                accent = Rose,
+                modifier = Modifier.weight(1f),
+            )
+            AccountMetric(
+                title = "永久包",
+                value = formatMinutes(ent.aiAddonSecondsRemaining),
+                accent = Honey,
+                modifier = Modifier.weight(1f),
+            )
         }
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(12.dp))
         Text("只在 AI 实际控制时消耗，连接、待机和停止不消耗。", color = TextSoft, style = MaterialTheme.typography.bodyMedium)
     }
 }
 
 @Composable
-private fun BalanceDot(text: String, color: Color) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(8.dp).clip(CircleShape).background(color))
-        Spacer(Modifier.width(6.dp))
-        Text(text, color = TextSoft, style = MaterialTheme.typography.labelMedium)
+private fun AccountMetric(title: String, value: String, accent: Color, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier
+            .defaultMinSize(minWidth = 132.dp)
+            .background(Color.White.copy(alpha = 0.055f), RoundedCornerShape(13.dp))
+            .border(1.dp, accent.copy(alpha = 0.18f), RoundedCornerShape(13.dp))
+            .padding(12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(8.dp).clip(CircleShape).background(accent))
+            Spacer(Modifier.width(7.dp))
+            Text(title, color = TextSoft, style = MaterialTheme.typography.labelMedium)
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(value, color = TextMain, fontWeight = FontWeight.Black, maxLines = 1)
+    }
+}
+
+@Composable
+private fun SectionTitle(title: String, subtitle: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, color = TextMain, fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleLarge)
+            Text(subtitle, color = TextSoft, style = MaterialTheme.typography.bodyMedium)
+        }
+        Icon(
+            imageVector = if (title == "兑换与说明") Icons.Outlined.CardGiftcard else Icons.Outlined.AutoAwesome,
+            contentDescription = null,
+            tint = Honey.copy(alpha = 0.82f),
+        )
     }
 }
 
