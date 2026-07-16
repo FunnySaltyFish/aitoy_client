@@ -225,7 +225,7 @@ class KissToyProtocolTest {
         assertKissToyAesCcmPacket(
             macRequest.bytes,
             cmdId = 0x00,
-            subId = 0xf1,
+            subId = 0x02,
             plaintext = emptyList(),
         )
         assertEquals(500L, assertIs<BleProtocolOperation.Sleep>(init[2]).millis)
@@ -273,7 +273,7 @@ class KissToyProtocolTest {
         assertKissToyAesCcmPacket(
             packet,
             cmdId = 0x00,
-            subId = 0xf1,
+            subId = 0x02,
             plaintext = emptyList(),
         )
     }
