@@ -15,7 +15,7 @@ data class DeviceRuntime(
     val displayName: String = "",
     val mode: Int = 1,
     val intensity: Int = 1,
-    val secondaryIntensity: Int = 1,
+    val secondaryIntensity: Int = 0,
     val batteryPercent: Int? = null,
 )
 
@@ -143,4 +143,3 @@ fun BleConnectionState.toRuntimeState(): ToyRuntimeState =
         BleConnectionState.Error -> ToyRuntimeState.Failed
         BleConnectionState.Idle -> ToyRuntimeState.Offline
     }
-

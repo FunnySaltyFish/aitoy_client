@@ -154,6 +154,13 @@ class KissToyProtocolTest {
                 listOf(0, 0, 0, 0, 0),
             ),
         )
+
+        val freshProtocol = BleProtocolRegistry.resolveNative(officialV2Fingerprint("QCPW")) ?: error("QCPW protocol not resolved")
+        val primaryOnly = freshProtocol.commandsFor(ToyControlAction.DualMotor(mode = 1, internalIntensity = 64, externalIntensity = 0))
+        assertKissToyBasicControlData(
+            assertSingleKissToyBasicControlWrite(primaryOnly, DDDD_WRITE_UUID).bytes,
+            content = listOf(181, 0, 0, 0, 0),
+        )
     }
 
     @Test

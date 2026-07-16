@@ -166,7 +166,7 @@ class BridgeViewModel : ViewModel() {
     )
     var mode by mutableStateOf(1)
     var intensity by mutableStateOf(1)
-    var secondaryIntensity by mutableStateOf(1)
+    var secondaryIntensity by mutableStateOf(0)
     var controlTrialStarted by mutableStateOf(false)
         private set
     var currentDeviceSaved by mutableStateOf(false)
@@ -479,7 +479,7 @@ class BridgeViewModel : ViewModel() {
         protocolAttemptStatus = deviceRuntimeStore.protocolAttemptStatus(address)
         mode = deviceRuntimeStore.mode(address)
         intensity = deviceRuntimeStore.intensity(address).takeIf { it > 0 } ?: 1
-        secondaryIntensity = deviceRuntimeStore.secondaryIntensity(address).takeIf { it > 0 } ?: intensity
+        secondaryIntensity = deviceRuntimeStore.secondaryIntensity(address)
         currentDeviceSaved = rememberedDevices.any { it.address == address }
         controlTrialStarted = false
         showDeviceRemarkDialog = false
