@@ -300,40 +300,91 @@ private enum class PopocatFunction(
     val index: Int = functionCode - 1
 }
 
-internal object SistalkWeightless808Protocol : BleDeviceProtocol {
+private fun ByteArray.unsignedByteAt(index: Int): Int =
+    this[index].unsignedByte()
+
+internal object SistalkMonsterPartyMp2Protocol : SistalkMonsterPartyDualVibrationProtocolBase(
+    id = "sistalk_monsterparty_mp2",
+    displayName = "小怪兽二代",
+    channelNames = listOf("内侧震动", "外侧震动"),
+) {
+    override fun hasDeviceIdentity(fingerprint: BleGattFingerprint): Boolean {
+        val manufacturerPayload = fingerprint.manufacturerData.toManufacturerDataMap()[0x2512] ?: return false
+        return manufacturerPayload.isMonsterPartyMp2ManufacturerPayload()
+    }
+
+    private fun ByteArray.isMonsterPartyMp2ManufacturerPayload(): Boolean {
+        if (size < 4 || unsignedByteAt(0) != 0x02) return false
+        val productId = unsignedByteAt(2)
+        val variantId = unsignedByteAt(3)
+        return productId == 0x18 && variantId == 0x00
+    }
+}
+
+internal object SistalkWeightless808Protocol : SistalkMonsterPartyDualVibrationProtocolBase(
+    id = "sistalk_weightless_808",
+    displayName = "失重808",
+    channelNames = listOf("头震", "尾震"),
+) {
+    override fun hasDeviceIdentity(fingerprint: BleGattFingerprint): Boolean {
+        if (fingerprint.name.normalizedDeviceName().contains("失重808")) return true
+        val manufacturerPayload = fingerprint.manufacturerData.toManufacturerDataMap()[0x2512] ?: return false
+        return manufacturerPayload.isWeightless808ManufacturerPayload()
+    }
+
+    private fun ByteArray.isWeightless808ManufacturerPayload(): Boolean {
+        if (size < 4 || unsignedByteAt(0) != 0x02) return false
+        val productId = unsignedByteAt(2)
+        val variantId = unsignedByteAt(3)
+        val hardwareId = getOrNull(4)?.unsignedByte() ?: 0
+        return when (productId) {
+            0x07 -> variantId == 0x00 && hardwareId == 0x0D
+            0x1C -> variantId == 0x00
+            else -> false
+        }
+    }
+}
+
+internal abstract class SistalkMonsterPartyDualVibrationProtocolBase(
+    id: String,
+    displayName: String,
+    private val channelNames: List<String>,
+) : BleDeviceProtocol {
     private val serviceUuid = Uuid.parse("00009000-0000-1000-8000-00805f9b34fb")
     private val opUuid = Uuid.parse("00009001-0000-1000-8000-00805f9b34fb")
     private val functionUuid = Uuid.parse("00009002-0000-1000-8000-00805f9b34fb")
 
-    private const val COMMAND_MOTOR = 0xA0
-    private const val STARTUP_PWM = 70
-    private const val STARTUP_SETTLE_MS = 120L
+    private val commandMotor = 0xA0
+    private val startupPwm = 70
+    private val startupSettleMs = 120L
     private val currentPwm = IntArray(2)
 
-    override val status = BleProtocolStatus(
-        id = "sistalk_weightless_808",
-        displayName = "失重808",
+    final override val status = BleProtocolStatus(
+        id = id,
+        displayName = displayName,
         controllable = true,
         intensityMax = 100,
         supportsMode = false,
         controlStyle = ToyControlStyle.DualIntensityOnly,
         intensityLabel = "强度",
-        channelNames = listOf("头震", "尾震"),
+        channelNames = channelNames,
         features = listOf(
-            BleProtocolFeature(type = "vibrate", min = 0, max = 100, index = 0, label = "头震"),
-            BleProtocolFeature(type = "vibrate", min = 0, max = 100, index = 1, label = "尾震"),
+            BleProtocolFeature(type = "vibrate", min = 0, max = 100, index = 0, label = channelNames[0]),
+            BleProtocolFeature(type = "vibrate", min = 0, max = 100, index = 1, label = channelNames[1]),
         ),
         automatic = true,
     )
 
-    override fun matches(fingerprint: BleGattFingerprint): Boolean =
-        fingerprint.hasWeightless808Identity() &&
+    final override fun matches(fingerprint: BleGattFingerprint): Boolean =
+        hasDeviceIdentity(fingerprint) &&
                 fingerprint.sistalkProtocolVersion != 1 &&
                 fingerprint.serviceUuids.contains(serviceUuid) &&
                 fingerprint.characteristicUuids.contains(opUuid) &&
                 fingerprint.characteristicUuids.contains(functionUuid)
 
-    override fun initialize(fingerprint: BleGattFingerprint): List<BleProtocolOperation> =
+    protected abstract fun hasDeviceIdentity(fingerprint: BleGattFingerprint): Boolean
+
+    final override fun initialize(fingerprint: BleGattFingerprint): List<BleProtocolOperation> =
         listOf(
             BleProtocolOperation.SubscribeNotify(opUuid),
             BleProtocolOperation.SubscribeNotify(functionUuid),
@@ -341,7 +392,7 @@ internal object SistalkWeightless808Protocol : BleDeviceProtocol {
             currentPwm.fill(0)
         }
 
-    override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
+    final override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
         when (action) {
             is ToyControlAction.Intensity -> updateAllChannels(action.value)
             is ToyControlAction.Combined -> updateChannel(action.mode, action.intensity)
@@ -369,17 +420,17 @@ internal object SistalkWeightless808Protocol : BleDeviceProtocol {
     }
 
     private fun updateTargets(headVibration: Int, tailVibration: Int): List<BleProtocolOperation> {
-        val startupHead = currentPwm[0] == 0 && headVibration in 1 until STARTUP_PWM
-        val startupTail = currentPwm[1] == 0 && tailVibration in 1 until STARTUP_PWM
+        val startupHead = currentPwm[0] == 0 && headVibration in 1 until startupPwm
+        val startupTail = currentPwm[1] == 0 && tailVibration in 1 until startupPwm
         val operations = buildList {
             if (startupHead || startupTail) {
                 add(
                     motorCommand(
-                        if (startupHead) STARTUP_PWM else headVibration,
-                        if (startupTail) STARTUP_PWM else tailVibration,
+                        if (startupHead) startupPwm else headVibration,
+                        if (startupTail) startupPwm else tailVibration,
                     )
                 )
-                add(BleProtocolOperation.Sleep(STARTUP_SETTLE_MS))
+                add(BleProtocolOperation.Sleep(startupSettleMs))
             }
             add(motorCommand(headVibration, tailVibration))
         }
@@ -398,7 +449,7 @@ internal object SistalkWeightless808Protocol : BleDeviceProtocol {
         BleProtocolOperation.Write(
             characteristicUuid = functionUuid,
             bytes = bytes(
-                COMMAND_MOTOR,
+                commandMotor,
                 (3 shl 3) or 0x80,
                 0x02,
                 headVibration.coerceIn(0, status.intensityMax),
@@ -407,26 +458,6 @@ internal object SistalkWeightless808Protocol : BleDeviceProtocol {
             withResponse = false,
         )
 
-    private fun BleGattFingerprint.hasWeightless808Identity(): Boolean {
-        if (name.normalizedDeviceName().contains("失重808")) return true
-        val manufacturerPayload = manufacturerData.toManufacturerDataMap()[0x2512] ?: return false
-        return manufacturerPayload.isWeightless808ManufacturerPayload()
-    }
-
-    private fun ByteArray.isWeightless808ManufacturerPayload(): Boolean {
-        if (size < 4 || unsignedByteAt(0) != 0x02) return false
-        val productId = unsignedByteAt(2)
-        val variantId = unsignedByteAt(3)
-        val hardwareId = getOrNull(4)?.unsignedByte() ?: 0
-        return when (productId) {
-            0x07 -> variantId == 0x00 && hardwareId == 0x0D
-            0x1C -> variantId == 0x00
-            else -> false
-        }
-    }
-
-    private fun ByteArray.unsignedByteAt(index: Int): Int =
-        this[index].unsignedByte()
 }
 
 internal object SistalkMonsterPubMultiMotorProtocol : SistalkMonsterPubProtocolBase(

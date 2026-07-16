@@ -60,6 +60,36 @@ class SistalkProtocolTest {
     }
 
     @Test
+    fun monsterPartyMp2ProductIdUsesDedicatedDualVibrationControl() {
+        val fingerprint = sistalkV2Fingerprint(
+            name = "Ankni",
+            manufacturerData = "0x2512:02 00 18 00 3E 00 00 00 00 00",
+        )
+        val protocol = BleProtocolRegistry.resolveNative(fingerprint)
+            ?: error("小怪兽二代 protocol not resolved")
+
+        assertEquals("sistalk_monsterparty_mp2", protocol.status.id)
+        assertEquals("小怪兽二代", protocol.status.displayName)
+        assertEquals(ToyControlStyle.DualIntensityOnly, protocol.status.controlStyle)
+        assertEquals(listOf("内侧震动", "外侧震动"), protocol.status.channelNames)
+        assertEquals("vibrate", protocol.status.features[0].type)
+        assertEquals("vibrate", protocol.status.features[1].type)
+
+        protocol.initialize(fingerprint)
+        val run = protocol.commandsFor(ToyControlAction.DualMotor(mode = 1, internalIntensity = 25, externalIntensity = 70))
+        assertEquals(3, run.size)
+        val startupWrite = assertIs<BleProtocolOperation.Write>(run[0])
+        assertEquals("A098024646", startupWrite.bytes.hexUpper())
+        assertEquals(BleProtocolOperation.Sleep(120L), run[1])
+        val targetWrite = assertIs<BleProtocolOperation.Write>(run[2])
+        assertEquals("A098021946", targetWrite.bytes.hexUpper())
+
+        val stop = protocol.commandsFor(ToyControlAction.Stop)
+        val stopWrite = assertIs<BleProtocolOperation.Write>(stop.single())
+        assertEquals("A098020000", stopWrite.bytes.hexUpper())
+    }
+
+    @Test
     fun popocatProductIdUsesDedicatedSuctionAndCatHeadMapping() {
         val fingerprint = sistalkV2Fingerprint(
             name = "MoulinRouge",

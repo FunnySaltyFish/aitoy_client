@@ -91,6 +91,7 @@ internal object BleProtocolRegistry {
                     KissToyProtocol,
                     WeVibeSyncLiteProtocol,
                     SistalkPopocatProtocol,
+                    SistalkMonsterPartyMp2Protocol,
                     SistalkWeightless808Protocol,
                     BeYourLoverVa617aProtocol,
                     SistalkMonsterPartyProtocol,
