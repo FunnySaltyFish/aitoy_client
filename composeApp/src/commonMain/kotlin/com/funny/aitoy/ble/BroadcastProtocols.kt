@@ -330,6 +330,7 @@ internal object CachitoShikong2BroadcastProtocol : BleBroadcastProtocol {
         val selected = modeTemplates[(mode - 1).coerceIn(0, modeTemplates.lastIndex)]
         selectedMode = mode.coerceIn(1, modeTemplates.size)
         val progress = intensity.coerceIn(0, 100)
+        if (progress == 0) return stop()
         return when (selected.function) {
             CachitoShikong2Function.Suction ->
                 listOf(BleAdvertiseOperation(CachitoBroadcastCodec.finalUuid(suctionTemplate(progress))))
@@ -417,6 +418,7 @@ internal object CachitoShikong3BroadcastProtocol : BleBroadcastProtocol {
         val selected = modeTemplates[(mode - 1).coerceIn(0, modeTemplates.lastIndex)]
         selectedMode = mode.coerceIn(1, modeTemplates.size)
         val progress = intensity.coerceIn(0, 100)
+        if (progress == 0) return stop()
         return when (selected.function) {
             CachitoShikong3Function.Suction ->
                 listOf(BleAdvertiseOperation(CachitoBroadcastCodec.finalUuid(suctionTemplate(progress))))
@@ -522,6 +524,7 @@ internal object CachitoShikong25BroadcastProtocol : BleBroadcastProtocol {
         val selected = modeTemplates[(mode - 1).coerceIn(0, modeTemplates.lastIndex)]
         selectedMode = mode.coerceIn(1, modeTemplates.size)
         val progress = intensity.coerceIn(0, 100)
+        if (progress == 0) return stop()
         return when (selected.function) {
             CachitoShikong25Function.Suction ->
                 listOf(BleAdvertiseOperation(CachitoBroadcastCodec.finalUuid(suctionTemplate(progress))))

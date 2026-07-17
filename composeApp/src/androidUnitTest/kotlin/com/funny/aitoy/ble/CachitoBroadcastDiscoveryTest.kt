@@ -161,6 +161,33 @@ class CachitoBroadcastDiscoveryTest {
     }
 
     @Test
+    fun shikongSeriesTreatZeroIntensityAsStop() {
+        val shikong2StopFrames = CachitoShikong2BroadcastProtocol
+            .commandsFor(ToyControlAction.Combined(mode = 1, intensity = 0))
+            .map { it.serviceUuid }
+        val shikong3StopFrames = CachitoShikong3BroadcastProtocol
+            .commandsFor(ToyControlAction.Combined(mode = 1, intensity = 0))
+            .map { it.serviceUuid }
+        val shikong25StopFrames = CachitoShikong25BroadcastProtocol
+            .commandsFor(ToyControlAction.Combined(mode = 1, intensity = 0))
+            .map { it.serviceUuid }
+
+        assertTrue(shikong2StopFrames.any { it.matchesUuidBody("-0400-", "-0302-0000000000") })
+        assertTrue(shikong2StopFrames.any { it.matchesUuidBody("-0400-", "-0601-0000000000") })
+        assertFalse(shikong2StopFrames.any { it.contains("-050A-", ignoreCase = true) })
+
+        assertTrue(shikong3StopFrames.any { it.matchesUuidBody("-0200-", "-0100-6400000002") })
+        assertTrue(shikong3StopFrames.any { it.matchesUuidBody("-0100-", "-0100-6400000002") })
+        assertTrue(shikong3StopFrames.any { it.matchesUuidBody("-0F00-", "-0100-6400000002") })
+        assertFalse(shikong3StopFrames.any { it.contains("-8200-", ignoreCase = true) })
+
+        assertTrue(shikong25StopFrames.any { it.matchesUuidBody("-0200-", "-0100-6400000002") })
+        assertTrue(shikong25StopFrames.any { it.matchesUuidBody("-0100-", "-0100-6400000002") })
+        assertTrue(shikong25StopFrames.any { it.matchesUuidBody("-0F00-", "-0100-6400000002") })
+        assertFalse(shikong25StopFrames.any { it.contains("-8200-", ignoreCase = true) })
+    }
+
+    @Test
     fun daxiuUsesOfficialMotionRtdHeatAndStopFrames() {
         val protocol = CachitoDaxiuBroadcastProtocol
 
