@@ -44,6 +44,12 @@ data class RelayCommand(
 data class RelayDevice(
     val deviceId: String,
     val displayName: String,
+    val bleAddress: String = "",
+    val connectable: Boolean = true,
+    val serviceUuids: List<String> = emptyList(),
+    val manufacturerData: String = "",
+    val scanRecordHex: String = "",
+    val broadcastProtocolName: String = "",
     val connected: Boolean,
     val isDefault: Boolean,
     val protocolName: String,
@@ -393,6 +399,12 @@ class RelayClient(
                     buildJsonObject {
                         put("deviceId", device.deviceId)
                         put("displayName", device.displayName)
+                        if (device.bleAddress.isNotBlank()) put("bleAddress", device.bleAddress.take(80))
+                        put("connectable", device.connectable)
+                        if (device.serviceUuids.isNotEmpty()) put("serviceUuids", stringJsonArray(device.serviceUuids.take(16)))
+                        if (device.manufacturerData.isNotBlank()) put("manufacturerData", device.manufacturerData.take(512))
+                        if (device.scanRecordHex.isNotBlank()) put("scanRecordHex", device.scanRecordHex.take(512))
+                        if (device.broadcastProtocolName.isNotBlank()) put("broadcastProtocolName", device.broadcastProtocolName.take(160))
                         put("connected", device.connected)
                         put("isDefault", device.isDefault)
                         put("protocolName", device.protocolName)

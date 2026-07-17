@@ -906,6 +906,7 @@ class BridgeViewModel : ViewModel() {
         relay.syncDevices(
             addresses.map { address ->
                 val remembered = saved.firstOrNull { it.address == address }
+                val scanned = devices.firstOrNull { it.address == address }
                 val isCurrent = address == selectedAddress
                 val status = protocolStatusFor(address)
                 RelayDevice(
@@ -915,6 +916,14 @@ class BridgeViewModel : ViewModel() {
                         deviceRuntimeStore.displayName(address).isNotBlank() -> deviceRuntimeStore.displayName(address)
                         else -> remembered?.name.orEmpty().ifBlank { "蓝牙设备" }
                     },
+                    bleAddress = address,
+                    connectable = scanned?.connectable ?: !address.startsWith("virtual:"),
+                    serviceUuids = scanned?.serviceUuids.orEmpty(),
+                    manufacturerData = scanned?.manufacturerData?.ifBlank { remembered?.manufacturerData.orEmpty() }
+                        ?: remembered?.manufacturerData.orEmpty(),
+                    scanRecordHex = scanned?.scanRecordHex?.ifBlank { remembered?.scanRecordHex.orEmpty() }
+                        ?: remembered?.scanRecordHex.orEmpty(),
+                    broadcastProtocolName = scanned?.broadcastProtocolName.orEmpty(),
                     connected = deviceRuntimeStore.connectionState(address) == BleConnectionState.Ready,
                     isDefault = address == defaultAddress,
                     protocolName = when {
