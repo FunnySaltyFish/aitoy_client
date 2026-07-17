@@ -93,6 +93,7 @@ internal object BleProtocolRegistry {
                     SistalkPopocatProtocol,
                     SistalkMonsterPartyMp2Protocol,
                     SistalkWeightless808Protocol,
+                    BeYourLoverV1Protocol,
                     BeYourLoverProtocol,
                     SistalkMonsterPartyProtocol,
                     SistalkMixPwmProtocol,

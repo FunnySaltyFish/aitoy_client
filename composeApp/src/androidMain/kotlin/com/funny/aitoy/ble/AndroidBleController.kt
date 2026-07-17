@@ -1493,7 +1493,21 @@ class AndroidBleController(
 
     private fun shouldUploadGattDiscoverySummary(): Boolean {
         val probe = "$connectedName $connectedManufacturerData $connectedScanRecordHex".lowercase()
-        return listOf("qctt", "kisstoy", "tutu", "tutuii", "突突", "迷路", "4a 4c 41 49 53 44 4b")
+        return listOf(
+            "qctt",
+            "kisstoy",
+            "tutu",
+            "tutuii",
+            "突突",
+            "迷路",
+            "4a 4c 41 49 53 44 4b",
+            "ankni",
+            "mizzzee",
+            "miyu",
+            "xhtkj",
+            "qd 1",
+            "0x642",
+        )
             .any(probe::contains)
     }
 

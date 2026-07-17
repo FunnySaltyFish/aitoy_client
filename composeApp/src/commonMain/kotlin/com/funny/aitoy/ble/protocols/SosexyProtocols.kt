@@ -111,6 +111,12 @@ internal fun BleProtocolStatus.independentFunctionModeMax(feature: BleProtocolFe
     when (id) {
         AnkniMxProtocol.status.id -> modeMax.coerceAtLeast(1)
         CachitoDaxiuBroadcastProtocol.status.id -> 0
+        "beyourlover_bx288a",
+        "beyourlover_hx029a_v1",
+        "beyourlover_vx357b_v1",
+        "beyourlover_va422a_v1",
+        "beyourlover_ct654a_v1",
+        "beyourlover_vv468a" -> feature.modeMax
         MesanelProtocol.status.id,
         "mesanel_coco",
         "mesanel_cocopro",

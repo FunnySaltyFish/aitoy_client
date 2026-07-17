@@ -204,6 +204,85 @@ class SvakomQhSx007eProtocolTest {
     }
 
     @Test
+    fun beYourLoverV1Bx288aResolvesPulseSuckRoute() {
+        val protocol = BleProtocolRegistry.resolveNative(beYourLoverV1Fingerprint(name = "BX288A", productCode = 0xF7, functionCode = 0x20))
+            ?: error("BX288A protocol not resolved")
+
+        assertEquals("beyourlover_bx288a", protocol.status.id)
+        assertEquals(ToyControlStyle.IndependentFunctions, protocol.status.controlStyle)
+        assertEquals(listOf("吮吸"), protocol.status.channelNames)
+
+        val suck = protocol.commandsFor(ToyControlAction.Combined(mode = 1 * 100, intensity = 6))
+        assertEquals("550303000107", assertIs<BleProtocolOperation.Write>(suck[0]).bytes.hexUpper())
+    }
+
+    @Test
+    fun beYourLoverV1Hx029aPulseNameResolvesNativeSuckRoute() {
+        val protocol = BleProtocolRegistry.resolveNative(beYourLoverV1Fingerprint(name = "QH-HX029A-B", productCode = 0xF7, functionCode = 0x20))
+            ?: error("HX029A V1 protocol not resolved")
+
+        assertEquals("beyourlover_hx029a_v1", protocol.status.id)
+        assertEquals(listOf("吮吸"), protocol.status.channelNames)
+
+        val suck = protocol.commandsFor(ToyControlAction.Combined(mode = 1 * 100, intensity = 8))
+        assertEquals("550303000109", assertIs<BleProtocolOperation.Write>(suck[0]).bytes.hexUpper())
+    }
+
+    @Test
+    fun beYourLoverV1Vx357bResolvesSuckAndVibrateRoute() {
+        val protocol = BleProtocolRegistry.resolveNative(beYourLoverV1Fingerprint(name = "VX357B", productCode = 0xF7, functionCode = 0x20))
+            ?: error("VX357B protocol not resolved")
+
+        assertEquals("beyourlover_vx357b_v1", protocol.status.id)
+        assertEquals(listOf("吮吸", "震动"), protocol.status.channelNames)
+
+        val suck = protocol.commandsFor(ToyControlAction.Combined(mode = 1 * 100, intensity = 7))
+        assertEquals("550900000700", assertIs<BleProtocolOperation.Write>(suck[0]).bytes.hexUpper())
+
+        val vibrate = protocol.commandsFor(ToyControlAction.Combined(mode = 2 * 100, intensity = 30))
+        assertEquals("55030000030A", assertIs<BleProtocolOperation.Write>(vibrate[0]).bytes.hexUpper())
+    }
+
+    @Test
+    fun beYourLoverV1KnownVibrateNamesResolveWithoutStealingQhSx007e() {
+        val va422a = BleProtocolRegistry.resolveNative(beYourLoverV1Fingerprint(name = "VA422A", productCode = 0xF4, functionCode = 0x00))
+            ?: error("VA422A protocol not resolved")
+        assertEquals("beyourlover_va422a_v1", va422a.status.id)
+        assertEquals("550400000164AA", assertIs<BleProtocolOperation.Write>(
+            va422a.commandsFor(ToyControlAction.Combined(mode = 1 * 100, intensity = 4))[0],
+        ).bytes.hexUpper())
+
+        val vv468a = BleProtocolRegistry.resolveNative(beYourLoverV1Fingerprint(name = "VV468A", productCode = 0xF4, functionCode = 0x00))
+            ?: error("VV468A protocol not resolved")
+        assertEquals("beyourlover_vv468a", vv468a.status.id)
+        assertEquals("550400000164AA", assertIs<BleProtocolOperation.Write>(
+            vv468a.commandsFor(ToyControlAction.Combined(mode = 1 * 100, intensity = 4))[0],
+        ).bytes.hexUpper())
+
+        assertEquals("svakom_vibrate_suck", BleProtocolRegistry.resolveNative(qhSx007eFingerprint())?.status?.id)
+    }
+
+    @Test
+    fun beYourLoverReportedV2ModelsResolveFromOfficialProductCodes() {
+        assertEquals("beyourlover_vx737b", BleProtocolRegistry.resolveNative(beYourLoverFingerprint(86, "VX737B"))?.status?.id)
+        assertEquals("beyourlover_hx029a", BleProtocolRegistry.resolveNative(beYourLoverFingerprint(361, "HX029A"))?.status?.id)
+        assertEquals("beyourlover_cl279b_v", BleProtocolRegistry.resolveNative(beYourLoverFingerprint(91, "CL279B"))?.status?.id)
+        assertEquals("beyourlover_cl279b_s", BleProtocolRegistry.resolveNative(beYourLoverFingerprint(92, "CL279B"))?.status?.id)
+    }
+
+    @Test
+    fun beYourLoverVx607pShowsStretchButKeepsOfficialCommandBranch() {
+        val protocol = BleProtocolRegistry.resolveNative(beYourLoverFingerprint(productCode = 392, name = "VX607P"))
+            ?: error("VX607P protocol not resolved")
+
+        assertEquals("beyourlover_vx607p", protocol.status.id)
+        assertEquals(listOf("吮吸", "伸缩"), protocol.status.channelNames)
+
+        val stretch = protocol.commandsFor(ToyControlAction.Combined(mode = 2 * 100 + 10, intensity = 8))
+        assertEquals("550300000A0800", assertIs<BleProtocolOperation.Write>(stretch[0]).bytes.hexUpper())
+    }
+
+    @Test
     fun st462aStopSendsAllThreeChannelStopsAndGlobalFallback() {
         val protocol = BleProtocolRegistry.resolveNative(st462aFingerprint())
             ?: error("ST462A protocol not resolved")
@@ -381,6 +460,19 @@ class SvakomQhSx007eProtocolTest {
         name = name,
         address = "FF:25:06:B7:61:D5",
         manufacturerData = "0x32:53 56 41 02 FF 32 25 06 B7 61 D5 FF 32 ${productCode.v2ProductCodeHex()} 00 00 BB",
+        scanRecordHex = "",
+        serviceUuids = setOf(SERVICE_UUID),
+        characteristicUuids = setOf(WRITE_UUID, NOTIFY_UUID),
+    )
+
+    private fun beYourLoverV1Fingerprint(
+        name: String,
+        productCode: Int,
+        functionCode: Int,
+    ) = BleGattFingerprint(
+        name = name,
+        address = "FF:24:09:07:12:97",
+        manufacturerData = "0x101:53 56 41 10 ${"%02X".format(productCode)} FF 24 09 07 12 97 ${"%02X".format(functionCode)}",
         scanRecordHex = "",
         serviceUuids = setOf(SERVICE_UUID),
         characteristicUuids = setOf(WRITE_UUID, NOTIFY_UUID),

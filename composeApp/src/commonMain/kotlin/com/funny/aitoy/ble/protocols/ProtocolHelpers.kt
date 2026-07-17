@@ -148,6 +148,18 @@ internal fun BleGattFingerprint.svakomProductCode(): Int? {
     }
 }
 
+internal fun BleGattFingerprint.svakomProtocolVersion(): Int? =
+    svakomManufacturerPayload()
+        ?.takeIf { it.size >= 4 }
+        ?.get(3)
+        ?.unsignedByte()
+
+internal fun BleGattFingerprint.svakomV1FunctionCode(): Int? =
+    svakomManufacturerPayload()
+        ?.takeIf { it.size >= 12 && it.getOrNull(3)?.unsignedByte() != 0x02 }
+        ?.get(11)
+        ?.unsignedByte()
+
 internal fun BleGattFingerprint.svakomManufacturerPayload(): ByteArray? {
     val mappedPayload = manufacturerData.toManufacturerDataMap()
         .values

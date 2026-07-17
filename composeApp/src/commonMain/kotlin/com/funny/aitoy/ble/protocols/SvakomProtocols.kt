@@ -149,6 +149,202 @@ internal object SvakomVibrateSuckProtocol : BleDeviceProtocol {
         }
 }
 
+// 礼物猫 / BeYourLover V1：官方 DeviceBean 按 SVA V1 广播的产品码和功能位识别，
+// 部分型号还按底层设备名特化（BX288A、VX357B、VV468A、CT654A）。
+internal object BeYourLoverV1Protocol : BleDeviceProtocol {
+    private val serviceUuid = Uuid.parse("0000ffe0-0000-1000-8000-00805f9b34fb")
+    private val writeUuid = Uuid.parse("0000ffe1-0000-1000-8000-00805f9b34fb")
+
+    override val status = BE_YOUR_LOVER_V1_VIBRATE.status
+
+    override fun matches(fingerprint: BleGattFingerprint): Boolean {
+        val hasWriteGatt = fingerprint.serviceUuids.contains(serviceUuid) &&
+                fingerprint.characteristicUuids.contains(writeUuid)
+        return hasWriteGatt &&
+                fingerprint.hasSvakomManufacturerData() &&
+                fingerprint.beYourLoverV1Profile() != null
+    }
+
+    override fun createInstance(fingerprint: BleGattFingerprint): BleDeviceProtocol =
+        BeYourLoverV1Session(fingerprint.beYourLoverV1Profile() ?: BE_YOUR_LOVER_V1_VIBRATE)
+
+    override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> = emptyList()
+}
+
+private class BeYourLoverV1Session(
+    private val profile: BeYourLoverV1Profile,
+) : BleDeviceProtocol {
+    private val writeUuid = Uuid.parse("0000ffe1-0000-1000-8000-00805f9b34fb")
+    private val states = profile.functions.associate { it.code to 0 }.toMutableMap()
+
+    override val status: BleProtocolStatus = profile.status
+
+    override fun matches(fingerprint: BleGattFingerprint): Boolean = false
+
+    override fun keepaliveIntervalMs(): Long = 1_500L
+
+    override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
+        when (action) {
+            is ToyControlAction.Pattern -> write(profile.defaultFunction, action.mode)
+            is ToyControlAction.Intensity -> write(profile.defaultFunction, action.value)
+            is ToyControlAction.Combined -> {
+                val function = profile.functionByCode(action.mode / 100)
+                val value = action.intensity.takeIf { it > 0 } ?: (action.mode % 100)
+                write(function, value)
+            }
+            is ToyControlAction.DualMotor -> {
+                val first = profile.functions.getOrNull(0)
+                val second = profile.functions.getOrNull(1)
+                buildList {
+                    if (first != null) add(writeOperation(first, action.internalIntensity))
+                    if (second != null) add(writeOperation(second, action.externalIntensity))
+                }
+            }
+            ToyControlAction.Stop -> stopAll()
+        }
+
+    private fun write(function: BeYourLoverV1Function, rawValue: Int): List<BleProtocolOperation> =
+        listOf(writeOperation(function, rawValue))
+
+    private fun writeOperation(function: BeYourLoverV1Function, rawValue: Int): BleProtocolOperation.Write {
+        val value = rawValue.coerceIn(0, function.max)
+        states[function.code] = value
+        return BleProtocolOperation.Write(
+            characteristicUuid = writeUuid,
+            bytes = function.frame(value),
+            withResponse = false,
+        )
+    }
+
+    private fun stopAll(): List<BleProtocolOperation> =
+        profile.functions.map { function ->
+            BleProtocolOperation.Write(
+                characteristicUuid = writeUuid,
+                bytes = function.frame(0),
+                withResponse = false,
+            )
+        } + profile.extraStopFrames.map { frame ->
+            BleProtocolOperation.Write(writeUuid, frame, withResponse = false)
+        }
+}
+
+private data class BeYourLoverV1Function(
+    val code: Int,
+    val type: String,
+    val label: String,
+    val max: Int,
+    val frame: (Int) -> ByteArray,
+)
+
+private data class BeYourLoverV1Profile(
+    val id: String,
+    val displayName: String,
+    val functions: List<BeYourLoverV1Function>,
+    val extraStopFrames: List<ByteArray> = emptyList(),
+) {
+    val defaultFunction: BeYourLoverV1Function = functions.first()
+    val status: BleProtocolStatus = svakomV2Status(
+        id = id,
+        displayName = displayName,
+        functions = functions.map {
+            SvakomV2Function(
+                code = it.code,
+                type = it.type,
+                label = it.label,
+                command = 0,
+                modeMax = 0,
+                intensityMax = it.max,
+            )
+        },
+    )
+
+    fun functionByCode(code: Int): BeYourLoverV1Function =
+        functions.firstOrNull { it.code == code } ?: defaultFunction
+}
+
+private val BE_YOUR_LOVER_V1_BX288A = BeYourLoverV1Profile(
+    id = "beyourlover_bx288a",
+    displayName = "礼物猫 BX288A",
+    functions = listOf(
+        BeYourLoverV1Function(1, "constrict", "吮吸", 9) { value ->
+            v1Bytes(0x55, 0x03, 0x03, 0x00, if (value == 0) 0x00 else 0x01, value + 1)
+        },
+    ),
+)
+
+private val BE_YOUR_LOVER_V1_HX029A = BeYourLoverV1Profile(
+    id = "beyourlover_hx029a_v1",
+    displayName = "礼物猫 HX029A",
+    functions = listOf(
+        BeYourLoverV1Function(1, "constrict", "吮吸", 9) { value ->
+            v1Bytes(0x55, 0x03, 0x03, 0x00, if (value == 0) 0x00 else 0x01, value + 1)
+        },
+    ),
+)
+
+private val BE_YOUR_LOVER_V1_VX357B = BeYourLoverV1Profile(
+    id = "beyourlover_vx357b_v1",
+    displayName = "礼物猫 VX357B",
+    functions = listOf(
+        BeYourLoverV1Function(1, "constrict", "吮吸", 10) { value ->
+            v1Bytes(0x55, 0x09, 0x00, 0x00, value, 0x00)
+        },
+        BeYourLoverV1Function(2, "vibrate", "震动", 30) { value ->
+            var speed = value % 10
+            var intensity = if (value == 0) 0 else value / 10 + 1
+            if (speed == 0 && intensity != 0) {
+                speed = 10
+                intensity -= 1
+            }
+            v1Bytes(0x55, 0x03, 0x00, 0x00, intensity, speed)
+        },
+    ),
+    extraStopFrames = listOf(v1Bytes(0x55, 0x03, 0x00, 0x00, 0x00, 0x00)),
+)
+
+private fun beYourLoverV1VibrateProfile(model: String) = BeYourLoverV1Profile(
+    id = "beyourlover_${model.lowercase()}_v1",
+    displayName = "礼物猫 $model",
+    functions = listOf(
+        BeYourLoverV1Function(1, "vibrate", "震动", 10) { value ->
+            v1Bytes(0x55, 0x04, 0x00, 0x00, if (value == 0) 0x00 else 0x01, value * 25, 0xAA)
+        },
+    ),
+    extraStopFrames = listOf(v1Bytes(0x55, 0x03, 0x00, 0x00, 0x00, 0x00)),
+)
+
+private val BE_YOUR_LOVER_V1_VIBRATE = beYourLoverV1VibrateProfile("V1")
+private val BE_YOUR_LOVER_V1_VA422A = beYourLoverV1VibrateProfile("VA422A")
+private val BE_YOUR_LOVER_V1_CT654A = beYourLoverV1VibrateProfile("CT654A")
+
+private val BE_YOUR_LOVER_V1_VV468A = BeYourLoverV1Profile(
+    id = "beyourlover_vv468a",
+    displayName = "礼物猫 VV468A",
+    functions = listOf(
+        BeYourLoverV1Function(1, "vibrate", "震动", 10) { value ->
+            v1Bytes(0x55, 0x04, 0x00, 0x00, 0x01, value * 25, 0xAA)
+        },
+    ),
+    extraStopFrames = listOf(v1Bytes(0x55, 0x03, 0x00, 0x00, 0x00, 0x00)),
+)
+
+private fun BleGattFingerprint.beYourLoverV1Profile(): BeYourLoverV1Profile? {
+    if (svakomProtocolVersion() == 0x02) return null
+    val name = name.normalizedDeviceName()
+    return when {
+        name.contains("bx288a") -> BE_YOUR_LOVER_V1_BX288A
+        name.contains("hx029a") || name.contains("qhhx029ab") -> BE_YOUR_LOVER_V1_HX029A
+        name.contains("vx357a") || name.contains("vx357b") || name.contains("vx357d") -> BE_YOUR_LOVER_V1_VX357B
+        name.contains("va422a") -> BE_YOUR_LOVER_V1_VA422A
+        name.contains("ct654a") -> BE_YOUR_LOVER_V1_CT654A
+        name.contains("vv468a") -> BE_YOUR_LOVER_V1_VV468A
+        else -> null
+    }
+}
+
+private fun v1Bytes(vararg values: Int): ByteArray =
+    values.map { it.coerceIn(0, 0xFF).toByte() }.toByteArray()
+
 // 礼物猫 / BeYourLover：官方 ProductCodeMapper.BE_YOUR_LOVER_MAP 产品码表。
 // 设备使用 SVA V2 广播前缀和 FFE0/FFE1 写入通道；分流只看官方产品码和功能表，不按中文商品名匹配。
 internal object BeYourLoverProtocol : BleDeviceProtocol {
@@ -741,6 +937,9 @@ private fun bylDoubleVibrate(mode: Int, strength: Int?) =
 private fun bylStretch(mode: Int, strength: Int?) =
     BeYourLoverFunctionSpec("oscillate", "伸缩", 0x08, mode, strength)
 
+private fun bylStretchWithVibrateCommand(mode: Int, strength: Int?) =
+    BeYourLoverFunctionSpec("oscillate", "伸缩", 0x03, mode, strength)
+
 private fun bylFlap(mode: Int, strength: Int?) =
     BeYourLoverFunctionSpec("flap", "拍打", 0x07, mode, strength)
 
@@ -840,7 +1039,7 @@ internal val BeYourLoverProfiles: Map<Int, SvakomV2Profile> = mapOf(
     381 to beYourLoverProfile("VP625B", bylStretch(5, 10), bylVibrate(10, 10)),
     382 to beYourLoverProfile("VX737C", bylDoubleVibrate(12, 10)),
     383 to beYourLoverProfile("S137P", bylVibrate(10, 10), bylVibrate(10, 10)),
-    392 to beYourLoverProfile("VX607P", bylSuck(10, 10), bylVibrate(10, 10)),
+    392 to beYourLoverProfile("VX607P", bylSuck(10, 10), bylStretchWithVibrateCommand(10, 10)),
 )
 
 internal fun Int?.svakomV2Profile(): SvakomV2Profile =
