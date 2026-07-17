@@ -224,7 +224,7 @@ class KissToyProtocolTest {
         assertFalse(protocol.status.supportsMode)
 
         val init = protocol.initialize(fingerprint)
-        assertEquals(3, init.size)
+        assertEquals(9, init.size)
         assertEquals(AE3A_NOTIFY_UUID, assertIs<BleProtocolOperation.SubscribeNotify>(init[0]).characteristicUuid)
         val macRequest = assertIs<BleProtocolOperation.Write>(init[1])
         assertEquals(AE3A_WRITE_UUID, macRequest.characteristicUuid)
@@ -236,6 +236,12 @@ class KissToyProtocolTest {
             plaintext = emptyList(),
         )
         assertEquals(500L, assertIs<BleProtocolOperation.Sleep>(init[2]).millis)
+        assertKissToyAesCcmDeviceInfoInit(init[3], subId = 0x00)
+        assertEquals(200L, assertIs<BleProtocolOperation.Sleep>(init[4]).millis)
+        assertKissToyAesCcmDeviceInfoInit(init[5], subId = 0xf1)
+        assertEquals(200L, assertIs<BleProtocolOperation.Sleep>(init[6]).millis)
+        assertKissToyAesCcmDeviceInfoInit(init[7], subId = 0xf2)
+        assertEquals(200L, assertIs<BleProtocolOperation.Sleep>(init[8]).millis)
 
         val run = protocol.commandsFor(ToyControlAction.Intensity(50))
         val write = assertSingleKissToyAesCcmBasicControlWrite(run, AE3A_WRITE_UUID)
@@ -725,6 +731,21 @@ class KissToyProtocolTest {
         assertEquals(29, write.bytes.size)
         assertEquals(listOf(0x60, 0x02, 0x01, 0x19), write.bytes.take(4).map { it.toInt() and 0xff })
         return write
+    }
+
+    private fun assertKissToyAesCcmDeviceInfoInit(
+        operation: BleProtocolOperation,
+        subId: Int,
+    ) {
+        val write = assertIs<BleProtocolOperation.Write>(operation)
+        assertEquals(AE3A_WRITE_UUID, write.characteristicUuid)
+        assertFalse(write.withResponse)
+        assertKissToyAesCcmPacket(
+            packet = write.bytes,
+            cmdId = 0x00,
+            subId = subId,
+            plaintext = emptyList(),
+        )
     }
 
     private fun assertKissToyBasicControlWrites(
