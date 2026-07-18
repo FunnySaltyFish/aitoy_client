@@ -1,7 +1,7 @@
 [versions]
 agp = "8.11.2"
-project-versionCode = "000908"
-project-versionName = "0.9.8"
+project-versionCode = "000909"
+project-versionName = "0.9.9"
 android-compileSdk = "36"
 android-minSdk = "24"
 android-targetSdk = "36"
