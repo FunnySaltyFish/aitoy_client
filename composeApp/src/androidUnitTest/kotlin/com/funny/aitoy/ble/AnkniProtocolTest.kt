@@ -30,6 +30,34 @@ class AnkniProtocolTest {
     }
 
     @Test
+    fun ankniBxUsesFfe1SingleSuctionRoute() {
+        val fingerprint = BleGattFingerprint(
+            name = "ANKNI BX",
+            address = "8B:C2:D2:16:6D:33",
+            manufacturerData = "0xf0f:06 75 72 74 2D 30 31 00 00 00 00 00 00 00",
+            scanRecordHex = "",
+            serviceUuids = setOf(FFE0_SERVICE_UUID),
+            characteristicUuids = setOf(FFE1_WRITE_UUID),
+        )
+        val protocol = BleProtocolRegistry.resolveNative(fingerprint)
+            ?: error("ANKNI BX protocol not resolved")
+
+        assertEquals("ankni_bx", protocol.status.id)
+        assertEquals(ToyControlStyle.IntensityOnly, protocol.status.controlStyle)
+        assertEquals("吮吸", protocol.status.intensityLabel)
+        assertEquals(10, protocol.status.intensityMax)
+
+        val init = protocol.initialize(fingerprint).single()
+        assertEquals(FFE1_WRITE_UUID, assertIs<BleProtocolOperation.SubscribeNotify>(init).characteristicUuid)
+
+        val run = protocol.commandsFor(ToyControlAction.Intensity(5)).single()
+        assertEquals("AA080232C8AE", assertIs<BleProtocolOperation.Write>(run).bytes.hexUpper())
+
+        val stop = protocol.commandsFor(ToyControlAction.Stop).single()
+        assertEquals("AA08020000B4", assertIs<BleProtocolOperation.Write>(stop).bytes.hexUpper())
+    }
+
+    @Test
     fun ankniMxWritesIndependentModeStateForSuctionAndVibration() {
         val protocol = BleProtocolRegistry.resolveNative(ankniMxFingerprint())
             ?: error("ANKNI MX protocol not resolved")
@@ -82,5 +110,7 @@ class AnkniProtocolTest {
         val SERVICE_UUID: Uuid = Uuid.parse("0000dddd-0000-1000-8000-00805f9b34fb")
         val WRITE_UUID: Uuid = Uuid.parse("0000ddd1-0000-1000-8000-00805f9b34fb")
         val NOTIFY_UUID: Uuid = Uuid.parse("0000ddd2-0000-1000-8000-00805f9b34fb")
+        val FFE0_SERVICE_UUID: Uuid = Uuid.parse("0000ffe0-0000-1000-8000-00805f9b34fb")
+        val FFE1_WRITE_UUID: Uuid = Uuid.parse("0000ffe1-0000-1000-8000-00805f9b34fb")
     }
 }

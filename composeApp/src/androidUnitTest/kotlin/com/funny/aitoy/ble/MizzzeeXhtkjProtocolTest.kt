@@ -57,10 +57,23 @@ class MizzzeeXhtkjProtocolTest {
         assertTrue(protocols.any { it.status.id == "ankni_qd1_ff12_gatt" })
 
         val protocol = protocols.first()
+        assertEquals(ToyControlStyle.IndependentFunctions, protocol.status.controlStyle)
+        assertEquals(listOf("震动", "吮吸"), protocol.status.features.map { it.label })
+        assertEquals(listOf(0, 0), protocol.status.features.map { protocol.status.independentFunctionModeMax(it) })
         val init = protocol.initialize(fingerprint)
         assertEquals(NOTIFY_UUID, assertIs<BleProtocolOperation.SubscribeNotify>(init[0]).characteristicUuid)
         assertEquals(DEVICE_INFO_UUID, assertIs<BleProtocolOperation.Read>(init[1]).characteristicUuid)
         assertEquals("0312F600", assertIs<BleProtocolOperation.Write>(init[2]).bytes.hexUpper())
+
+        val vibrationOnly = assertIs<BleProtocolOperation.Write>(
+            protocol.commandsFor(ToyControlAction.Combined(mode = 101, intensity = 50)).single(),
+        )
+        assertEquals("0312F300FC00FE40013CA600FC00FE40013C0000", vibrationOnly.bytes.hexUpper())
+
+        val suctionAdded = assertIs<BleProtocolOperation.Write>(
+            protocol.commandsFor(ToyControlAction.Combined(mode = 201, intensity = 25)).single(),
+        )
+        assertEquals("0312F300FC00FE40013CA600FC00FE40017C7900", suctionAdded.bytes.hexUpper())
 
         val strength = assertIs<BleProtocolOperation.Write>(
             protocol.commandsFor(ToyControlAction.Intensity(50)).single(),
@@ -89,6 +102,12 @@ class MizzzeeXhtkjProtocolTest {
         val initWrite = assertIs<BleProtocolOperation.Write>(init[1])
         assertEquals(FF15_WRITE_UUID, initWrite.characteristicUuid)
         assertEquals("0312F600", initWrite.bytes.hexUpper())
+
+        val vibrationOnly = assertIs<BleProtocolOperation.Write>(
+            protocol.commandsFor(ToyControlAction.Combined(mode = 101, intensity = 50)).single(),
+        )
+        assertEquals(FF15_WRITE_UUID, vibrationOnly.characteristicUuid)
+        assertEquals("0312F300FC00FE40013CA600FC00FE40013C0000", vibrationOnly.bytes.hexUpper())
 
         val strength = assertIs<BleProtocolOperation.Write>(
             protocol.commandsFor(ToyControlAction.Intensity(50)).single(),

@@ -33,9 +33,11 @@ import kotlin.uuid.Uuid
 
 internal object AnkniQd1XhtkjProtocol : BleDeviceProtocol {
     private val serviceUuid = Uuid.parse("0000ff10-0000-1000-8000-00805f9b34fb")
+    private val notifyUuid = Uuid.parse("0000ff11-0000-1000-8000-00805f9b34fb")
     private val writeUuid = Uuid.parse("0000ff12-0000-1000-8000-00805f9b34fb")
+    private val deviceInfoUuid = Uuid.parse("00002a50-0000-1000-8000-00805f9b34fb")
 
-    override val status = MizzzeeXhtkjProtocol.status.copy(
+    override val status = ANKNI_QD1_XHTKJ_STATUS.copy(
         id = "ankni_qd1_xhtkj",
         displayName = "ANKNI QD1",
     )
@@ -47,11 +49,19 @@ internal object AnkniQd1XhtkjProtocol : BleDeviceProtocol {
                 fingerprint.characteristicUuids.contains(writeUuid)
     }
 
+    override fun createInstance(fingerprint: BleGattFingerprint): BleDeviceProtocol =
+        AnkniQd1XhtkjRouteProtocol(
+            status = status,
+            writeUuid = writeUuid,
+            notifyUuid = notifyUuid,
+            deviceInfoUuid = deviceInfoUuid,
+        )
+
     override fun initialize(fingerprint: BleGattFingerprint): List<BleProtocolOperation> =
-        MizzzeeXhtkjProtocol.initialize(fingerprint)
+        createInstance(fingerprint).initialize(fingerprint)
 
     override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
-        MizzzeeXhtkjProtocol.commandsFor(action)
+        qd1XhtkjCommandsFor(action, status, writeUuid, IntArray(2))
 }
 
 internal object AnkniQd1Ff15XhtkjProtocol : BleDeviceProtocol {
@@ -59,7 +69,7 @@ internal object AnkniQd1Ff15XhtkjProtocol : BleDeviceProtocol {
     private val notifyUuid = Uuid.parse("0000ff14-0000-1000-8000-00805f9b34fb")
     private val writeUuid = Uuid.parse("0000ff15-0000-1000-8000-00805f9b34fb")
 
-    override val status = MizzzeeXhtkjProtocol.status.copy(
+    override val status = ANKNI_QD1_XHTKJ_STATUS.copy(
         id = "ankni_qd1_xhtkj_ff15",
         displayName = "ANKNI QD1",
     )
@@ -71,16 +81,44 @@ internal object AnkniQd1Ff15XhtkjProtocol : BleDeviceProtocol {
                 fingerprint.characteristicUuids.contains(writeUuid)
     }
 
+    override fun createInstance(fingerprint: BleGattFingerprint): BleDeviceProtocol =
+        AnkniQd1XhtkjRouteProtocol(
+            status = status,
+            writeUuid = writeUuid,
+            notifyUuid = notifyUuid,
+            deviceInfoUuid = null,
+        )
+
+    override fun initialize(fingerprint: BleGattFingerprint): List<BleProtocolOperation> =
+        createInstance(fingerprint).initialize(fingerprint)
+
+    override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
+        qd1XhtkjCommandsFor(action, status, writeUuid, IntArray(2))
+}
+
+private class AnkniQd1XhtkjRouteProtocol(
+    override val status: BleProtocolStatus,
+    private val writeUuid: Uuid,
+    private val notifyUuid: Uuid,
+    private val deviceInfoUuid: Uuid?,
+) : BleDeviceProtocol {
+    private val channelValues = IntArray(2)
+
+    override fun matches(fingerprint: BleGattFingerprint): Boolean = false
+
     override fun initialize(fingerprint: BleGattFingerprint): List<BleProtocolOperation> =
         buildList {
             if (fingerprint.characteristicUuids.contains(notifyUuid)) {
                 add(BleProtocolOperation.SubscribeNotify(notifyUuid))
             }
+            if (deviceInfoUuid != null && fingerprint.characteristicUuids.contains(deviceInfoUuid)) {
+                add(BleProtocolOperation.Read(deviceInfoUuid))
+            }
             add(xhtkjWrite(writeUuid, byteArrayOf(0x03, 0x12, 0xf6.toByte(), 0x00)))
         }
 
     override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
-        xhtkjCommandsFor(action, status, writeUuid)
+        qd1XhtkjCommandsFor(action, status, writeUuid, channelValues)
 }
 
 internal object MizzzeeXhtkjProtocol : BleDeviceProtocol {
@@ -126,6 +164,26 @@ private val XHTKJ_STATUS = BleProtocolStatus(
     repeatIntervalMs = 200,
 )
 
+private val ANKNI_QD1_XHTKJ_STATUS = BleProtocolStatus(
+    id = "ankni_qd1_xhtkj",
+    displayName = "ANKNI QD1",
+    controllable = true,
+    intensityMax = 100,
+    supportsMode = true,
+    modeMax = 10,
+    controlStyle = ToyControlStyle.IndependentFunctions,
+    modeLabel = "预设节奏",
+    modeNames = List(10) { index -> "模式 ${index + 1}" },
+    intensityLabel = "强度",
+    channelNames = listOf("震动", "吮吸"),
+    features = listOf(
+        BleProtocolFeature(type = "vibrate", min = 0, max = 100, index = 0, label = "震动", functionCode = 1),
+        BleProtocolFeature(type = "constrict", min = 0, max = 100, index = 1, label = "吮吸", functionCode = 2),
+    ),
+    automatic = true,
+    repeatIntervalMs = 200,
+)
+
 private fun xhtkjCommandsFor(
     action: ToyControlAction,
     status: BleProtocolStatus,
@@ -139,10 +197,66 @@ private fun xhtkjCommandsFor(
         ToyControlAction.Stop -> listOf(xhtkjClearCommand(writeUuid), xhtkjResetModelCommand(writeUuid))
     }
 
-private fun xhtkjStrengthCommand(writeUuid: Uuid, intensity: Int): BleProtocolOperation.Write {
-    val encoded = xhtkjEncodeStrength(intensity)
-    val low = (encoded and 0xff).toByte()
-    val high = ((encoded ushr 8) and 0xff).toByte()
+private fun qd1XhtkjCommandsFor(
+    action: ToyControlAction,
+    status: BleProtocolStatus,
+    writeUuid: Uuid,
+    channelValues: IntArray,
+): List<BleProtocolOperation> =
+    when (action) {
+        is ToyControlAction.Pattern -> listOf(xhtkjModelCommand(writeUuid, action.mode, status.modeMax))
+        is ToyControlAction.Intensity -> {
+            val value = action.value.coerceIn(0, status.intensityMax)
+            channelValues[0] = value
+            channelValues[1] = value
+            listOf(xhtkjStrengthCommand(writeUuid, channelValues[0], channelValues[1]))
+        }
+        is ToyControlAction.Combined -> {
+            updateQd1XhtkjFunction(action, status, channelValues)
+            listOf(xhtkjStrengthCommand(writeUuid, channelValues[0], channelValues[1]))
+        }
+        is ToyControlAction.DualMotor -> {
+            channelValues[0] = action.internalIntensity.coerceIn(0, status.intensityMax)
+            channelValues[1] = action.externalIntensity.coerceIn(0, status.intensityMax)
+            listOf(xhtkjStrengthCommand(writeUuid, channelValues[0], channelValues[1]))
+        }
+        ToyControlAction.Stop -> {
+            channelValues.fill(0)
+            listOf(
+                xhtkjStrengthCommand(writeUuid, 0, 0),
+                xhtkjClearCommand(writeUuid),
+                xhtkjResetModelCommand(writeUuid),
+            )
+        }
+    }
+
+private fun updateQd1XhtkjFunction(
+    action: ToyControlAction.Combined,
+    status: BleProtocolStatus,
+    channelValues: IntArray,
+) {
+    val functionCode = action.mode / 100
+    val value = action.intensity.coerceIn(0, status.intensityMax)
+    when (functionCode) {
+        1 -> channelValues[0] = value
+        2 -> channelValues[1] = value
+        else -> {
+            channelValues[0] = value
+            channelValues[1] = value
+        }
+    }
+}
+
+private fun xhtkjStrengthCommand(writeUuid: Uuid, intensity: Int): BleProtocolOperation.Write =
+    xhtkjStrengthCommand(writeUuid, intensity, intensity)
+
+private fun xhtkjStrengthCommand(writeUuid: Uuid, primaryIntensity: Int, secondaryIntensity: Int): BleProtocolOperation.Write {
+    val primary = xhtkjEncodeStrength(primaryIntensity)
+    val secondary = xhtkjEncodeStrength(secondaryIntensity)
+    val primaryLow = (primary and 0xff).toByte()
+    val primaryHigh = ((primary ushr 8) and 0xff).toByte()
+    val secondaryLow = (secondary and 0xff).toByte()
+    val secondaryHigh = ((secondary ushr 8) and 0xff).toByte()
     return xhtkjWrite(
         writeUuid,
         byteArrayOf(
@@ -155,16 +269,16 @@ private fun xhtkjStrengthCommand(writeUuid: Uuid, intensity: Int): BleProtocolOp
             0xfe.toByte(),
             0x40,
             0x01,
-            low,
-            high,
+            primaryLow,
+            primaryHigh,
             0x00,
             0xfc.toByte(),
             0x00,
             0xfe.toByte(),
             0x40,
             0x01,
-            low,
-            high,
+            secondaryLow,
+            secondaryHigh,
             0x00,
         ),
     )

@@ -21,6 +21,7 @@ class SosexyProtocolTest {
         assertEquals("constrict", protocol.status.features[0].type)
         assertEquals("vibrate", protocol.status.features[1].type)
         assertEquals("shock", protocol.status.features[2].type)
+        assertEquals(listOf(4, 4, 4), protocol.status.features.map { it.modeMax })
     }
 
     @Test
@@ -30,32 +31,30 @@ class SosexyProtocolTest {
     }
 
     @Test
-    fun scalarFunctionsWriteOnlySelectedMotorFrameWithResponse() {
+    fun scalarFunctionsWriteOfficialSelectedMotorFrameWithResponse() {
         val protocol = BleProtocolRegistry.resolveNative(sosexyFingerprint())
             ?: error("SOSEXY protocol not resolved")
 
         val suction = protocol.commandsFor(ToyControlAction.Combined(mode = 1 * 100 + 1, intensity = 50))
         assertEquals(1, suction.size)
-        assertEquals("010100020007113200081101", assertIs<BleProtocolOperation.Write>(suction[0]).bytes.hexUpper())
+        assertEquals("020007113200081101", assertIs<BleProtocolOperation.Write>(suction[0]).bytes.hexUpper())
         assertEquals(true, assertIs<BleProtocolOperation.Write>(suction[0]).withResponse)
 
         val vibration = protocol.commandsFor(ToyControlAction.Combined(mode = 2 * 100 + 1, intensity = 30))
-        assertEquals("010100020001111E00021101", assertIs<BleProtocolOperation.Write>(vibration[0]).bytes.hexUpper())
+        assertEquals("020001111E00021101", assertIs<BleProtocolOperation.Write>(vibration[0]).bytes.hexUpper())
 
-        val electric = protocol.commandsFor(ToyControlAction.Combined(mode = 3 * 100 + 1, intensity = 20))
-        assertEquals("010100020003111400041101", assertIs<BleProtocolOperation.Write>(electric[0]).bytes.hexUpper())
+        val electric = protocol.commandsFor(ToyControlAction.Combined(mode = 3 * 100 + 4, intensity = 20))
+        assertEquals("020003111400041104", assertIs<BleProtocolOperation.Write>(electric[0]).bytes.hexUpper())
     }
 
     @Test
-    fun stopSendsAllThreeMotorZeroFrames() {
+    fun stopSendsOfficialAllMotorZeroFrame() {
         val protocol = BleProtocolRegistry.resolveNative(sosexyFingerprint())
             ?: error("SOSEXY protocol not resolved")
 
         val stop = protocol.commandsFor(ToyControlAction.Stop)
-        assertEquals(3, stop.size)
-        assertEquals("010100020007110000081101", assertIs<BleProtocolOperation.Write>(stop[0]).bytes.hexUpper())
-        assertEquals("010100020001110000021101", assertIs<BleProtocolOperation.Write>(stop[1]).bytes.hexUpper())
-        assertEquals("010100020003110000041101", assertIs<BleProtocolOperation.Write>(stop[2]).bytes.hexUpper())
+        assertEquals(1, stop.size)
+        assertEquals("03000111000003110000071100", assertIs<BleProtocolOperation.Write>(stop[0]).bytes.hexUpper())
     }
 
     private fun sosexyFingerprint(

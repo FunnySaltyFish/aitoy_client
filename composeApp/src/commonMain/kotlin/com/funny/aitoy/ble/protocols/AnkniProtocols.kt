@@ -264,6 +264,63 @@ internal object Ankni0010Protocol : BleDeviceProtocol {
     private const val SLIDE_DURATION = 0xC8
 }
 
+internal object AnkniBxProtocol : BleDeviceProtocol {
+    private val serviceUuid = Uuid.parse("0000ffe0-0000-1000-8000-00805f9b34fb")
+    private val writeUuid = Uuid.parse("0000ffe1-0000-1000-8000-00805f9b34fb")
+
+    override val status = BleProtocolStatus(
+        id = "ankni_bx",
+        displayName = "ANKNI BX",
+        controllable = true,
+        intensityMax = 10,
+        supportsMode = false,
+        controlStyle = ToyControlStyle.IntensityOnly,
+        intensityLabel = "吮吸",
+        channelNames = listOf("吮吸"),
+        features = listOf(
+            BleProtocolFeature(type = "constrict", min = 0, max = 10, index = 0, label = "吮吸"),
+        ),
+        automatic = true,
+        repeatIntervalMs = BX_KEEP_ALIVE_MS,
+    )
+
+    override fun matches(fingerprint: BleGattFingerprint): Boolean {
+        val name = fingerprint.name.normalizedDeviceName()
+        if (name != "anknibx") return false
+        return fingerprint.serviceUuids.contains(serviceUuid) &&
+            fingerprint.characteristicUuids.contains(writeUuid)
+    }
+
+    override fun initialize(fingerprint: BleGattFingerprint): List<BleProtocolOperation> =
+        listOf(BleProtocolOperation.SubscribeNotify(writeUuid))
+
+    override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
+        when (action) {
+            is ToyControlAction.Intensity -> listOf(write(slideFrame(action.value)))
+            is ToyControlAction.Combined -> listOf(write(slideFrame(action.intensity)))
+            is ToyControlAction.DualMotor -> listOf(write(slideFrame(action.strongestIntensity(status.intensityMax))))
+            is ToyControlAction.Pattern -> listOf(write(slideFrame(action.mode)))
+            ToyControlAction.Stop -> listOf(write(slideFrame(0)))
+        }
+
+    private fun slideFrame(gear: Int): ByteArray {
+        val value = gear.coerceIn(0, status.intensityMax) * 10
+        val duration = if (value > 0) SLIDE_DURATION else 0
+        return ankniAaFrame(SLIDE_COMMAND, value, duration)
+    }
+
+    private fun write(bytes: ByteArray): BleProtocolOperation.Write =
+        BleProtocolOperation.Write(
+            characteristicUuid = writeUuid,
+            bytes = bytes,
+            withResponse = false,
+        )
+
+    private const val SLIDE_COMMAND = 0x08
+    private const val SLIDE_DURATION = 0xC8
+    private const val BX_KEEP_ALIVE_MS = 200
+}
+
 internal val ankniDdddProfileProtocols: List<BleDeviceProtocol> = listOf(
     AnkniMxProtocol,
     AnkniDdddProfileProtocol(AnkniDdddProfile.tqjD()),
