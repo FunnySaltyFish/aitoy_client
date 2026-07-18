@@ -5,6 +5,9 @@ import kotlin.uuid.Uuid
 internal object MasolinWaiwaimaFfa0Protocol : BleDeviceProtocol {
     private val serviceUuid = Uuid.parse("0000ffa0-0000-1000-8000-00805f9b34fb")
     private val writeUuid = Uuid.parse("0000ffa1-0000-1000-8000-00805f9b34fb")
+    private const val continuousMotor = 0x00
+    private const val vibrationMotor = 0x02
+    private const val stopMotor = 0x14
 
     override val status = BleProtocolStatus(
         id = "masolin_waiwaima_ffa0",
@@ -29,12 +32,12 @@ internal object MasolinWaiwaimaFfa0Protocol : BleDeviceProtocol {
 
     override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
         when (action) {
-            is ToyControlAction.Intensity -> listOf(controlFrame(motor = 0x00, mode = 0, intensity = action.value))
+            is ToyControlAction.Intensity -> listOf(controlFrame(motor = continuousMotor, mode = 0, intensity = action.value))
             is ToyControlAction.Combined -> {
                 if (action.intensity <= 0) {
                     listOf(stopFrame())
                 } else {
-                    listOf(controlFrame(motor = 0x01, mode = action.mode, intensity = action.intensity))
+                    listOf(controlFrame(motor = vibrationMotor, mode = action.mode, intensity = action.intensity))
                 }
             }
             is ToyControlAction.DualMotor -> {
@@ -42,10 +45,10 @@ internal object MasolinWaiwaimaFfa0Protocol : BleDeviceProtocol {
                 if (intensity <= 0) {
                     listOf(stopFrame())
                 } else {
-                    listOf(controlFrame(motor = 0x01, mode = action.mode, intensity = intensity))
+                    listOf(controlFrame(motor = vibrationMotor, mode = action.mode, intensity = intensity))
                 }
             }
-            is ToyControlAction.Pattern -> listOf(controlFrame(motor = 0x01, mode = action.mode, intensity = 50))
+            is ToyControlAction.Pattern -> listOf(controlFrame(motor = vibrationMotor, mode = action.mode, intensity = 50))
             ToyControlAction.Stop -> listOf(stopFrame())
         }
 
@@ -61,7 +64,7 @@ internal object MasolinWaiwaimaFfa0Protocol : BleDeviceProtocol {
         )
 
     private fun stopFrame(): BleProtocolOperation.Write =
-        write(byteArrayOf(0xaa.toByte(), 0x0b, 0x14, 0x00, 0x00))
+        write(byteArrayOf(0xaa.toByte(), 0x0b, stopMotor.toByte(), 0x00, 0x00))
 
     private fun write(bytes: ByteArray): BleProtocolOperation.Write =
         BleProtocolOperation.Write(writeUuid, bytes, withResponse = true)
