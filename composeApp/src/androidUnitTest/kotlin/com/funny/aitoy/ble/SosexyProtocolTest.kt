@@ -31,30 +31,35 @@ class SosexyProtocolTest {
     }
 
     @Test
-    fun scalarFunctionsWriteOfficialSelectedMotorFrameWithResponse() {
+    fun scalarFunctionsWriteLegacySelectedMotorFrameWithResponse() {
         val protocol = BleProtocolRegistry.resolveNative(sosexyFingerprint())
             ?: error("SOSEXY protocol not resolved")
 
         val suction = protocol.commandsFor(ToyControlAction.Combined(mode = 1 * 100 + 1, intensity = 50))
         assertEquals(1, suction.size)
-        assertEquals("020007113200081101", assertIs<BleProtocolOperation.Write>(suction[0]).bytes.hexUpper())
+        assertEquals("010100020007113200081101", assertIs<BleProtocolOperation.Write>(suction[0]).bytes.hexUpper())
         assertEquals(true, assertIs<BleProtocolOperation.Write>(suction[0]).withResponse)
 
         val vibration = protocol.commandsFor(ToyControlAction.Combined(mode = 2 * 100 + 1, intensity = 30))
-        assertEquals("020001111E00021101", assertIs<BleProtocolOperation.Write>(vibration[0]).bytes.hexUpper())
+        assertEquals("010100020001111E00021101", assertIs<BleProtocolOperation.Write>(vibration[0]).bytes.hexUpper())
 
         val electric = protocol.commandsFor(ToyControlAction.Combined(mode = 3 * 100 + 4, intensity = 20))
-        assertEquals("020003111400041104", assertIs<BleProtocolOperation.Write>(electric[0]).bytes.hexUpper())
+        assertEquals(2, electric.size)
+        assertEquals("010100020003111400041101", assertIs<BleProtocolOperation.Write>(electric[0]).bytes.hexUpper())
+        assertEquals("010100020004110400031114", assertIs<BleProtocolOperation.Write>(electric[1]).bytes.hexUpper())
     }
 
     @Test
-    fun stopSendsOfficialAllMotorZeroFrame() {
+    fun stopSendsLegacyAllMotorZeroFramesAndElectricFallback() {
         val protocol = BleProtocolRegistry.resolveNative(sosexyFingerprint())
             ?: error("SOSEXY protocol not resolved")
 
         val stop = protocol.commandsFor(ToyControlAction.Stop)
-        assertEquals(1, stop.size)
-        assertEquals("03000111000003110000071100", assertIs<BleProtocolOperation.Write>(stop[0]).bytes.hexUpper())
+        assertEquals(4, stop.size)
+        assertEquals("010100020007110000081101", assertIs<BleProtocolOperation.Write>(stop[0]).bytes.hexUpper())
+        assertEquals("010100020001110000021101", assertIs<BleProtocolOperation.Write>(stop[1]).bytes.hexUpper())
+        assertEquals("010100020003110000041101", assertIs<BleProtocolOperation.Write>(stop[2]).bytes.hexUpper())
+        assertEquals("010100020004110100031100", assertIs<BleProtocolOperation.Write>(stop[3]).bytes.hexUpper())
     }
 
     private fun sosexyFingerprint(

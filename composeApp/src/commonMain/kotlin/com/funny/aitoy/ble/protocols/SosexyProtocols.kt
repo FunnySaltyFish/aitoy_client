@@ -43,25 +43,14 @@ internal object SosexyBoboBeiProtocol : BleDeviceProtocol {
             is ToyControlAction.Intensity -> listOf(command(SosexyMotor.Suction, mode = 1, intensity = action.value))
             is ToyControlAction.Combined -> {
                 val motor = motorForMode(action.mode)
-                listOf(command(motor, functionModeForMode(action.mode), action.intensity))
+                motor.commands(mode = functionModeForMode(action.mode), intensity = action.intensity)
             }
             is ToyControlAction.DualMotor -> listOf(
                 command(SosexyMotor.Suction, mode = 1, intensity = action.internalIntensity),
                 command(SosexyMotor.Vibration, mode = 1, intensity = action.externalIntensity),
             )
-            ToyControlAction.Stop -> listOf(
-                write(
-                    bytes(
-                        0x03,
-                        0x00,
-                        0x01, 0x11, 0x00,
-                        0x00,
-                        0x03, 0x11, 0x00,
-                        0x00,
-                        0x07, 0x11, 0x00,
-                    )
-                )
-            )
+            ToyControlAction.Stop -> SosexyMotor.entries.map { motor -> command(motor, mode = 1, intensity = 0) } +
+                    electricModeFirstCommand(mode = 1, intensity = 0)
         }
 
     private fun motorForMode(mode: Int): SosexyMotor {
@@ -79,9 +68,19 @@ internal object SosexyBoboBeiProtocol : BleDeviceProtocol {
             1
         }
 
+    private fun SosexyMotor.commands(mode: Int, intensity: Int): List<BleProtocolOperation> =
+        if (this == SosexyMotor.Electric) {
+            listOf(command(this, mode, intensity), electricModeFirstCommand(mode, intensity))
+        } else {
+            listOf(command(this, mode, intensity))
+        }
+
     private fun command(motor: SosexyMotor, mode: Int, intensity: Int): BleProtocolOperation.Write =
         write(
             bytes(
+                0x01,
+                0x01,
+                0x00,
                 0x02,
                 0x00,
                 motor.intensityByte,
@@ -90,7 +89,25 @@ internal object SosexyBoboBeiProtocol : BleDeviceProtocol {
                 0x00,
                 motor.modeByte,
                 0x11,
+                0x01,
+            )
+        )
+
+    private fun electricModeFirstCommand(mode: Int, intensity: Int): BleProtocolOperation.Write =
+        write(
+            bytes(
+                0x01,
+                0x01,
+                0x00,
+                0x02,
+                0x00,
+                SosexyMotor.Electric.modeByte,
+                0x11,
                 mode.coerceIn(1, SosexyMotor.MODE_MAX),
+                0x00,
+                SosexyMotor.Electric.intensityByte,
+                0x11,
+                intensity.coerceIn(0, 100),
             )
         )
 

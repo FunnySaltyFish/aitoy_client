@@ -112,6 +112,47 @@ class SvakomQhSx007eProtocolTest {
     }
 
     @Test
+    fun hs141bOfficialProductCodeResolvesToSuckAndTongueLickProfile() {
+        val protocol = BleProtocolRegistry.resolveNative(hs141bFingerprint())
+            ?: error("HS141B protocol not resolved")
+
+        assertEquals("svakom_hs141b", protocol.status.id)
+        assertEquals(ToyControlStyle.IndependentFunctions, protocol.status.controlStyle)
+        assertEquals(listOf("吮吸", "舌舔"), protocol.status.channelNames)
+        assertEquals(8, protocol.status.modeMax)
+        assertEquals(10, protocol.status.features.first { it.type == "constrict" }.max)
+        assertEquals(8, protocol.status.features.first { it.type == "constrict" }.modeMax)
+        assertEquals(10, protocol.status.features.first { it.type == "lick" }.max)
+        assertEquals(8, protocol.status.features.first { it.type == "lick" }.modeMax)
+    }
+
+    @Test
+    fun hs141bUsesOfficialSuckAndTongueLickFrames() {
+        val protocol = BleProtocolRegistry.resolveNative(hs141bFingerprint())
+            ?: error("HS141B protocol not resolved")
+
+        val suck = protocol.commandsFor(ToyControlAction.Combined(mode = 3 * 100 + 8, intensity = 10))
+        assertEquals(1, suck.size)
+        assertEquals("55090000080A00", assertIs<BleProtocolOperation.Write>(suck[0]).bytes.hexUpper())
+
+        // 官方 case 38 把“舌舔”显示在第二功能区，但命令仍走 VIBRATION 的 0x03 分支。
+        val tongueLick = protocol.commandsFor(ToyControlAction.Combined(mode = 6 * 100 + 8, intensity = 7))
+        assertEquals(1, tongueLick.size)
+        assertEquals("55030000080700", assertIs<BleProtocolOperation.Write>(tongueLick[0]).bytes.hexUpper())
+    }
+
+    @Test
+    fun hs141bStopSendsBothChannelStopsAndGlobalFallback() {
+        val protocol = BleProtocolRegistry.resolveNative(hs141bFingerprint())
+            ?: error("HS141B protocol not resolved")
+
+        val stop = protocol.commandsFor(ToyControlAction.Stop)
+        assertEquals("55090000000000", assertIs<BleProtocolOperation.Write>(stop[0]).bytes.hexUpper())
+        assertEquals("55030000000000", assertIs<BleProtocolOperation.Write>(stop[1]).bytes.hexUpper())
+        assertEquals("550400000000AA", assertIs<BleProtocolOperation.Write>(stop[2]).bytes.hexUpper())
+    }
+
+    @Test
     fun va617aSuckEndpointResolvesFromLiveGiftCatAdvertisement() {
         val fingerprint = va617aSuckFingerprint(characteristicUuids = setOf(WRITE_UUID))
         val protocol = BleProtocolRegistry.resolveNative(fingerprint)
@@ -271,6 +312,31 @@ class SvakomQhSx007eProtocolTest {
     }
 
     @Test
+    fun beYourLoverVx737bUsesNotifyAndReplaysActiveHeadFrames() {
+        val fingerprint = beYourLoverFingerprint(productCode = 86, name = "VX737B")
+        val protocol = BleProtocolRegistry.resolveNative(fingerprint)
+            ?: error("VX737B protocol not resolved")
+
+        assertEquals("beyourlover_vx737b", protocol.status.id)
+        assertEquals(listOf("震动 1", "震动 2"), protocol.status.channelNames)
+        assertEquals(listOf(BleProtocolOperation.SubscribeNotify(NOTIFY_UUID)), protocol.initialize(fingerprint))
+
+        val firstHead = protocol.commandsFor(ToyControlAction.Combined(mode = 1 * 100 + 12, intensity = 7))
+        assertEquals(1, firstHead.size)
+        assertEquals("550301000C0700", assertIs<BleProtocolOperation.Write>(firstHead[0]).bytes.hexUpper())
+
+        val secondHead = protocol.commandsFor(ToyControlAction.Combined(mode = 2 * 100 + 6, intensity = 4))
+        assertEquals(2, secondHead.size)
+        assertEquals("550301000C0700", assertIs<BleProtocolOperation.Write>(secondHead[0]).bytes.hexUpper())
+        assertEquals("55030200060400", assertIs<BleProtocolOperation.Write>(secondHead[1]).bytes.hexUpper())
+
+        val stopFirstHead = protocol.commandsFor(ToyControlAction.Combined(mode = 1 * 100, intensity = 0))
+        assertEquals(2, stopFirstHead.size)
+        assertEquals("55030100000000", assertIs<BleProtocolOperation.Write>(stopFirstHead[0]).bytes.hexUpper())
+        assertEquals("55030200060400", assertIs<BleProtocolOperation.Write>(stopFirstHead[1]).bytes.hexUpper())
+    }
+
+    @Test
     fun beYourLoverVx607pShowsStretchButKeepsOfficialCommandBranch() {
         val protocol = BleProtocolRegistry.resolveNative(beYourLoverFingerprint(productCode = 392, name = "VX607P"))
             ?: error("VX607P protocol not resolved")
@@ -401,6 +467,19 @@ class SvakomQhSx007eProtocolTest {
     private fun st462aFingerprint(
         name: String = "ST462A",
         manufacturerData: String = "0x32:53 56 41 02 FF 32 26 02 4F 61 37 FF 32 00 01 39",
+    ) = BleGattFingerprint(
+        name = name,
+        address = "FF:26:02:4F:61:37",
+        manufacturerData = manufacturerData,
+        scanRecordHex = "",
+        serviceUuids = setOf(SERVICE_UUID),
+        characteristicUuids = setOf(WRITE_UUID, NOTIFY_UUID),
+    )
+
+    // 截图反馈 2026-07-18：官方控制页底层名 HS141B；官方 ProductCodeMapper：产品码 30 -> HS141B。
+    private fun hs141bFingerprint(
+        name: String = "HS141B",
+        manufacturerData: String = "0x32:53 56 41 02 FF 32 26 02 4F 61 37 FF 32 00 00 1E",
     ) = BleGattFingerprint(
         name = name,
         address = "FF:26:02:4F:61:37",

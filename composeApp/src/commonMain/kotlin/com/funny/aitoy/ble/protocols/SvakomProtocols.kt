@@ -113,6 +113,7 @@ internal object SvakomV2MultiFunctionProtocol : BleDeviceProtocol {
 // SX119B（波波鸟）：官方产品码 57，八档吮吸（强度 0..5）+ 十一档震动（强度 0..10）。
 // SX589A（青提）：官方产品码 59，与 SX119B 同构（case 45/46 fall-through）。
 // ST462A（口口甜）：官方产品码 313，舔（10 档）+ 吮吸（3 档无强度）+ 震动（10 档）三功能区。
+// HS141B（啾啾雀）：官方产品码 30，吮吸 8 档 + 舌舔 8 档，两路均有强度滑杆。
 internal object SvakomVibrateSuckProtocol : BleDeviceProtocol {
     private val serviceUuid = Uuid.parse("0000ffe0-0000-1000-8000-00805f9b34fb")
     private val writeUuid = Uuid.parse("0000ffe1-0000-1000-8000-00805f9b34fb")
@@ -144,6 +145,7 @@ internal object SvakomVibrateSuckProtocol : BleDeviceProtocol {
             productCode == 57 || normalizedName.contains("sx119b") -> SVAKOM_V2_SX119B
             productCode == 59 || normalizedName.contains("sx589a") -> SVAKOM_V2_SX589A
             productCode == 313 || normalizedName.contains("st462a") -> SVAKOM_V2_ST462A
+            productCode == 30 || normalizedName.contains("hs141b") -> SVAKOM_V2_HS141B
             normalizedName.contains("qhsx007e") -> SVAKOM_V2_VIBRATE_SUCK
             else -> null
         }
@@ -443,7 +445,11 @@ internal class SvakomV2Session(
     private fun updateFunction(functionCode: Int, mode: Int, intensity: Int): List<BleProtocolOperation> {
         val function = profile.functions.firstOrNull { it.code == functionCode } ?: profile.defaultFunction
         updateState(function, mode, intensity)
-        return if (profile.writeCurrentStateOnUpdate) writeCurrentState() else listOf(write(function.commandBytes(states[function.code] ?: SvakomV2FunctionState())))
+        return when {
+            profile.writeCurrentStateOnUpdate -> writeCurrentState()
+            profile.replayActiveStateOnUpdate -> writeChangedAndActiveState(function)
+            else -> listOf(write(function.commandBytes(states[function.code] ?: SvakomV2FunctionState())))
+        }
     }
 
     private fun updateState(function: SvakomV2Function, mode: Int, intensity: Int) {
@@ -456,6 +462,23 @@ internal class SvakomV2Session(
     private fun writeCurrentState(): List<BleProtocolOperation> =
         profile.functions.map { function ->
             write(function.commandBytes(states[function.code] ?: SvakomV2FunctionState()))
+        }
+
+    private fun writeChangedAndActiveState(changedFunction: SvakomV2Function): List<BleProtocolOperation> =
+        profile.functions
+            .filter { function ->
+                function.code == changedFunction.code ||
+                        (states[function.code]?.isActive(function) == true)
+            }
+            .map { function ->
+                write(function.commandBytes(states[function.code] ?: SvakomV2FunctionState()))
+            }
+
+    private fun SvakomV2FunctionState.isActive(function: SvakomV2Function): Boolean =
+        if (function.strengthDriven && mode > function.strengthDisabledThroughMode) {
+            intensity > 0
+        } else {
+            mode > 0
         }
 
     private fun currentMode(functionCode: Int): Int =
@@ -614,6 +637,7 @@ internal sealed class SvakomV2Profile(
     val functions: List<SvakomV2Function>,
     val defaultFunction: SvakomV2Function = functions.first(),
     val writeCurrentStateOnUpdate: Boolean = true,
+    val replayActiveStateOnUpdate: Boolean = false,
     val pairedDualControl: SvakomV2PairedDualControl? = null,
 ) {
     fun functionByType(type: String): SvakomV2Function? =
@@ -667,6 +691,7 @@ internal val SvakomV2Vibrate = SvakomV2Function(2, "vibrate", "震动", 0x03, mo
 internal val SvakomV2Vibrate11 = SvakomV2Vibrate.copy(modeMax = 11)
 internal val SvakomV2Suck = SvakomV2Function(3, "constrict", "吮吸", 0x09, modeMax = 5)
 internal val SvakomV2Suck8Level5 = SvakomV2Suck.copy(modeMax = 8, intensityMax = 5)
+internal val SvakomV2Suck8Level10 = SvakomV2Suck.copy(modeMax = 8, intensityMax = 10)
 // ST462A 官方 case 82 的吮吸：setSuck_num(3) 且未 setSuck_strong_max，没有强度滑杆，只有 3 档模式启停。
 internal val SvakomV2Suck3Mode = SvakomV2Function(3, "constrict", "吮吸", 0x09, modeMax = 3, intensityMax = 1, strengthDriven = false)
 internal val SvakomV2Flap = SvakomV2Function(4, "flap", "拍打", 0x07, modeMax = 7, intensityMax = 1, strengthDriven = false)
@@ -674,6 +699,8 @@ internal val SvakomV2Heat = SvakomV2Function(5, "heat", "加热", 0x05, modeMax 
 // 舔（LICKING）：官方 AutoV2ModeView case 5 命令字 0x14(=20)，帧仍是通用 55 CMD 00 00 <档> <强> 00。
 // ST462A 官方 case 82 的舔为 setLicking_num(10) + setLicking_strong_max(10)，10 档 + 0..10 强度滑杆。
 internal val SvakomV2Lick = SvakomV2Function(6, "lick", "舔", 0x14, modeMax = 10)
+// HS141B 官方 case 38 把第二功能挂在 VIBRATION 命令族，并将标题显示为“舌舔”。
+internal val SvakomV2TongueLick8 = SvakomV2Function(6, "lick", "舌舔", 0x03, modeMax = 8)
 internal val SvakomV2Rotate = SvakomV2Function(7, "rotate", "旋转", 0x0d, modeMax = 5, frameLayout = SvakomV2FrameLayout.Rotate)
 internal val SvakomV2Occlusion = SvakomV2Function(8, "occlusion", "收缩", 0x15, modeMax = 10)
 
@@ -857,6 +884,19 @@ internal object SVAKOM_V2_ST462A : SvakomV2Profile(
     writeCurrentStateOnUpdate = false,
 )
 
+// HS141B（啾啾雀）：官方 ProductCodeMapper 产品码 30，AllSupportFunctionBeanTools case 38：
+// 吮吸 8 档强度 0..10；“舌舔”标题复用 VIBRATION 命令族，8 档强度 0..10，帧命令字仍为 0x03。
+internal object SVAKOM_V2_HS141B : SvakomV2Profile(
+    status = svakomV2Status(
+        id = "svakom_hs141b",
+        displayName = "SVAKOM HS141B",
+        functions = listOf(SvakomV2Suck8Level10, SvakomV2TongueLick8),
+    ),
+    functions = listOf(SvakomV2Suck8Level10, SvakomV2TongueLick8),
+    defaultFunction = SvakomV2Suck8Level10,
+    writeCurrentStateOnUpdate = false,
+)
+
 private val BeYourLoverVa617aSuck =
     SvakomV2Suck.copy(modeMax = 8, intensityMax = 10)
 
@@ -890,12 +930,14 @@ private class StaticSvakomV2Profile(
     functions: List<SvakomV2Function>,
     defaultFunction: SvakomV2Function = functions.first(),
     writeCurrentStateOnUpdate: Boolean = false,
+    replayActiveStateOnUpdate: Boolean = false,
     pairedDualControl: SvakomV2PairedDualControl? = null,
 ) : SvakomV2Profile(
     status = status,
     functions = functions,
     defaultFunction = defaultFunction,
     writeCurrentStateOnUpdate = writeCurrentStateOnUpdate,
+    replayActiveStateOnUpdate = replayActiveStateOnUpdate,
     pairedDualControl = pairedDualControl,
 )
 
@@ -952,7 +994,11 @@ private fun bylLick(mode: Int, strength: Int?) =
 private fun bylOcclusion(mode: Int, strength: Int?) =
     BeYourLoverFunctionSpec("occlusion", "收缩", 0x15, mode, strength)
 
-private fun beYourLoverProfile(model: String, vararg specs: BeYourLoverFunctionSpec): SvakomV2Profile {
+private fun beYourLoverProfile(
+    model: String,
+    vararg specs: BeYourLoverFunctionSpec,
+    replayActiveStateOnUpdate: Boolean = false,
+): SvakomV2Profile {
     var vibrateOrdinal = 0
     val vibrateCount = specs.count { it.type == "vibrate" }
     val functions = specs.mapIndexed { index, spec ->
@@ -976,6 +1022,7 @@ private fun beYourLoverProfile(model: String, vararg specs: BeYourLoverFunctionS
         ),
         functions = functions,
         defaultFunction = functions.first(),
+        replayActiveStateOnUpdate = replayActiveStateOnUpdate,
         pairedDualControl = if (functions.any { it.type == "constrict" } && functions.any { it.type == "vibrate" }) {
             svakomV2SuckVibrateDualControl
         } else {
@@ -986,6 +1033,13 @@ private fun beYourLoverProfile(model: String, vararg specs: BeYourLoverFunctionS
 
 private fun beYourLoverProfile(model: String, specs: List<BeYourLoverFunctionSpec>): SvakomV2Profile =
     beYourLoverProfile(model, *specs.toTypedArray())
+
+private fun beYourLoverDoubleVibrateProfile(model: String, mode: Int, strength: Int?): SvakomV2Profile =
+    beYourLoverProfile(
+        model,
+        *bylDoubleVibrate(mode, strength).toTypedArray(),
+        replayActiveStateOnUpdate = true,
+    )
 
 internal val BeYourLoverProfiles: Map<Int, SvakomV2Profile> = mapOf(
     26 to beYourLoverProfile("CX492B", bylSuck(5, 10), bylVibrate(11, 10)),
@@ -998,7 +1052,7 @@ internal val BeYourLoverProfiles: Map<Int, SvakomV2Profile> = mapOf(
     72 to beYourLoverProfile("TX640A", bylSuck(6, null), bylVibrate(10, null), bylFlap(5, null)),
     78 to beYourLoverProfile("TX752B", bylSuck(10, 5), bylVibrate(10, null)),
     83 to beYourLoverProfile("ST629B", bylRotate(5, 10), bylVibrate(11, 10)),
-    86 to beYourLoverProfile("VX737B", bylDoubleVibrate(12, 10)),
+    86 to beYourLoverDoubleVibrateProfile("VX737B", 12, 10),
     91 to beYourLoverProfile("CL279B_V", bylStretch(10, null), bylVibrate(10, 10)),
     92 to beYourLoverProfile("CL279B_S", bylSuck(10, 10)),
     95 to beYourLoverProfile("MW36B", bylStretch(8, 5), bylVibrate(11, 10)),
@@ -1037,7 +1091,7 @@ internal val BeYourLoverProfiles: Map<Int, SvakomV2Profile> = mapOf(
     379 to beYourLoverProfile("VX760A_S", bylSuck(10, null)),
     380 to beYourLoverProfile("VA733B", bylStretch(10, 10), bylVibrate(10, 10)),
     381 to beYourLoverProfile("VP625B", bylStretch(5, 10), bylVibrate(10, 10)),
-    382 to beYourLoverProfile("VX737C", bylDoubleVibrate(12, 10)),
+    382 to beYourLoverDoubleVibrateProfile("VX737C", 12, 10),
     383 to beYourLoverProfile("S137P", bylVibrate(10, 10), bylVibrate(10, 10)),
     392 to beYourLoverProfile("VX607P", bylSuck(10, 10), bylStretchWithVibrateCommand(10, 10)),
 )

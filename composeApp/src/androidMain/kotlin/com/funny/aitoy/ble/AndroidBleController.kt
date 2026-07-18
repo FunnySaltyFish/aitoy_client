@@ -1284,6 +1284,7 @@ class AndroidBleController(
         if (uuid == BATTERY_LEVEL_CHARACTERISTIC_UUID) {
             handleBatteryLevel(bytes)
         }
+        traceSvakomInvalidFrameNotify(uuid, bytes)
         runCatching {
             val protocol = activeProtocol
             val operations = protocol?.onNotify(uuid.toKotlinUuid(), bytes).orEmpty()
@@ -1311,6 +1312,25 @@ class AndroidBleController(
         }.onFailure {
             handleProtocolOperationFailed("协议通知处理失败：${it.message}")
         }
+    }
+
+    private fun traceSvakomInvalidFrameNotify(uuid: UUID, bytes: ByteArray) {
+        if (uuid != SVAKOM_NOTIFY_CHARACTERISTIC_UUID || bytes.size < 2) return
+        if ((bytes[0].toInt() and 0xff) != 0x55 || (bytes[1].toInt() and 0xff) != 0xff) return
+        val protocolId = activeProtocol?.status?.id.orEmpty()
+        if (!protocolId.startsWith("svakom_") &&
+            !protocolId.startsWith("beyourlover_") &&
+            !protocolId.startsWith("zemalia_")
+        ) {
+            return
+        }
+        trace(
+            "设备返回无效指令反馈 protocolId=$protocolId notify=${bytes.toHexString()}",
+            type = "svakom_invalid_frame_feedback",
+            uploadPolicy = AiToyTraceUploadPolicy.RateLimited,
+            key = "svakom_invalid_frame:$connectedAddress:$protocolId",
+            intervalMs = 15_000L,
+        )
     }
 
     private fun enqueueFirst(operations: List<BleProtocolOperation>) {
@@ -1552,6 +1572,8 @@ class AndroidBleController(
             UUID.fromString("0000180f-0000-1000-8000-00805f9b34fb")
         private val BATTERY_LEVEL_CHARACTERISTIC_UUID =
             UUID.fromString("00002a19-0000-1000-8000-00805f9b34fb")
+        private val SVAKOM_NOTIFY_CHARACTERISTIC_UUID =
+            UUID.fromString("0000ffe2-0000-1000-8000-00805f9b34fb")
     }
 }
 
