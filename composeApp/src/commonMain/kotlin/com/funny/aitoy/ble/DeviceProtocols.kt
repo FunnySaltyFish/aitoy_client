@@ -110,6 +110,7 @@ internal object BleProtocolRegistry {
                     MesanelProtocol,
                     JissbonProtocol,
                     SosexyBoboBeiProtocol,
+                    MasolinWaiwaimaFfa0Protocol,
                     MizzzeeXhtkjProtocol,
                     SenseeCcpa10S2Protocol,
                     OhMiBodEsca2Protocol,
