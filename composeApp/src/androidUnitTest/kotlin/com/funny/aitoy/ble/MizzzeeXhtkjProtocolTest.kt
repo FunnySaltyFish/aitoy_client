@@ -69,6 +69,35 @@ class MizzzeeXhtkjProtocolTest {
     }
 
     @Test
+    fun ankniQd1WithFf15TraceRouteTriesAlternateXhtChannelBeforeLegacyAaRoute() {
+        val fingerprint = mizzzeeXhtkjFingerprint(
+            name = "ANKNI QD 1",
+            manufacturerData = "0x642:",
+            includeDeviceInfo = false,
+            extraServiceUuids = setOf(FF15_SERVICE_UUID),
+            extraCharacteristicUuids = setOf(FF15_WRITE_UUID, FF14_NOTIFY_UUID),
+        )
+        val protocols = BleProtocolRegistry.resolveNativeAll(fingerprint)
+
+        assertEquals("ankni_qd1_xhtkj", protocols[0].status.id)
+        assertEquals("ankni_qd1_xhtkj_ff15", protocols[1].status.id)
+        assertEquals("ankni_qd1_ff12_gatt", protocols[2].status.id)
+
+        val protocol = protocols[1]
+        val init = protocol.initialize(fingerprint)
+        assertEquals(FF14_NOTIFY_UUID, assertIs<BleProtocolOperation.SubscribeNotify>(init[0]).characteristicUuid)
+        val initWrite = assertIs<BleProtocolOperation.Write>(init[1])
+        assertEquals(FF15_WRITE_UUID, initWrite.characteristicUuid)
+        assertEquals("0312F600", initWrite.bytes.hexUpper())
+
+        val strength = assertIs<BleProtocolOperation.Write>(
+            protocol.commandsFor(ToyControlAction.Intensity(50)).single(),
+        )
+        assertEquals(FF15_WRITE_UUID, strength.characteristicUuid)
+        assertEquals("0312F300FC00FE40013CA600FC00FE40013CA600", strength.bytes.hexUpper())
+    }
+
+    @Test
     fun xhtkjInitializationStillWritesHandshakeWhenNotifyCharacteristicIsAbsent() {
         val fingerprint = mizzzeeXhtkjFingerprint(
             name = "XHTKJ",
@@ -88,16 +117,19 @@ class MizzzeeXhtkjProtocolTest {
         manufacturerData: String = "",
         includeNotify: Boolean = true,
         includeDeviceInfo: Boolean = true,
+        extraServiceUuids: Set<Uuid> = emptySet(),
+        extraCharacteristicUuids: Set<Uuid> = emptySet(),
     ): BleGattFingerprint =
         BleGattFingerprint(
             name = name,
             manufacturerData = manufacturerData,
             scanRecordHex = "",
-            serviceUuids = setOf(SERVICE_UUID),
+            serviceUuids = setOf(SERVICE_UUID) + extraServiceUuids,
             characteristicUuids = buildSet {
                 add(WRITE_UUID)
                 if (includeNotify) add(NOTIFY_UUID)
                 if (includeDeviceInfo) add(DEVICE_INFO_UUID)
+                addAll(extraCharacteristicUuids)
             },
         )
 
@@ -109,5 +141,8 @@ class MizzzeeXhtkjProtocolTest {
         val NOTIFY_UUID: Uuid = Uuid.parse("0000ff11-0000-1000-8000-00805f9b34fb")
         val WRITE_UUID: Uuid = Uuid.parse("0000ff12-0000-1000-8000-00805f9b34fb")
         val DEVICE_INFO_UUID: Uuid = Uuid.parse("00002a50-0000-1000-8000-00805f9b34fb")
+        val FF15_SERVICE_UUID: Uuid = Uuid.parse("0000ff12-0000-1000-8000-00805f9b34fb")
+        val FF14_NOTIFY_UUID: Uuid = Uuid.parse("0000ff14-0000-1000-8000-00805f9b34fb")
+        val FF15_WRITE_UUID: Uuid = Uuid.parse("0000ff15-0000-1000-8000-00805f9b34fb")
     }
 }

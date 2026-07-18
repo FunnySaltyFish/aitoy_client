@@ -54,26 +54,42 @@ internal object AnkniQd1XhtkjProtocol : BleDeviceProtocol {
         MizzzeeXhtkjProtocol.commandsFor(action)
 }
 
+internal object AnkniQd1Ff15XhtkjProtocol : BleDeviceProtocol {
+    private val serviceUuid = Uuid.parse("0000ff12-0000-1000-8000-00805f9b34fb")
+    private val notifyUuid = Uuid.parse("0000ff14-0000-1000-8000-00805f9b34fb")
+    private val writeUuid = Uuid.parse("0000ff15-0000-1000-8000-00805f9b34fb")
+
+    override val status = MizzzeeXhtkjProtocol.status.copy(
+        id = "ankni_qd1_xhtkj_ff15",
+        displayName = "ANKNI QD1",
+    )
+
+    override fun matches(fingerprint: BleGattFingerprint): Boolean {
+        if (!fingerprint.hasAnkniQd1Name()) return false
+        if (!fingerprint.manufacturerData.contains("0x642", ignoreCase = true)) return false
+        return fingerprint.serviceUuids.contains(serviceUuid) &&
+                fingerprint.characteristicUuids.contains(writeUuid)
+    }
+
+    override fun initialize(fingerprint: BleGattFingerprint): List<BleProtocolOperation> =
+        buildList {
+            if (fingerprint.characteristicUuids.contains(notifyUuid)) {
+                add(BleProtocolOperation.SubscribeNotify(notifyUuid))
+            }
+            add(xhtkjWrite(writeUuid, byteArrayOf(0x03, 0x12, 0xf6.toByte(), 0x00)))
+        }
+
+    override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
+        xhtkjCommandsFor(action, status, writeUuid)
+}
+
 internal object MizzzeeXhtkjProtocol : BleDeviceProtocol {
     private val serviceUuid = Uuid.parse("0000ff10-0000-1000-8000-00805f9b34fb")
     private val notifyUuid = Uuid.parse("0000ff11-0000-1000-8000-00805f9b34fb")
     private val writeUuid = Uuid.parse("0000ff12-0000-1000-8000-00805f9b34fb")
     private val deviceInfoUuid = Uuid.parse("00002a50-0000-1000-8000-00805f9b34fb")
 
-    override val status = BleProtocolStatus(
-        id = "mizzzee_xhtkj",
-        displayName = "Mizzzee XHTKJ",
-        controllable = true,
-        intensityMax = 100,
-        supportsMode = true,
-        modeMax = 10,
-        controlStyle = ToyControlStyle.ExclusivePatternOrIntensity,
-        modeLabel = "预设节奏",
-        modeNames = List(10) { index -> "模式 ${index + 1}" },
-        intensityLabel = "滑动强度",
-        automatic = true,
-        repeatIntervalMs = 200,
-    )
+    override val status = XHTKJ_STATUS
 
     override fun matches(fingerprint: BleGattFingerprint): Boolean {
         return fingerprint.serviceUuids.contains(serviceUuid) &&
@@ -88,82 +104,105 @@ internal object MizzzeeXhtkjProtocol : BleDeviceProtocol {
             if (fingerprint.characteristicUuids.contains(deviceInfoUuid)) {
                 add(BleProtocolOperation.Read(deviceInfoUuid))
             }
-            add(write(byteArrayOf(0x03, 0x12, 0xf6.toByte(), 0x00)))
+            add(xhtkjWrite(writeUuid, byteArrayOf(0x03, 0x12, 0xf6.toByte(), 0x00)))
         }
 
     override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
-        when (action) {
-            is ToyControlAction.Intensity -> listOf(strengthCommand(action.value.coerceIn(0, status.intensityMax)))
-            is ToyControlAction.Combined -> listOf(modelCommand(action.mode))
-            is ToyControlAction.DualMotor -> listOf(modelCommand(action.mode))
-            is ToyControlAction.Pattern -> listOf(modelCommand(action.mode))
-            ToyControlAction.Stop -> listOf(clearCommand(), resetModelCommand())
-        }
+        xhtkjCommandsFor(action, status, writeUuid)
+}
 
-    private fun strengthCommand(intensity: Int): BleProtocolOperation.Write {
-        val encoded = encodeStrength(intensity)
-        val low = (encoded and 0xff).toByte()
-        val high = ((encoded ushr 8) and 0xff).toByte()
-        return write(
-            byteArrayOf(
-                0x03,
-                0x12,
-                0xf3.toByte(),
-                0x00,
-                0xfc.toByte(),
-                0x00,
-                0xfe.toByte(),
-                0x40,
-                0x01,
-                low,
-                high,
-                0x00,
-                0xfc.toByte(),
-                0x00,
-                0xfe.toByte(),
-                0x40,
-                0x01,
-                low,
-                high,
-                0x00,
-            ),
-        )
+private val XHTKJ_STATUS = BleProtocolStatus(
+    id = "mizzzee_xhtkj",
+    displayName = "Mizzzee XHTKJ",
+    controllable = true,
+    intensityMax = 100,
+    supportsMode = true,
+    modeMax = 10,
+    controlStyle = ToyControlStyle.ExclusivePatternOrIntensity,
+    modeLabel = "预设节奏",
+    modeNames = List(10) { index -> "模式 ${index + 1}" },
+    intensityLabel = "滑动强度",
+    automatic = true,
+    repeatIntervalMs = 200,
+)
+
+private fun xhtkjCommandsFor(
+    action: ToyControlAction,
+    status: BleProtocolStatus,
+    writeUuid: Uuid,
+): List<BleProtocolOperation> =
+    when (action) {
+        is ToyControlAction.Intensity -> listOf(xhtkjStrengthCommand(writeUuid, action.value.coerceIn(0, status.intensityMax)))
+        is ToyControlAction.Combined -> listOf(xhtkjModelCommand(writeUuid, action.mode, status.modeMax))
+        is ToyControlAction.DualMotor -> listOf(xhtkjModelCommand(writeUuid, action.mode, status.modeMax))
+        is ToyControlAction.Pattern -> listOf(xhtkjModelCommand(writeUuid, action.mode, status.modeMax))
+        ToyControlAction.Stop -> listOf(xhtkjClearCommand(writeUuid), xhtkjResetModelCommand(writeUuid))
     }
 
-    private fun modelCommand(mode: Int): BleProtocolOperation.Write =
-        write(ByteArray(20).also {
-            it[0] = 0x03
-            it[1] = 0x12
-            it[2] = mode.coerceIn(0, status.modeMax).toByte()
-        })
+private fun xhtkjStrengthCommand(writeUuid: Uuid, intensity: Int): BleProtocolOperation.Write {
+    val encoded = xhtkjEncodeStrength(intensity)
+    val low = (encoded and 0xff).toByte()
+    val high = ((encoded ushr 8) and 0xff).toByte()
+    return xhtkjWrite(
+        writeUuid,
+        byteArrayOf(
+            0x03,
+            0x12,
+            0xf3.toByte(),
+            0x00,
+            0xfc.toByte(),
+            0x00,
+            0xfe.toByte(),
+            0x40,
+            0x01,
+            low,
+            high,
+            0x00,
+            0xfc.toByte(),
+            0x00,
+            0xfe.toByte(),
+            0x40,
+            0x01,
+            low,
+            high,
+            0x00,
+        ),
+    )
+}
 
-    private fun clearCommand(): BleProtocolOperation.Write =
-        write(ByteArray(20).also {
-            it[0] = 0x03
-            it[1] = 0x12
-            it[2] = 0xf0.toByte()
-            it[3] = 0x07
-        })
+private fun xhtkjModelCommand(writeUuid: Uuid, mode: Int, modeMax: Int): BleProtocolOperation.Write =
+    xhtkjWrite(writeUuid, ByteArray(20).also {
+        it[0] = 0x03
+        it[1] = 0x12
+        it[2] = mode.coerceIn(0, modeMax).toByte()
+    })
 
-    private fun resetModelCommand(): BleProtocolOperation.Write =
-        write(ByteArray(20).also {
-            it[0] = 0x03
-            it[1] = 0x12
-            it[2] = 0xf4.toByte()
-        })
+private fun xhtkjClearCommand(writeUuid: Uuid): BleProtocolOperation.Write =
+    xhtkjWrite(writeUuid, ByteArray(20).also {
+        it[0] = 0x03
+        it[1] = 0x12
+        it[2] = 0xf0.toByte()
+        it[3] = 0x07
+    })
 
-    private fun write(bytes: ByteArray): BleProtocolOperation.Write =
-        BleProtocolOperation.Write(
-            characteristicUuid = writeUuid,
-            bytes = bytes,
-            withResponse = false,
-        )
+private fun xhtkjResetModelCommand(writeUuid: Uuid): BleProtocolOperation.Write =
+    xhtkjWrite(writeUuid, ByteArray(20).also {
+        it[0] = 0x03
+        it[1] = 0x12
+        it[2] = 0xf4.toByte()
+    })
 
-    private fun encodeStrength(intensity: Int): Int {
-        if (intensity <= 0) return 0x003c
-        val scaled = (intensity / 100.0 * 0.7) + 0.3
-        return (((scaled * 1023).toInt() shl 6) or 0x3c).coerceIn(0, 0xffff)
-    }
+private fun xhtkjWrite(writeUuid: Uuid, bytes: ByteArray): BleProtocolOperation.Write =
+    BleProtocolOperation.Write(
+        characteristicUuid = writeUuid,
+        bytes = bytes,
+        withResponse = false,
+    )
+
+private fun xhtkjEncodeStrength(intensity: Int): Int {
+    if (intensity <= 0) return 0x003c
+    val scaled = (intensity / 100.0 * 0.7) + 0.3
+    return (((scaled * 1023).toInt() shl 6) or 0x3c).coerceIn(0, 0xffff)
 }
 
 internal object XiuxiudaOfficialProtocol : BleDeviceProtocol {
@@ -197,6 +236,11 @@ internal object XiuxiudaOfficialProtocol : BleDeviceProtocol {
         "XXD-Lush149",
         "XXD-Lush14E",
     ).map { it.normalizedDeviceName() }.toSet()
+    private val dualMotorPrefixes = setOf(
+        "XXD-Lush123",
+        "XXD-Lush124",
+        "XXD-Lush125",
+    ).map { it.normalizedDeviceName() }
 
     override val status = BleProtocolStatus(
         id = "xiuxiuda_official",
@@ -247,7 +291,7 @@ internal object XiuxiudaOfficialProtocol : BleDeviceProtocol {
         private val fingerprint: BleGattFingerprint,
         private val route: XiuxiudaOfficialRoute,
     ) : BleDeviceProtocol {
-        override val status: BleProtocolStatus = XiuxiudaOfficialProtocol.status
+        override val status: BleProtocolStatus = XiuxiudaOfficialProtocol.statusFor(fingerprint.name)
 
         override fun matches(fingerprint: BleGattFingerprint): Boolean =
             XiuxiudaOfficialProtocol.matches(fingerprint)
@@ -259,20 +303,63 @@ internal object XiuxiudaOfficialProtocol : BleDeviceProtocol {
             when (action) {
                 is ToyControlAction.Intensity -> listOf(write(fingerprint, route, controlCommand(fingerprint.name, action.value)))
                 is ToyControlAction.Combined -> listOf(write(fingerprint, route, controlCommand(fingerprint.name, action.intensity)))
-                is ToyControlAction.DualMotor -> listOf(write(fingerprint, route, controlCommand(fingerprint.name, action.strongestIntensity(status.intensityMax))))
+                is ToyControlAction.DualMotor -> listOf(
+                    write(
+                        fingerprint,
+                        route,
+                        dualMotorCommand(
+                            fingerprint.name,
+                            suctionIntensity = action.internalIntensity,
+                            vibrationIntensity = action.externalIntensity,
+                        ),
+                    ),
+                )
                 is ToyControlAction.Pattern -> listOf(write(fingerprint, route, controlCommand(fingerprint.name, status.intensityMax)))
                 ToyControlAction.Stop -> listOf(write(fingerprint, route, controlCommand(fingerprint.name, 0)))
             }
     }
 
+    private fun statusFor(name: String): BleProtocolStatus =
+        if (name.isXiuxiudaDualMotor()) {
+            status.copy(
+                controlStyle = ToyControlStyle.DualIntensityOnly,
+                channelNames = listOf("吸力", "震动"),
+            )
+        } else {
+            status
+        }
+
     private fun controlCommand(name: String, intensity: Int): IntArray {
         val normalizedName = name.normalizedDeviceName()
         val gear = intensity.coerceIn(0, status.intensityMax)
-        return if (normalizedName in highPowerNames) {
-            command(0x95, 0x3C, 0x30, gear)
-        } else {
-            command(0x65, 0x3A, 0x30, gear)
+        return when {
+            name.isXiuxiudaDualMotor() -> command(0x96, 0x3C, 0x31, gear)
+            normalizedName in highPowerNames -> command(0x95, 0x3C, 0x30, gear)
+            else -> command(0x65, 0x3A, 0x30, gear)
         }
+    }
+
+    private fun dualMotorCommand(
+        name: String,
+        suctionIntensity: Int,
+        vibrationIntensity: Int,
+    ): IntArray {
+        if (!name.isXiuxiudaDualMotor()) {
+            return controlCommand(name, suctionIntensity.coerceAtLeast(vibrationIntensity))
+        }
+        val suction = suctionIntensity.coerceIn(0, status.intensityMax)
+        val vibration = vibrationIntensity.coerceIn(0, status.intensityMax)
+        return when {
+            suction > 0 && vibration > 0 -> command(0x96, 0x3C, 0x31, suction.coerceAtLeast(vibration))
+            suction > 0 -> command(0x76, 0x3A, 0x31, suction)
+            vibration > 0 -> command(0x86, 0x3B, 0x31, vibration)
+            else -> command(0x96, 0x3C, 0x31, 0)
+        }
+    }
+
+    private fun String.isXiuxiudaDualMotor(): Boolean {
+        val normalizedName = normalizedDeviceName()
+        return dualMotorPrefixes.any { normalizedName.startsWith(it) }
     }
 
     private fun write(

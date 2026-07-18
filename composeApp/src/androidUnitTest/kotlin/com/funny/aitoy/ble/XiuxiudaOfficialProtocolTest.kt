@@ -70,6 +70,42 @@ class XiuxiudaOfficialProtocolTest {
     }
 
     @Test
+    fun littleDevilXtUsesOfficialDualMotorCommands() {
+        val fingerprint = xiuxiudaFingerprint(
+            name = "XXD-Lush125-XT",
+            address = "02:26:01:36:E7:19",
+            serviceUuid = SHORT_SERVICE_UUID,
+            notifyUuid = SHORT_NOTIFY_UUID,
+            writeUuid = SHORT_WRITE_UUID,
+        )
+        val protocol = BleProtocolRegistry.resolveNative(fingerprint) ?: error("Xiuxiuda protocol not resolved")
+
+        assertEquals("xiuxiuda_official", protocol.status.id)
+        assertEquals(ToyControlStyle.DualIntensityOnly, protocol.status.controlStyle)
+        assertEquals(listOf("吸力", "震动"), protocol.status.channelNames)
+
+        val intensity = assertIs<BleProtocolOperation.Write>(
+            protocol.commandsFor(ToyControlAction.Intensity(9)).single(),
+        )
+        assertEquals("8E89E9EE963C310992", intensity.bytes.hexUpper())
+
+        val suction = assertIs<BleProtocolOperation.Write>(
+            protocol.commandsFor(ToyControlAction.DualMotor(mode = 1, internalIntensity = 7, externalIntensity = 0)).single(),
+        )
+        assertEquals("8E89E9EE763A31077A", suction.bytes.hexUpper())
+
+        val vibration = assertIs<BleProtocolOperation.Write>(
+            protocol.commandsFor(ToyControlAction.DualMotor(mode = 1, internalIntensity = 0, externalIntensity = 7)).single(),
+        )
+        assertEquals("8E89E9EE863B31078B", vibration.bytes.hexUpper())
+
+        val both = assertIs<BleProtocolOperation.Write>(
+            protocol.commandsFor(ToyControlAction.DualMotor(mode = 1, internalIntensity = 6, externalIntensity = 11)).single(),
+        )
+        assertEquals("8E89E9EE963C310B90", both.bytes.hexUpper())
+    }
+
+    @Test
     fun traceFingerprintWithFf12AndShortRoutePrefersXiuxiudaOfficialProtocol() {
         val fingerprint = BleGattFingerprint(
             name = "XXD-Lush12P-XT",
