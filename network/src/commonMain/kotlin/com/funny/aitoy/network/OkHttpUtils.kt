@@ -35,6 +35,7 @@ object OkHttpUtils {
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
             .writeTimeout(60, TimeUnit.SECONDS)
+            .addInterceptor(ClientRequestContextInterceptor)
             .addInterceptor(AuthTokenInterceptor)
             .addInterceptor(DynamicTimeoutInterceptor)
             .addNetworkInterceptor(CacheControlInterceptor)

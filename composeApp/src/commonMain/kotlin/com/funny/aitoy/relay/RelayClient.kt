@@ -5,6 +5,7 @@ import com.funny.aitoy.core.utils.JsonX
 import com.funny.aitoy.core.utils.nowMs
 import com.funny.aitoy.diagnostics.AiToyTraceEvent
 import com.funny.aitoy.diagnostics.AiToyTraceUploadPolicy
+import com.funny.aitoy.network.ClientRequestContextInterceptor
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -85,6 +86,7 @@ class RelayClient(
     private val client = OkHttpClient.Builder()
         .pingInterval(20, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
+        .addInterceptor(ClientRequestContextInterceptor)
         .build()
 
     private var socket: WebSocket? = null
