@@ -4,7 +4,7 @@ import kotlin.uuid.Uuid
 
 // 感觉盒子 Flutter 官方端：
 // service BAE0、写 BAE1、通知 BAE2。连接后订阅通知，并依次发送 AA01 / AA04 初始化帧。
-// 星球走单吮吸；紫月、芋泥啵啵、福袋走同一组吮吸 + 震动 + 节奏控制帧。
+// 星球走官方单路吮吸帧；紫月、芋泥啵啵、福袋走同一组吮吸 + 震动 + 节奏控制帧。
 
 private val FEELBOX_SERVICE_UUID = Uuid.parse("0000bae0-0000-1000-8000-00805f9b34fb")
 private val FEELBOX_WRITE_UUID = Uuid.parse("0000bae1-0000-1000-8000-00805f9b34fb")
@@ -17,7 +17,7 @@ internal val feelBoxProtocols: List<BleDeviceProtocol> = listOf(
             displayName = "感觉星球",
             nameTokens = setOf("s071", "feelplanet"),
             functions = listOf(
-                FeelBoxFunction(1, "constrict", "吮吸", FeelBoxCommand.Suction),
+                FeelBoxFunction(1, "constrict", "吮吸", FeelBoxCommand.SingleSuction),
             ),
         ),
     ),
@@ -71,6 +71,7 @@ private data class FeelBoxFunction(
 }
 
 private enum class FeelBoxCommand {
+    SingleSuction,
     Suction,
     Vibration,
     Pattern;
@@ -170,6 +171,7 @@ private class FeelBoxProfileProtocol(
 
     private fun command(function: FeelBoxFunction, mode: Int, intensity: Int): BleProtocolOperation.Write =
         when (function.command) {
+            FeelBoxCommand.SingleSuction -> write(feelBoxSingleSuctionFrame(intensity))
             FeelBoxCommand.Suction -> write(feelBoxSuctionFrame(intensity))
             FeelBoxCommand.Vibration -> write(feelBoxModeFrame(mode = 3, intensity = intensity))
             FeelBoxCommand.Pattern -> write(feelBoxModeFrame(mode = mode, intensity = intensity))
@@ -187,6 +189,9 @@ private fun BleGattFingerprint.hasFeelBoxGatt(): Boolean =
     characteristicUuids.contains(FEELBOX_WRITE_UUID) &&
             characteristicUuids.contains(FEELBOX_NOTIFY_UUID) &&
             (serviceUuids.isEmpty() || serviceUuids.contains(FEELBOX_SERVICE_UUID))
+
+private fun feelBoxSingleSuctionFrame(intensity: Int): ByteArray =
+    bytes(0xAA, 0x03, 0x01, 0x01, 0x02, intensity.feelBoxStrength()) + ByteArray(12)
 
 private fun feelBoxSuctionFrame(intensity: Int): ByteArray =
     bytes(0xAA, 0x03, 0x01, 0x02, 0x03, intensity.feelBoxStrength()) + ByteArray(12)

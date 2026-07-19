@@ -44,11 +44,11 @@ class FeelBoxProtocolTest {
         assertEquals("constrict", protocol.status.features.single().type)
 
         val command = protocol.commandsFor(ToyControlAction.Intensity(12)).single()
-        assertEquals("AA030102030C000000000000000000000000", assertIs<BleProtocolOperation.Write>(command).bytes.hexUpper())
+        assertEquals("AA030101020C000000000000000000000000", assertIs<BleProtocolOperation.Write>(command).bytes.hexUpper())
         assertEquals(false, assertIs<BleProtocolOperation.Write>(command).withResponse)
 
         val stop = protocol.commandsFor(ToyControlAction.Stop).single()
-        assertEquals("AA0301020300000000000000000000000000", assertIs<BleProtocolOperation.Write>(stop).bytes.hexUpper())
+        assertEquals("AA0301010200000000000000000000000000", assertIs<BleProtocolOperation.Write>(stop).bytes.hexUpper())
     }
 
     @Test
