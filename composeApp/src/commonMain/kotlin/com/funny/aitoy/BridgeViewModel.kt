@@ -42,6 +42,7 @@ import com.funny.aitoy.network.api.apiRequest
 import com.funny.aitoy.relay.MaxSequenceDurationSec
 import com.funny.aitoy.relay.RelayClient
 import com.funny.aitoy.relay.RelayCommand
+import com.funny.aitoy.relay.RelayConnectionState
 import com.funny.aitoy.relay.RelayDevice
 import com.funny.aitoy.relay.RelayDeviceFeature
 import com.funny.aitoy.relay.RelaySequenceStep
@@ -102,7 +103,7 @@ class BridgeViewModel : ViewModel() {
         private set
     var selectedName by mutableStateOf("")
         private set
-    var relayState by mutableStateOf("未连接")
+    var relayState by mutableStateOf(RelayConnectionState.Disconnected)
         private set
     var protocolStatus by mutableStateOf(BleProtocolStatus())
         private set
@@ -240,12 +241,13 @@ class BridgeViewModel : ViewModel() {
         onState = {
             relayState = it
             when (it) {
-                "正在同步" -> syncRelayDevice()
-                "已在线" -> {
+                RelayConnectionState.Syncing -> syncRelayDevice()
+                RelayConnectionState.Online -> {
                     syncRelayDevice()
                     toast("手机已上线", ToastType.Success)
                 }
-                "未连接" -> BridgePlatform.stopForegroundService()
+                RelayConnectionState.Disconnected -> BridgePlatform.stopForegroundService()
+                else -> Unit
             }
         },
         onLog = ::appendLog,
@@ -906,7 +908,7 @@ class BridgeViewModel : ViewModel() {
         val savedAddresses = saved.mapTo(mutableSetOf()) { it.address }
         val addresses = managedDeviceAddresses(saved, savedAddresses)
         if (addresses.isEmpty()) {
-            if (relayState == "已在线") relay.syncDevices(emptyList())
+            if (relayState == RelayConnectionState.Online) relay.syncDevices(emptyList())
             return
         }
         val defaultAddress = defaultConnectedAddress().ifBlank { saved.firstOrNull()?.address.orEmpty() }
@@ -1479,7 +1481,7 @@ class BridgeViewModel : ViewModel() {
         deviceRuntimeStore.connectedDeviceCount()
 
     private fun autoOfflineWhenNoConnectedSavedDevice() {
-        if (relayState == "已在线" && connectedSavedDeviceCount() == 0) {
+        if (relayState == RelayConnectionState.Online && connectedSavedDeviceCount() == 0) {
             disconnectRelay()
         }
     }
@@ -1666,7 +1668,7 @@ class BridgeViewModel : ViewModel() {
     private fun autoOnlineSavedDevice() {
         if (connectionState != BleConnectionState.Ready) return
         if (!currentDeviceSaved || selectedAddress.isBlank()) return
-        if (relayState == "已在线") {
+        if (relayState == RelayConnectionState.Online) {
             syncRelayDevice()
             return
         }

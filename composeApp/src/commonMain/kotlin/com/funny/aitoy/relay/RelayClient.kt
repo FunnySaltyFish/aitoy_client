@@ -76,9 +76,18 @@ data class RelayDeviceFeature(
     val modeMax: Int = 0,
 )
 
+enum class RelayConnectionState(val displayText: String) {
+    Disconnected("未连接"),
+    Connecting("正在连接"),
+    Syncing("正在同步"),
+    Online("已在线"),
+    Disconnecting("正在断开"),
+    WaitingReconnect("等待重连"),
+}
+
 class RelayClient(
     private val scope: CoroutineScope,
-    private val onState: (String) -> Unit,
+    private val onState: (RelayConnectionState) -> Unit,
     private val onLog: (String) -> Unit,
     private val onCommand: (RelayCommand) -> Unit,
     private val onTrace: (AiToyTraceEvent) -> Unit,
@@ -123,7 +132,7 @@ class RelayClient(
             .replaceFirst("https://", "wss://")
             .replaceFirst("http://", "ws://") + "/ws/app?token=$userToken"
         trace("连接 AI 伙伴：${safeWsUrl(wsUrl)}")
-        emitState("正在连接")
+        emitState(RelayConnectionState.Connecting)
         socket = client.newWebSocket(
             Request.Builder().url(wsUrl).build(),
             object : WebSocketListener() {
@@ -137,7 +146,7 @@ class RelayClient(
                         type = "relay_socket_open",
                         uploadPolicy = AiToyTraceUploadPolicy.SessionOnce,
                     )
-                    emitState("正在同步")
+                    emitState(RelayConnectionState.Syncing)
                     lastCommandActivityMs = nowMs()
                     startCommandIdleTimer(generation)
                     startHeartbeat()
@@ -170,7 +179,7 @@ class RelayClient(
                                 uploadPolicy = AiToyTraceUploadPolicy.SessionOnce,
                             )
                             retryCount = 0
-                            emitState("已在线")
+                            emitState(RelayConnectionState.Online)
                         }
                         else -> trace("AI 伙伴收到消息 type=$messageType")
                     }
@@ -179,7 +188,7 @@ class RelayClient(
                 override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
                     if (generation != connectionGeneration) return
                     trace("AI 伙伴正在断开")
-                    emitState("正在断开")
+                    emitState(RelayConnectionState.Disconnecting)
                 }
 
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
@@ -199,7 +208,7 @@ class RelayClient(
                             type = "relay_disconnected",
                             uploadPolicy = AiToyTraceUploadPolicy.Always,
                         )
-                        emitState("等待重连")
+                        emitState(RelayConnectionState.WaitingReconnect)
                         scheduleReconnect()
                     } else {
                         trace(
@@ -207,7 +216,7 @@ class RelayClient(
                             type = "relay_offline",
                             uploadPolicy = AiToyTraceUploadPolicy.Always,
                         )
-                        emitState("未连接")
+                        emitState(RelayConnectionState.Disconnected)
                     }
                 }
 
@@ -220,10 +229,10 @@ class RelayClient(
                     onlineConfirmed = false
                     trace("AI 伙伴连接中断：${t.message ?: "网络不可用"}", error = true)
                     if (userRequestedOnline) {
-                        emitState("等待重连")
+                        emitState(RelayConnectionState.WaitingReconnect)
                         scheduleReconnect()
                     } else {
-                        emitState("未连接")
+                        emitState(RelayConnectionState.Disconnected)
                     }
                 }
             },
@@ -267,7 +276,7 @@ class RelayClient(
         stopCommandIdleTimer()
         socket?.close(1000, "App disconnect")
         socket = null
-        emitState("未连接")
+        emitState(RelayConnectionState.Disconnected)
     }
 
     fun close() {
@@ -283,7 +292,13 @@ class RelayClient(
         trace("AI 伙伴同步状态 accepted=$accepted payload=$text")
         if (!accepted) {
             onlineConfirmed = false
-            emitState(if (userRequestedOnline) "等待重连" else "未连接")
+            emitState(
+                if (userRequestedOnline) {
+                    RelayConnectionState.WaitingReconnect
+                } else {
+                    RelayConnectionState.Disconnected
+                }
+            )
             onTrace(
                 AiToyTraceEvent(
                     message = "AI 伙伴同步状态 accepted=false",
@@ -315,7 +330,7 @@ class RelayClient(
                 if (!accepted) {
                     trace("AI 伙伴保活失败，正在准备重连", error = true, type = "relay_heartbeat_failed")
                     onlineConfirmed = false
-                    emitState("等待重连")
+                    emitState(RelayConnectionState.WaitingReconnect)
                     currentSocket.cancel()
                     if (socket === currentSocket) socket = null
                     scheduleReconnect()
@@ -374,7 +389,7 @@ class RelayClient(
             uploadPolicy = AiToyTraceUploadPolicy.Always,
         )
         if (closeSocket) webSocket?.close(1000, "command_idle_timeout")
-        emitState("未连接")
+        emitState(RelayConnectionState.Disconnected)
     }
 
     private fun scheduleReconnect() {
@@ -418,7 +433,7 @@ class RelayClient(
         scope.launch { onLog(message) }
     }
 
-    private fun emitState(state: String) {
+    private fun emitState(state: RelayConnectionState) {
         scope.launch { onState(state) }
     }
 

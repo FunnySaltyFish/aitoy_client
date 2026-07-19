@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import com.funny.aitoy.core.kmp.ToastType
 import com.funny.aitoy.core.kmp.toast
 import com.funny.aitoy.network.OkHttpUtils
+import com.funny.aitoy.relay.RelayConnectionState
 
 @Composable
 internal fun AiCompanion(vm: BridgeViewModel) {
@@ -98,8 +99,8 @@ internal fun AiCompanion(vm: BridgeViewModel) {
 
 @Composable
 private fun RelayStateButton(vm: BridgeViewModel) {
-    val online = vm.relayState == "已在线"
-    val connecting = vm.relayState != "未连接" && !online
+    val online = vm.relayState == RelayConnectionState.Online
+    val connecting = vm.relayState != RelayConnectionState.Disconnected && !online
     Button(
         onClick = {
             if (online || connecting) vm.disconnectRelay() else vm.connectRelay()
@@ -114,7 +115,7 @@ private fun RelayStateButton(vm: BridgeViewModel) {
         Text(
             when {
                 online -> "已上线，点击下线"
-                connecting -> "${vm.relayState}，点击取消"
+                connecting -> "${vm.relayState.displayText}，点击取消"
                 else -> "上线 AI"
             },
         )
