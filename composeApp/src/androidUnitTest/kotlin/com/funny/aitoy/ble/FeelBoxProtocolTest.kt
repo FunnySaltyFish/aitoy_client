@@ -11,8 +11,10 @@ class FeelBoxProtocolTest {
     @Test
     fun officialDeviceNamesResolveToFeelBoxProfiles() {
         assertEquals("feelbox_planet", resolve("S071").status.id)
+        assertEquals("feelbox_planet", resolve("S071-BT").status.id)
         assertEquals("feelbox_planet", resolve("FEEL PLANET").status.id)
         assertEquals("feelbox_moon", resolve("FEELBOX 02").status.id)
+        assertEquals("feelbox_moon", resolve("FEELBOX 02-BT").status.id)
         assertEquals("feelbox_moon", resolve("FEEL MOON").status.id)
         assertEquals("feelbox_bobo", resolve("FB-BOBO").status.id)
         assertEquals("feelbox_bobo", resolve("FEEL BOBO").status.id)

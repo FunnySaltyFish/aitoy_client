@@ -116,7 +116,7 @@ private class FeelBoxProfileProtocol(
 
     override fun matches(fingerprint: BleGattFingerprint): Boolean {
         val name = fingerprint.name.normalizedDeviceName()
-        return profile.nameTokens.any { token -> name == token } && fingerprint.hasFeelBoxGatt()
+        return profile.nameTokens.any { token -> name == token || name.startsWith(token) } && fingerprint.hasFeelBoxGatt()
     }
 
     override fun initialize(fingerprint: BleGattFingerprint): List<BleProtocolOperation> =
