@@ -111,6 +111,7 @@ internal object BleProtocolRegistry {
                     ChokerMiyinProtocol,
                     MesanelProtocol,
                     JissbonProtocol,
+                    *feelBoxProtocols.toTypedArray(),
                     SosexyBoboBeiProtocol,
                     MasolinWaiwaimaFfa0Protocol,
                     MizzzeeXhtkjProtocol,
