@@ -516,6 +516,41 @@ class KissToyProtocolTest {
     }
 
     @Test
+    fun cachitoTouhuanMiniTraceUsesFed5GattRoute() {
+        val fingerprint = cachitoTouhuanMiniFingerprint()
+        val protocol = BleProtocolRegistry.resolveNative(fingerprint) ?: error("Cachito 偷欢 Mini protocol not resolved")
+
+        assertEquals("cachito_touhuan_mini_gatt", protocol.status.id)
+        assertEquals("Cachito 偷欢 Mini", protocol.status.displayName)
+        assertEquals(ToyControlStyle.IntensityOnly, protocol.status.controlStyle)
+        assertEquals("吮吸强度", protocol.status.intensityLabel)
+
+        val init = protocol.initialize(fingerprint)
+        assertEquals(1, init.size)
+        assertEquals(FED6_NOTIFY_UUID, assertIs<BleProtocolOperation.SubscribeNotify>(init.single()).characteristicUuid)
+
+        val run = protocol.commandsFor(ToyControlAction.Intensity(70))
+        val write = assertIs<BleProtocolOperation.Write>(run.single())
+        assertEquals(FED5_WRITE_UUID, write.characteristicUuid)
+        assertTrue(write.withResponse)
+        assertEquals(16, write.bytes.size)
+        assertEquals("71000A", write.bytes.copyOfRange(0, 3).hexUpper())
+        assertEquals("8200000001006400005502", write.bytes.copyOfRange(4, 15).hexUpper())
+        assertEquals(
+            write.bytes.take(15).sumOf { it.toInt() and 0xff } and 0xff,
+            write.bytes.last().toInt() and 0xff,
+        )
+
+        val stopWrite = assertIs<BleProtocolOperation.Write>(protocol.commandsFor(ToyControlAction.Stop).single())
+        assertEquals(FED5_WRITE_UUID, stopWrite.characteristicUuid)
+        assertTrue(stopWrite.withResponse)
+        assertEquals("0F00000001000000000000", stopWrite.bytes.copyOfRange(4, 15).hexUpper())
+
+        val zeroWrite = assertIs<BleProtocolOperation.Write>(protocol.commandsFor(ToyControlAction.Intensity(0)).single())
+        assertEquals("0F00000001000000000000", zeroWrite.bytes.copyOfRange(4, 15).hexUpper())
+    }
+
+    @Test
     fun cachitoToHuanConnectableScanUsesTouhuanBroadcastRoute() {
         val matches = BleBroadcastProtocolRegistry.resolveAll(
             ScannedBleDevice(
@@ -706,6 +741,25 @@ class KissToyProtocolTest {
         ),
     )
 
+    private fun cachitoTouhuanMiniFingerprint() = BleGattFingerprint(
+        name = "SN-9AQ1TR02789",
+        address = "C1:19:32:00:03:D0",
+        manufacturerData = "0x504:C1 19 32 00 03 D0",
+        scanRecordHex = "02 01 05 03 02 B0 FF 09 FF 04 05 C1 19 32 00 03 D0 0F 09 53 4E 2D 39 41 51 31 54 52 30 32 37 38 39 02 0A 00",
+        serviceUuids = setOf(
+            FFB0_SERVICE_UUID,
+            FEB3_SERVICE_UUID,
+        ),
+        characteristicUuids = setOf(
+            FED4_READ_UUID,
+            FED5_WRITE_UUID,
+            FED6_NOTIFY_UUID,
+            FED7_UUID,
+            FED8_UUID,
+            FFB2_UUID,
+        ),
+    )
+
     private fun assertSingleKissToyBasicControlWrite(
         operations: List<BleProtocolOperation>,
         writeUuid: Uuid,
@@ -857,6 +911,15 @@ class KissToyProtocolTest {
         val FFE0_SERVICE_UUID: Uuid = Uuid.parse("0000ffe0-0000-1000-8000-00805f9b34fb")
         val FFE0_WRITE_UUID: Uuid = Uuid.parse("0000ffe1-0000-1000-8000-00805f9b34fb")
         val FFE0_NOTIFY_UUID: Uuid = Uuid.parse("0000ffe2-0000-1000-8000-00805f9b34fb")
+
+        val FFB0_SERVICE_UUID: Uuid = Uuid.parse("0000ffb0-0000-1000-8000-00805f9b34fb")
+        val FFB2_UUID: Uuid = Uuid.parse("0000ffb2-0000-1000-8000-00805f9b34fb")
+        val FEB3_SERVICE_UUID: Uuid = Uuid.parse("0000feb3-0000-1000-8000-00805f9b34fb")
+        val FED4_READ_UUID: Uuid = Uuid.parse("0000fed4-0000-1000-8000-00805f9b34fb")
+        val FED5_WRITE_UUID: Uuid = Uuid.parse("0000fed5-0000-1000-8000-00805f9b34fb")
+        val FED6_NOTIFY_UUID: Uuid = Uuid.parse("0000fed6-0000-1000-8000-00805f9b34fb")
+        val FED7_UUID: Uuid = Uuid.parse("0000fed7-0000-1000-8000-00805f9b34fb")
+        val FED8_UUID: Uuid = Uuid.parse("0000fed8-0000-1000-8000-00805f9b34fb")
 
         val AE3A_SERVICE_UUID: Uuid = Uuid.parse("0000ae3a-0000-1000-8000-00805f9b34fb")
         val AE3A_WRITE_UUID: Uuid = Uuid.parse("0000ae3b-0000-1000-8000-00805f9b34fb")

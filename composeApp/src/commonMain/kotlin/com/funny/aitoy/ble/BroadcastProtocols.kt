@@ -39,12 +39,12 @@ internal object BleBroadcastProtocolRegistry {
         CachitoTemplateBroadcastProtocol(
             CachitoTemplateBroadcastSpec(
                 id = "cachito_touhuan_mini_advertise",
-                displayName = "Cachito 套环 Mini",
-                aliases = listOf("套环mini", "touhuanmini", "tohuanmini"),
+                displayName = "Cachito 偷欢 Mini",
+                aliases = listOf("偷欢mini", "套环mini", "touhuanmini", "tohuanmini"),
                 framePrefixes = listOf("71000A"),
                 modeNames = listOf("强度"),
                 commandTemplates = listOf({ progress -> cachito8200Template("71000A", progress) }),
-                stopTemplates = listOf("71000A**-0F00-####-0100-3211643202"),
+                stopTemplates = listOf("71000A**-0F00-####-0100-0000000000"),
             )
         ),
         CachitoTemplateBroadcastProtocol(
