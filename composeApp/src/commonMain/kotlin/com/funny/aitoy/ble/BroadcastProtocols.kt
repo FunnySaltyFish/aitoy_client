@@ -45,6 +45,7 @@ internal object BleBroadcastProtocolRegistry {
                 modeNames = listOf("强度"),
                 commandTemplates = listOf({ progress -> cachito8200Template("71000A", progress) }),
                 stopTemplates = listOf("71000A**-0F00-####-0100-0000000000"),
+                scanMatchers = listOf(::isCachitoTouhuanMiniSnAdvertisement),
             )
         ),
         CachitoTemplateBroadcastProtocol(
@@ -712,6 +713,7 @@ private data class CachitoTemplateBroadcastSpec(
     val modeNames: List<String>,
     val commandTemplates: List<(Int) -> String>,
     val stopTemplates: List<String>,
+    val scanMatchers: List<(ScannedBleDevice) -> Boolean> = emptyList(),
     val excludedAliases: List<String> = emptyList(),
 )
 
@@ -753,6 +755,7 @@ private class CachitoTemplateBroadcastProtocol(
             return false
         }
         return spec.aliases.any { compactText.contains(it.lowercase().replace(" ", "").replace(".", "")) } ||
+            spec.scanMatchers.any { it(device) } ||
             spec.framePrefixes.any(device::hasCachitoBroadcastFramePrefix)
     }
 
@@ -1018,6 +1021,16 @@ private fun String.compactHex(): String =
     filter { character ->
         character.isDigit() || character.lowercaseChar() in 'a'..'f'
     }
+
+private fun isCachitoTouhuanMiniSnAdvertisement(device: ScannedBleDevice): Boolean {
+    val hasSnName = device.name.trim().startsWith("SN-", ignoreCase = true)
+    val hasFfb0Advertisement = device.serviceUuids.any {
+        it.equals("0000ffb0-0000-1000-8000-00805f9b34fb", ignoreCase = true)
+    } || device.scanRecordHex.compactHex().uppercase().contains("0302B0FF")
+    val hasCachitoMiniManufacturer = device.manufacturerData.contains("0x504", ignoreCase = true) ||
+        device.scanRecordHex.compactHex().uppercase().contains("09FF0405")
+    return hasSnName && hasFfb0Advertisement && hasCachitoMiniManufacturer
+}
 
 /**
  * 解析扫描记录里的厂商数据，返回指定 company id 的首字节。

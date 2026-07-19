@@ -29,6 +29,31 @@ class CachitoBroadcastDiscoveryTest {
     }
 
     @Test
+    fun snTouhuanMiniTraceUsesBroadcastRouteInsteadOfGattOtaRoute() {
+        val matches = BleBroadcastProtocolRegistry.resolveAll(
+            ScannedBleDevice(
+                name = "SN-9AQ1TR02789",
+                address = "C1:19:32:00:03:D0",
+                rssi = -55,
+                connectable = true,
+                serviceUuids = listOf("0000ffb0-0000-1000-8000-00805f9b34fb"),
+                manufacturerData = "0x504:C1 19 32 00 03 D0",
+                scanRecordHex = "02 01 05 03 02 B0 FF 09 FF 04 05 C1 19 32 00 03 D0 " +
+                    "0F 09 53 4E 2D 39 41 51 31 54 52 30 32 37 38 39 02 0A 00",
+            ),
+        )
+
+        val protocol = matches.single()
+        assertEquals("cachito_touhuan_mini_advertise", protocol.status.id)
+        assertFalse(protocol.preferGattWhenConnectable)
+
+        val run = protocol.commandsFor(ToyControlAction.Intensity(70)).single().serviceUuid
+        val stop = protocol.commandsFor(ToyControlAction.Stop).single().serviceUuid
+        assertTrue(run.matchesUuidBody("-8200-", "-0100-6400005502"))
+        assertTrue(stop.matchesUuidBody("-0F00-", "-0100-0000000000"))
+    }
+
+    @Test
     fun recognizesDaxiuAndShikong3FromOfficialProductTypeBytes() {
         val daxiuMatches = BleBroadcastProtocolRegistry.resolveAll(
             ScannedBleDevice(
