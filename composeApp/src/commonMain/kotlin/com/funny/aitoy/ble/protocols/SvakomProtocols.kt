@@ -1053,6 +1053,7 @@ internal val BeYourLoverProfiles: Map<Int, SvakomV2Profile> = mapOf(
     78 to beYourLoverProfile("TX752B", bylSuck(10, 5), bylVibrate(10, null)),
     83 to beYourLoverProfile("ST629B", bylRotate(5, 10), bylVibrate(11, 10)),
     86 to beYourLoverDoubleVibrateProfile("VX737B", 12, 10),
+    320 to beYourLoverDoubleVibrateProfile("VX737B", 12, 10),
     91 to beYourLoverProfile("CL279B_V", bylStretch(10, null), bylVibrate(10, 10)),
     92 to beYourLoverProfile("CL279B_S", bylSuck(10, 10)),
     95 to beYourLoverProfile("MW36B", bylStretch(8, 5), bylVibrate(11, 10)),

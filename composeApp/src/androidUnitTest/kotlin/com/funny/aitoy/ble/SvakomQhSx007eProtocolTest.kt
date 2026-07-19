@@ -337,6 +337,19 @@ class SvakomQhSx007eProtocolTest {
     }
 
     @Test
+    fun beYourLoverVx737bLiveTraceProductCodeResolvesToSameProfile() {
+        val protocol = BleProtocolRegistry.resolveNative(vx737bLiveTraceFingerprint())
+            ?: error("VX737B live trace protocol not resolved")
+
+        assertEquals("beyourlover_vx737b", protocol.status.id)
+        assertEquals(listOf("震动 1", "震动 2"), protocol.status.channelNames)
+
+        val secondHead = protocol.commandsFor(ToyControlAction.Combined(mode = 2 * 100 + 12, intensity = 10))
+        assertEquals(1, secondHead.size)
+        assertEquals("550302000C0A00", assertIs<BleProtocolOperation.Write>(secondHead[0]).bytes.hexUpper())
+    }
+
+    @Test
     fun beYourLoverVx607pShowsStretchButKeepsOfficialCommandBranch() {
         val protocol = BleProtocolRegistry.resolveNative(beYourLoverFingerprint(productCode = 392, name = "VX607P"))
             ?: error("VX607P protocol not resolved")
@@ -540,6 +553,17 @@ class SvakomQhSx007eProtocolTest {
         address = "FF:25:06:B7:61:D5",
         manufacturerData = "0x32:53 56 41 02 FF 32 25 06 B7 61 D5 FF 32 ${productCode.v2ProductCodeHex()} 00 00 BB",
         scanRecordHex = "",
+        serviceUuids = setOf(SERVICE_UUID),
+        characteristicUuids = setOf(WRITE_UUID, NOTIFY_UUID),
+    )
+
+    // 用户实机 Trace 2026-07-18 23:53：name=VX737B manufacturer=0x38:... 00 01 40 ...
+    // V2 产品码 payload[13..15]=00 01 40=0x140=320；海外 BeYourLover ProductCodeMapper 明确映射 320 -> VX737B。
+    private fun vx737bLiveTraceFingerprint() = BleGattFingerprint(
+        name = "VX737B",
+        address = "FF:25:06:3A:A8:0C",
+        manufacturerData = "0x38:53 56 41 02 FF 38 25 06 3A A8 0C FF 38 00 01 40 19 02 1B 00 01",
+        scanRecordHex = "02 01 06 03 03 A0 00 07 09 56 58 37 33 37 42 18 FF 38 00 53 56 41 02 FF 38 25 06 3A A8 0C FF 38 00 01 40 19 02 1B 00 01",
         serviceUuids = setOf(SERVICE_UUID),
         characteristicUuids = setOf(WRITE_UUID, NOTIFY_UUID),
     )
