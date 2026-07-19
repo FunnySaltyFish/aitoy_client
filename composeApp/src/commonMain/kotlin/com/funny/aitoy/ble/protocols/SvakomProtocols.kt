@@ -177,7 +177,7 @@ private class BeYourLoverV1Session(
     private val profile: BeYourLoverV1Profile,
 ) : BleDeviceProtocol {
     private val writeUuid = Uuid.parse("0000ffe1-0000-1000-8000-00805f9b34fb")
-    private val states = profile.functions.associate { it.code to 0 }.toMutableMap()
+    private val states = profile.functions.associate { it.code to BeYourLoverV1FunctionState() }.toMutableMap()
 
     override val status: BleProtocolStatus = profile.status
 
@@ -187,42 +187,64 @@ private class BeYourLoverV1Session(
 
     override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
         when (action) {
-            is ToyControlAction.Pattern -> write(profile.defaultFunction, action.mode)
-            is ToyControlAction.Intensity -> write(profile.defaultFunction, action.value)
+            is ToyControlAction.Pattern -> write(
+                profile.defaultFunction,
+                mode = action.mode,
+                intensity = if (profile.defaultFunction.modeMax > 0) 1 else action.mode,
+            )
+            is ToyControlAction.Intensity -> write(profile.defaultFunction, mode = 0, intensity = action.value)
             is ToyControlAction.Combined -> {
                 val function = profile.functionByCode(action.mode / 100)
-                val value = action.intensity.takeIf { it > 0 } ?: (action.mode % 100)
-                write(function, value)
+                write(function, mode = action.mode % 100, intensity = action.intensity)
             }
             is ToyControlAction.DualMotor -> {
                 val first = profile.functions.getOrNull(0)
                 val second = profile.functions.getOrNull(1)
                 buildList {
-                    if (first != null) add(writeOperation(first, action.internalIntensity))
-                    if (second != null) add(writeOperation(second, action.externalIntensity))
+                    if (first != null) add(writeOperation(first, mode = 0, intensity = action.internalIntensity))
+                    if (second != null) add(writeOperation(second, mode = 0, intensity = action.externalIntensity))
                 }
             }
             ToyControlAction.Stop -> stopAll()
         }
 
-    private fun write(function: BeYourLoverV1Function, rawValue: Int): List<BleProtocolOperation> =
-        listOf(writeOperation(function, rawValue))
+    private fun write(function: BeYourLoverV1Function, mode: Int, intensity: Int): List<BleProtocolOperation> =
+        buildList {
+            val state = function.safeState(mode, intensity)
+            if (profile.exclusiveFunctionCodes.contains(function.code) && state.isActive()) {
+                profile.exclusiveFunctionCodes
+                    .filter { it != function.code }
+                    .mapNotNull(profile::functionByCodeOrNull)
+                    .filter { other -> states[other.code]?.isActive() == true }
+                    .forEach { other ->
+                        states[other.code] = BeYourLoverV1FunctionState()
+                        add(writeOperation(other, mode = 0, intensity = 0))
+                    }
+            }
+            add(writeOperation(function, mode, intensity))
+        }
 
-    private fun writeOperation(function: BeYourLoverV1Function, rawValue: Int): BleProtocolOperation.Write {
-        val value = rawValue.coerceIn(0, function.max)
-        states[function.code] = value
+    private fun writeOperation(function: BeYourLoverV1Function, mode: Int, intensity: Int): BleProtocolOperation.Write {
+        val state = function.safeState(mode, intensity)
+        states[function.code] = state
         return BleProtocolOperation.Write(
             characteristicUuid = writeUuid,
-            bytes = function.frame(value),
+            bytes = function.frame(state),
             withResponse = false,
         )
     }
+
+    private fun BeYourLoverV1Function.safeState(mode: Int, intensity: Int): BeYourLoverV1FunctionState =
+        BeYourLoverV1FunctionState(
+            mode = mode.coerceIn(0, modeMax.coerceAtLeast(0)),
+            intensity = intensity.coerceIn(0, intensityMax.coerceAtLeast(1)),
+        )
 
     private fun stopAll(): List<BleProtocolOperation> =
         profile.functions.map { function ->
             BleProtocolOperation.Write(
                 characteristicUuid = writeUuid,
-                bytes = function.frame(0),
+                bytes = function.frame(BeYourLoverV1FunctionState()),
                 withResponse = false,
             )
         } + profile.extraStopFrames.map { frame ->
@@ -234,15 +256,24 @@ private data class BeYourLoverV1Function(
     val code: Int,
     val type: String,
     val label: String,
-    val max: Int,
-    val frame: (Int) -> ByteArray,
+    val intensityMax: Int,
+    val modeMax: Int = 0,
+    val frame: (BeYourLoverV1FunctionState) -> ByteArray,
 )
+
+private data class BeYourLoverV1FunctionState(
+    val mode: Int = 0,
+    val intensity: Int = 0,
+) {
+    fun isActive(): Boolean = mode > 0 || intensity > 0
+}
 
 private data class BeYourLoverV1Profile(
     val id: String,
     val displayName: String,
     val functions: List<BeYourLoverV1Function>,
     val extraStopFrames: List<ByteArray> = emptyList(),
+    val exclusiveFunctionCodes: Set<Int> = emptySet(),
 ) {
     val defaultFunction: BeYourLoverV1Function = functions.first()
     val status: BleProtocolStatus = svakomV2Status(
@@ -254,21 +285,25 @@ private data class BeYourLoverV1Profile(
                 type = it.type,
                 label = it.label,
                 command = 0,
-                modeMax = 0,
-                intensityMax = it.max,
+                modeMax = it.modeMax,
+                intensityMax = it.intensityMax,
             )
         },
     )
 
     fun functionByCode(code: Int): BeYourLoverV1Function =
-        functions.firstOrNull { it.code == code } ?: defaultFunction
+        functionByCodeOrNull(code) ?: defaultFunction
+
+    fun functionByCodeOrNull(code: Int): BeYourLoverV1Function? =
+        functions.firstOrNull { it.code == code }
 }
 
 private val BE_YOUR_LOVER_V1_BX288A = BeYourLoverV1Profile(
     id = "beyourlover_bx288a",
     displayName = "礼物猫 BX288A",
     functions = listOf(
-        BeYourLoverV1Function(1, "constrict", "吮吸", 9) { value ->
+        BeYourLoverV1Function(1, "constrict", "吮吸", 9) { state ->
+            val value = state.intensity
             v1Bytes(0x55, 0x03, 0x03, 0x00, if (value == 0) 0x00 else 0x01, value + 1)
         },
     ),
@@ -278,20 +313,46 @@ private val BE_YOUR_LOVER_V1_HX029A = BeYourLoverV1Profile(
     id = "beyourlover_hx029a_v1",
     displayName = "礼物猫 HX029A",
     functions = listOf(
-        BeYourLoverV1Function(1, "constrict", "吮吸", 9) { value ->
+        BeYourLoverV1Function(1, "constrict", "吮吸", 9) { state ->
+            val value = state.intensity
             v1Bytes(0x55, 0x03, 0x03, 0x00, if (value == 0) 0x00 else 0x01, value + 1)
         },
     ),
+)
+
+private val BE_YOUR_LOVER_V1_HIBA = BeYourLoverV1Profile(
+    id = "beyourlover_hiba_v1",
+    displayName = "礼物猫 HiBa",
+    functions = listOf(
+        BeYourLoverV1Function(1, "constrict", "吮吸强度", intensityMax = 5) { state ->
+            val value = state.intensity
+            v1Bytes(0x55, 0x03, 0x03, 0x00, if (value == 0) 0x00 else 0x01, value + 1)
+        },
+        BeYourLoverV1Function(2, "constrict", "吮吸模式", intensityMax = 1, modeMax = 5) { state ->
+            val mode = state.mode.takeIf { state.intensity > 0 } ?: 0
+            v1Bytes(0x55, 0x03, 0x03, 0x00, if (mode == 0) 0x00 else 0x01, mode + 1)
+        },
+        BeYourLoverV1Function(3, "heat", "加热", intensityMax = 1, modeMax = 1) { state ->
+            if (state.intensity > 0) {
+                v1Bytes(0x55, 0x05, 0x01, 0x37, 0x00, 0x00)
+            } else {
+                v1Bytes(0x55, 0x05, 0x00, 0x00, 0x00, 0x00)
+            }
+        },
+    ),
+    exclusiveFunctionCodes = setOf(1, 2),
 )
 
 private val BE_YOUR_LOVER_V1_VX357B = BeYourLoverV1Profile(
     id = "beyourlover_vx357b_v1",
     displayName = "礼物猫 VX357B",
     functions = listOf(
-        BeYourLoverV1Function(1, "constrict", "吮吸", 10) { value ->
+        BeYourLoverV1Function(1, "constrict", "吮吸", 10) { state ->
+            val value = state.intensity
             v1Bytes(0x55, 0x09, 0x00, 0x00, value, 0x00)
         },
-        BeYourLoverV1Function(2, "vibrate", "震动", 30) { value ->
+        BeYourLoverV1Function(2, "vibrate", "震动", 30) { state ->
+            val value = state.intensity
             var speed = value % 10
             var intensity = if (value == 0) 0 else value / 10 + 1
             if (speed == 0 && intensity != 0) {
@@ -308,7 +369,8 @@ private fun beYourLoverV1VibrateProfile(model: String) = BeYourLoverV1Profile(
     id = "beyourlover_${model.lowercase()}_v1",
     displayName = "礼物猫 $model",
     functions = listOf(
-        BeYourLoverV1Function(1, "vibrate", "震动", 10) { value ->
+        BeYourLoverV1Function(1, "vibrate", "震动", 10) { state ->
+            val value = state.intensity
             v1Bytes(0x55, 0x04, 0x00, 0x00, if (value == 0) 0x00 else 0x01, value * 25, 0xAA)
         },
     ),
@@ -323,7 +385,8 @@ private val BE_YOUR_LOVER_V1_VV468A = BeYourLoverV1Profile(
     id = "beyourlover_vv468a",
     displayName = "礼物猫 VV468A",
     functions = listOf(
-        BeYourLoverV1Function(1, "vibrate", "震动", 10) { value ->
+        BeYourLoverV1Function(1, "vibrate", "震动", 10) { state ->
+            val value = state.intensity
             v1Bytes(0x55, 0x04, 0x00, 0x00, 0x01, value * 25, 0xAA)
         },
     ),
@@ -335,7 +398,8 @@ private fun BleGattFingerprint.beYourLoverV1Profile(): BeYourLoverV1Profile? {
     val name = name.normalizedDeviceName()
     return when {
         name.contains("bx288a") -> BE_YOUR_LOVER_V1_BX288A
-        name.contains("hx029a") || name.contains("qhhx029ab") -> BE_YOUR_LOVER_V1_HX029A
+        name.contains("hiba") || name.contains("qhhx029ab") -> BE_YOUR_LOVER_V1_HIBA
+        name.contains("hx029a") -> BE_YOUR_LOVER_V1_HX029A
         name.contains("vx357a") || name.contains("vx357b") || name.contains("vx357d") -> BE_YOUR_LOVER_V1_VX357B
         name.contains("va422a") -> BE_YOUR_LOVER_V1_VA422A
         name.contains("ct654a") -> BE_YOUR_LOVER_V1_CT654A
@@ -970,6 +1034,9 @@ private fun bylSuck(mode: Int, strength: Int?) =
 private fun bylVibrate(mode: Int, strength: Int?, head: Int = 0, label: String = "震动") =
     BeYourLoverFunctionSpec("vibrate", label, 0x03, mode, strength, head = head)
 
+private fun bylHeat() =
+    BeYourLoverFunctionSpec("heat", "加热", 0x05, modeMax = 1, intensityMax = null)
+
 private fun bylDoubleVibrate(mode: Int, strength: Int?) =
     listOf(
         bylVibrate(mode, strength, head = 1, label = "震动 1"),
@@ -1042,39 +1109,39 @@ private fun beYourLoverDoubleVibrateProfile(model: String, mode: Int, strength: 
     )
 
 internal val BeYourLoverProfiles: Map<Int, SvakomV2Profile> = mapOf(
-    26 to beYourLoverProfile("CX492B", bylSuck(5, 10), bylVibrate(11, 10)),
+    26 to beYourLoverProfile("CX492B", bylSuck(5, 10), bylVibrate(5, 5)),
     50 to beYourLoverProfile("SA251B_S", bylSuck(8, 10)),
     51 to beYourLoverProfile("SA251B_V", bylVibrate(9, 10)),
     58 to beYourLoverProfile("CA594B", bylFlap(5, 10), bylVibrate(11, 10)),
     62 to BE_YOUR_LOVER_VA617A_VIBRATE,
     63 to BE_YOUR_LOVER_VA617A_SUCK,
     65 to beYourLoverProfile("MW35", bylSuck(5, null), bylVibrate(5, 10)),
-    72 to beYourLoverProfile("TX640A", bylSuck(6, null), bylVibrate(10, null), bylFlap(5, null)),
+    72 to beYourLoverProfile("TX640A", bylSuck(6, null), bylVibrate(10, null), bylFlap(5, null), bylHeat()),
     78 to beYourLoverProfile("TX752B", bylSuck(10, 5), bylVibrate(10, null)),
     83 to beYourLoverProfile("ST629B", bylRotate(5, 10), bylVibrate(11, 10)),
     86 to beYourLoverDoubleVibrateProfile("VX737B", 12, 10),
-    320 to beYourLoverDoubleVibrateProfile("VX737B", 12, 10),
-    91 to beYourLoverProfile("CL279B_V", bylStretch(10, null), bylVibrate(10, 10)),
-    92 to beYourLoverProfile("CL279B_S", bylSuck(10, 10)),
+    320 to beYourLoverProfile("VX737B", *(bylDoubleVibrate(12, 10) + bylHeat()).toTypedArray(), replayActiveStateOnUpdate = true),
+    91 to beYourLoverProfile("CL279B_V", bylStretch(10, null), bylVibrate(10, 10), bylHeat()),
+    92 to beYourLoverProfile("CL279B_S", bylSuck(10, 10), bylHeat()),
     95 to beYourLoverProfile("MW36B", bylStretch(8, 5), bylVibrate(11, 10)),
     96 to beYourLoverProfile("MW36A", bylSuck(8, null), bylVibrate(11, 10)),
-    97 to beYourLoverProfile("VP753A", bylStretch(5, null), bylVibrate(8, null)),
+    97 to beYourLoverProfile("VP753A", bylStretch(5, null), bylVibrate(8, null), bylHeat()),
     103 to beYourLoverProfile("SF030C", bylRotate(5, 10), bylSuck(10, null)),
-    105 to beYourLoverProfile("QL169C_V", bylStretch(7, null), bylVibrate(10, 10)),
-    106 to beYourLoverProfile("QL169C_F", bylFlap(7, null)),
+    105 to beYourLoverProfile("QL169C_V", bylStretch(7, null), bylVibrate(10, 10), bylHeat()),
+    106 to beYourLoverProfile("QL169C_F", bylFlap(7, null), bylHeat()),
     118 to beYourLoverProfile("VX736A", listOf(bylOcclusion(10, 10), bylSuck(3, 10)) + bylDoubleVibrate(10, 10)),
     266 to beYourLoverProfile("VX586A", bylSuck(5, 5)),
-    267 to beYourLoverProfile("VX688A_S", bylSuck(5, 5)),
-    268 to beYourLoverProfile("VX586D", bylSuck(8, null)),
-    274 to beYourLoverProfile("TL278B_V", bylStretch(7, null), bylVibrate(10, 10)),
-    275 to beYourLoverProfile("TL278B_S", bylSuck(5, 10)),
-    309 to beYourLoverProfile("TL278J", bylSuck(5, 10)),
-    314 to beYourLoverProfile("VX719A", bylSuck(10, 10), bylStretch(6, 10), bylVibrate(10, 10)),
-    316 to beYourLoverProfile("CA755B_V", bylVibrate(8, 10), bylVibrate(8, 10)),
+    267 to beYourLoverProfile("VX688A_S", bylSuck(5, 5), bylHeat()),
+    268 to beYourLoverProfile("VX586D", bylSuck(8, null), bylHeat()),
+    274 to beYourLoverProfile("TL278B_V", bylStretch(7, null), bylVibrate(10, 10), bylHeat()),
+    275 to beYourLoverProfile("TL278B_S", bylSuck(5, 10), bylHeat()),
+    309 to beYourLoverProfile("TL278J", bylSuck(5, 10), bylHeat()),
+    314 to beYourLoverProfile("VX719A", bylSuck(10, 10), bylStretch(6, 10), bylVibrate(10, 10), bylHeat()),
+    316 to beYourLoverProfile("CA755B_V", bylVibrate(8, 10), bylVibrate(8, 10), bylHeat()),
     317 to beYourLoverProfile("CA755B_V_2", bylVibrate(8, 10)),
     323 to beYourLoverProfile("S106C", bylSuck(6, null), bylFlap(6, null), bylStretch(6, null)),
-    335 to beYourLoverProfile("VX723A", bylLick(10, 10), bylSuck(3, null), bylVibrate(10, 10)),
-    337 to beYourLoverProfile("VP757A", bylStretch(6, null), bylVibrate(8, null)),
+    335 to beYourLoverProfile("VX723A", bylLick(10, 10), bylSuck(3, null), bylVibrate(10, 10), bylHeat()),
+    337 to beYourLoverProfile("VP757A", bylStretch(6, null), bylVibrate(8, null), bylHeat()),
     338 to beYourLoverProfile("MW655A", bylSuck(8, null), bylVibrate(11, 10)),
     339 to beYourLoverProfile("MW520A", bylSuck(8, null), bylVibrate(11, 10)),
     340 to beYourLoverProfile("MW820A", bylSuck(8, null), bylVibrate(11, 10)),
@@ -1082,17 +1149,17 @@ internal val BeYourLoverProfiles: Map<Int, SvakomV2Profile> = mapOf(
     342 to beYourLoverProfile("MW520B", bylStretch(8, 5), bylVibrate(11, 10)),
     343 to beYourLoverProfile("MW820B", bylStretch(8, 5), bylVibrate(11, 10)),
     356 to beYourLoverProfile("VX688A_V", bylVibrate(5, 5)),
-    361 to beYourLoverProfile("HX029A", bylSuck(10, 10)),
-    362 to beYourLoverProfile("TX218A", bylSuck(7, 10), bylVibrate(6, 10)),
+    361 to beYourLoverProfile("HX029A", bylSuck(10, 10), bylHeat()),
+    362 to beYourLoverProfile("TX218A", bylSuck(7, 10), bylVibrate(6, 10), bylHeat()),
     363 to beYourLoverProfile("VF721A", bylSuck(5, null), bylStretch(5, null), bylVibrate(8, null)),
     367 to beYourLoverProfile("SG02A", bylVibrate(10, 10)),
     374 to beYourLoverProfile("VX219A", bylVibrate(10, 10)),
-    376 to beYourLoverProfile("VX586C", bylSuck(8, null)),
+    376 to beYourLoverProfile("VX586C", bylSuck(8, null), bylHeat()),
     378 to beYourLoverProfile("VX760A_V", bylVibrate(10, null)),
     379 to beYourLoverProfile("VX760A_S", bylSuck(10, null)),
     380 to beYourLoverProfile("VA733B", bylStretch(10, 10), bylVibrate(10, 10)),
-    381 to beYourLoverProfile("VP625B", bylStretch(5, 10), bylVibrate(10, 10)),
-    382 to beYourLoverDoubleVibrateProfile("VX737C", 12, 10),
+    381 to beYourLoverProfile("VP625B", bylStretch(5, 10), bylVibrate(10, 10), bylHeat()),
+    382 to beYourLoverProfile("VX737C", *(bylDoubleVibrate(12, 10) + bylHeat()).toTypedArray(), replayActiveStateOnUpdate = true),
     383 to beYourLoverProfile("S137P", bylVibrate(10, 10), bylVibrate(10, 10)),
     392 to beYourLoverProfile("VX607P", bylSuck(10, 10), bylStretchWithVibrateCommand(10, 10)),
 )

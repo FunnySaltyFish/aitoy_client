@@ -6,7 +6,7 @@ internal object MasolinWaiwaimaFfa0Protocol : BleDeviceProtocol {
     private val serviceUuid = Uuid.parse("0000ffa0-0000-1000-8000-00805f9b34fb")
     private val writeUuid = Uuid.parse("0000ffa1-0000-1000-8000-00805f9b34fb")
     private const val continuousMotor = 0x00
-    private const val vibrationMotor = 0x02
+    private const val vibrationMotor = 0x01
     private const val stopMotor = 0x14
 
     override val status = BleProtocolStatus(

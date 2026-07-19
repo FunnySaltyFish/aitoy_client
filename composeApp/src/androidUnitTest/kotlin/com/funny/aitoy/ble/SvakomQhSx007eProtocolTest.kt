@@ -238,10 +238,14 @@ class SvakomQhSx007eProtocolTest {
 
         assertEquals("beyourlover_tx640a", protocol.status.id)
         assertEquals(listOf("吮吸", "震动", "拍打"), protocol.status.channelNames)
+        assertEquals(4, protocol.status.features.size)
         assertEquals(1, protocol.status.features.first { it.type == "vibrate" }.max)
 
         val vibrate = protocol.commandsFor(ToyControlAction.Combined(mode = 2 * 100 + 10, intensity = 10))
         assertEquals("550300000A0000", assertIs<BleProtocolOperation.Write>(vibrate[0]).bytes.hexUpper())
+
+        val heat = protocol.commandsFor(ToyControlAction.Combined(mode = 4 * 100 + 1, intensity = 1))
+        assertEquals("55050137010000", assertIs<BleProtocolOperation.Write>(heat[0]).bytes.hexUpper())
     }
 
     @Test
@@ -258,15 +262,47 @@ class SvakomQhSx007eProtocolTest {
     }
 
     @Test
-    fun beYourLoverV1Hx029aPulseNameResolvesNativeSuckRoute() {
-        val protocol = BleProtocolRegistry.resolveNative(beYourLoverV1Fingerprint(name = "QH-HX029A-B", productCode = 0xF7, functionCode = 0x20))
+    fun beYourLoverV1HibaPulseNameResolvesManualSuckAndHeatRoute() {
+        val protocol = BleProtocolRegistry.resolveNative(hibaV1Fingerprint())
+            ?: error("HiBa V1 protocol not resolved")
+
+        assertEquals("beyourlover_hiba_v1", protocol.status.id)
+        assertEquals(listOf("吮吸强度", "吮吸模式"), protocol.status.channelNames)
+        assertEquals(3, protocol.status.features.size)
+        assertEquals(5, protocol.status.features.first { it.label == "吮吸强度" }.max)
+        assertEquals(5, protocol.status.features.first { it.label == "吮吸模式" }.modeMax)
+
+        val suck = protocol.commandsFor(ToyControlAction.Combined(mode = 1 * 100, intensity = 5))
+        assertEquals(1, suck.size)
+        assertEquals("550303000106", assertIs<BleProtocolOperation.Write>(suck[0]).bytes.hexUpper())
+
+        val mode = protocol.commandsFor(ToyControlAction.Combined(mode = 2 * 100 + 4, intensity = 1))
+        assertEquals(2, mode.size)
+        assertEquals("550303000001", assertIs<BleProtocolOperation.Write>(mode[0]).bytes.hexUpper())
+        assertEquals("550303000105", assertIs<BleProtocolOperation.Write>(mode[1]).bytes.hexUpper())
+
+        val heat = protocol.commandsFor(ToyControlAction.Combined(mode = 3 * 100 + 1, intensity = 1))
+        assertEquals(1, heat.size)
+        assertEquals("550501370000", assertIs<BleProtocolOperation.Write>(heat[0]).bytes.hexUpper())
+    }
+
+    // 真实广播（线上 trace 2026-07-19 12:15）：name=QH-HX029A-B / 用户备注“礼物猫 hiba”，SVA V1。
+    private fun hibaV1Fingerprint() = BleGattFingerprint(
+        name = "QH-HX029A-B",
+        address = "FF:10:00:63:7A:84",
+        manufacturerData = "0x101:53 56 41 10 FD FF 10 00 63 7A 84 02",
+        scanRecordHex = "",
+        serviceUuids = setOf(SERVICE_UUID),
+        characteristicUuids = setOf(WRITE_UUID, NOTIFY_UUID),
+    )
+
+    @Test
+    fun beYourLoverV1Hx029aNameKeepsLegacyPulseRoute() {
+        val protocol = BleProtocolRegistry.resolveNative(beYourLoverV1Fingerprint(name = "HX029A", productCode = 0xF7, functionCode = 0x20))
             ?: error("HX029A V1 protocol not resolved")
 
         assertEquals("beyourlover_hx029a_v1", protocol.status.id)
         assertEquals(listOf("吮吸"), protocol.status.channelNames)
-
-        val suck = protocol.commandsFor(ToyControlAction.Combined(mode = 1 * 100, intensity = 8))
-        assertEquals("550303000109", assertIs<BleProtocolOperation.Write>(suck[0]).bytes.hexUpper())
     }
 
     @Test
@@ -343,10 +379,27 @@ class SvakomQhSx007eProtocolTest {
 
         assertEquals("beyourlover_vx737b", protocol.status.id)
         assertEquals(listOf("震动 1", "震动 2"), protocol.status.channelNames)
+        assertEquals(3, protocol.status.features.size)
 
         val secondHead = protocol.commandsFor(ToyControlAction.Combined(mode = 2 * 100 + 12, intensity = 10))
         assertEquals(1, secondHead.size)
         assertEquals("550302000C0A00", assertIs<BleProtocolOperation.Write>(secondHead[0]).bytes.hexUpper())
+    }
+
+    @Test
+    fun beYourLoverCx492bMiniProUsesFiveSuckAndFiveVibrateGears() {
+        val protocol = BleProtocolRegistry.resolveNative(cx492bLiveTraceFingerprint())
+            ?: error("CX492B protocol not resolved")
+
+        assertEquals("beyourlover_cx492b", protocol.status.id)
+        assertEquals(listOf("吮吸", "震动"), protocol.status.channelNames)
+        assertEquals(5, protocol.status.features.first { it.type == "constrict" }.modeMax)
+        assertEquals(10, protocol.status.features.first { it.type == "constrict" }.max)
+        assertEquals(5, protocol.status.features.first { it.type == "vibrate" }.modeMax)
+        assertEquals(5, protocol.status.features.first { it.type == "vibrate" }.max)
+
+        val vibrate = protocol.commandsFor(ToyControlAction.Combined(mode = 2 * 100 + 5, intensity = 5))
+        assertEquals("55030000050500", assertIs<BleProtocolOperation.Write>(vibrate[0]).bytes.hexUpper())
     }
 
     @Test
@@ -564,6 +617,16 @@ class SvakomQhSx007eProtocolTest {
         address = "FF:25:06:3A:A8:0C",
         manufacturerData = "0x38:53 56 41 02 FF 38 25 06 3A A8 0C FF 38 00 01 40 19 02 1B 00 01",
         scanRecordHex = "02 01 06 03 03 A0 00 07 09 56 58 37 33 37 42 18 FF 38 00 53 56 41 02 FF 38 25 06 3A A8 0C FF 38 00 01 40 19 02 1B 00 01",
+        serviceUuids = setOf(SERVICE_UUID),
+        characteristicUuids = setOf(WRITE_UUID, NOTIFY_UUID),
+    )
+
+    // 真实广播（线上 trace 2026-07-19 12:36）：name=CX492B / 用户备注“觅野Pro”，V2 产品码 0x1A=26。
+    private fun cx492bLiveTraceFingerprint() = BleGattFingerprint(
+        name = "CX492B",
+        address = "FF:26:04:0A:76:C5",
+        manufacturerData = "0x32:53 56 41 02 FF 32 26 04 0A 76 C5 FF 32 00 00 1A 18 0A 1C 04 00",
+        scanRecordHex = "02 01 06 03 03 A0 00 07 09 43 58 34 39 32 42 18 FF 32 00 53 56 41 02 FF 32 26 04 0A 76 C5 FF 32 00 00 1A 18 0A 1C 04 00",
         serviceUuids = setOf(SERVICE_UUID),
         characteristicUuids = setOf(WRITE_UUID, NOTIFY_UUID),
     )

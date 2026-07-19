@@ -34,7 +34,7 @@ class MasolinProtocolTest {
         assertEquals(1, writes.size)
         assertEquals(FFA1_WRITE_UUID, writes[0].characteristicUuid)
         assertEquals(true, writes[0].withResponse)
-        assertEquals("AA0B020305", writes[0].bytes.hexUpper())
+        assertEquals("AA0B010305", writes[0].bytes.hexUpper())
     }
 
     @Test
