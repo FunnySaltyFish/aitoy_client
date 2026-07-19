@@ -23,4 +23,61 @@ class RelaySequenceScriptTest {
             step,
         )
     }
+
+    @Test
+    fun parsesFiniteRepeatSequence() {
+        val step = parseRelaySequenceScript(
+            "repeat(count=3){set(mode=1,intensity=20,duration=5); set(mode=2,intensity=40,duration=8)}",
+        ).single()
+
+        assertEquals(
+            RelaySequenceStep.Repeat(
+                count = 3,
+                steps = listOf(
+                    RelaySequenceStep.Set(mode = 1, intensity = 20, durationSec = 5),
+                    RelaySequenceStep.Set(mode = 2, intensity = 40, durationSec = 8),
+                ),
+            ),
+            step,
+        )
+    }
+
+    @Test
+    fun parsesFiniteRepeatAndKeepsFollowingTopLevelStep() {
+        val steps = parseRelaySequenceScript(
+            "repeat(count=2){set(mode=1,intensity=20,duration=5); set(mode=1,intensity=40,duration=8)}; stop()",
+        )
+
+        assertEquals(
+            listOf(
+                RelaySequenceStep.Repeat(
+                    count = 2,
+                    steps = listOf(
+                        RelaySequenceStep.Set(mode = 1, intensity = 20, durationSec = 5),
+                        RelaySequenceStep.Set(mode = 1, intensity = 40, durationSec = 8),
+                    ),
+                ),
+                RelaySequenceStep.Stop,
+            ),
+            steps,
+        )
+    }
+
+    @Test
+    fun parsesInfiniteRepeatCount() {
+        val step = parseRelaySequenceScript(
+            "repeat(count=-1){set(mode=1,intensity=20,duration=5); set(mode=1,intensity=40,duration=8)}",
+        ).single()
+
+        assertEquals(
+            RelaySequenceStep.Repeat(
+                count = UnlimitedSequenceRepeatCount,
+                steps = listOf(
+                    RelaySequenceStep.Set(mode = 1, intensity = 20, durationSec = 5),
+                    RelaySequenceStep.Set(mode = 1, intensity = 40, durationSec = 8),
+                ),
+            ),
+            step,
+        )
+    }
 }

@@ -2,6 +2,8 @@ package com.funny.aitoy.relay
 
 const val UnlimitedSequenceDurationSec = -1
 const val MaxSequenceDurationSec = 600
+const val UnlimitedSequenceRepeatCount = -1
+const val MaxSequenceRepeatCount = 100
 
 sealed interface RelaySequenceStep {
     data class Set(
@@ -30,17 +32,23 @@ sealed interface RelaySequenceStep {
 
     data class Sleep(val durationSec: Int) : RelaySequenceStep
 
+    data class Repeat(
+        val count: Int,
+        val steps: List<RelaySequenceStep>,
+    ) : RelaySequenceStep
+
     data object Stop : RelaySequenceStep
 }
 
 private class SequenceScriptFormatException : IllegalArgumentException("序列脚本格式错误")
 
 fun parseRelaySequenceScript(script: String): List<RelaySequenceStep> {
-    val parts = script.split(';').map { it.trim() }.filter { it.isNotBlank() }
+    val parts = splitTopLevelSequenceParts(script)
     if (parts.isEmpty()) throw SequenceScriptFormatException()
     return parts.map { part ->
         when {
             part == "stop()" -> RelaySequenceStep.Stop
+            part.startsWith("repeat(") -> parseRepeatStep(part)
             part.startsWith("sleep(") && part.endsWith(")") -> {
                 val seconds = part.removePrefix("sleep(")
                     .removeSuffix(")")
@@ -102,6 +110,29 @@ fun parseRelaySequenceScript(script: String): List<RelaySequenceStep> {
     }
 }
 
+private fun parseRepeatStep(part: String): RelaySequenceStep.Repeat {
+    val argsStart = "repeat".length
+    val argsEnd = findMatchingDelimiter(part, argsStart, '(', ')')
+    if (argsEnd <= argsStart) throw SequenceScriptFormatException()
+    val args = parseSequenceArguments(part.substring(argsStart + 1, argsEnd))
+    val blockStart = argsEnd + 1
+    if (blockStart >= part.length || part[blockStart] != '{') throw SequenceScriptFormatException()
+    val blockEnd = findMatchingDelimiter(part, blockStart, '{', '}')
+    if (blockEnd != part.lastIndex) throw SequenceScriptFormatException()
+    val count = parseRepeatCount(args)
+    val steps = parseRelaySequenceScript(part.substring(blockStart + 1, blockEnd))
+    return RelaySequenceStep.Repeat(count = count, steps = steps)
+}
+
+private fun parseRepeatCount(args: Map<String, Int>): Int {
+    val count = args["count"] ?: args["times"] ?: throw SequenceScriptFormatException()
+    return if (count == UnlimitedSequenceRepeatCount) {
+        UnlimitedSequenceRepeatCount
+    } else {
+        count.coerceIn(1, MaxSequenceRepeatCount)
+    }
+}
+
 private fun parseSequenceDuration(args: Map<String, Int>): Int? {
     val duration = args["duration"] ?: return null
     return if (duration == UnlimitedSequenceDurationSec) {
@@ -120,4 +151,55 @@ private fun parseSequenceArguments(text: String): Map<String, Int> {
             if (key.isBlank() || value == null) throw SequenceScriptFormatException()
             key to value
         }
+}
+
+private fun splitTopLevelSequenceParts(script: String): List<String> {
+    val parts = mutableListOf<String>()
+    var partStart = 0
+    var parenthesisDepth = 0
+    var braceDepth = 0
+    script.forEachIndexed { index, char ->
+        when (char) {
+            '(' -> parenthesisDepth += 1
+            ')' -> {
+                parenthesisDepth -= 1
+                if (parenthesisDepth < 0) throw SequenceScriptFormatException()
+            }
+            '{' -> braceDepth += 1
+            '}' -> {
+                braceDepth -= 1
+                if (braceDepth < 0) throw SequenceScriptFormatException()
+            }
+            ';' -> if (parenthesisDepth == 0 && braceDepth == 0) {
+                parts += script.substring(partStart, index).trim()
+                partStart = index + 1
+            }
+        }
+    }
+    if (parenthesisDepth != 0 || braceDepth != 0) throw SequenceScriptFormatException()
+    parts += script.substring(partStart).trim()
+    return parts.filter { it.isNotBlank() }
+}
+
+private fun findMatchingDelimiter(
+    text: String,
+    openIndex: Int,
+    openChar: Char,
+    closeChar: Char,
+): Int {
+    if (openIndex !in text.indices || text[openIndex] != openChar) {
+        throw SequenceScriptFormatException()
+    }
+    var depth = 0
+    for (index in openIndex..text.lastIndex) {
+        when (text[index]) {
+            openChar -> depth += 1
+            closeChar -> {
+                depth -= 1
+                if (depth == 0) return index
+                if (depth < 0) throw SequenceScriptFormatException()
+            }
+        }
+    }
+    throw SequenceScriptFormatException()
 }

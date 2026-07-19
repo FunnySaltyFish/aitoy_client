@@ -46,6 +46,7 @@ import com.funny.aitoy.relay.RelayDevice
 import com.funny.aitoy.relay.RelayDeviceFeature
 import com.funny.aitoy.relay.RelaySequenceStep
 import com.funny.aitoy.relay.UnlimitedSequenceDurationSec
+import com.funny.aitoy.relay.UnlimitedSequenceRepeatCount
 import com.funny.aitoy.relay.parseRelaySequenceScript
 import com.funny.aitoy.runtime.DeviceRuntimeStore
 import com.funny.aitoy.runtime.toRuntimeState
@@ -53,6 +54,7 @@ import com.funny.data_saver.core.mutableDataSaverStateOf
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -67,6 +69,10 @@ private const val DefaultCommunityUrl = "https://qm.qq.com/q/ytRVIe6O7m"
 private const val DefaultTutorialUrl = "https://docs.qq.com/s/4dhBqBSu1u5900Qh7qvYHW/folder/YFZTdLuzaIxv"
 private const val ProtocolExhaustedFeedbackMessage =
     "已尝试所有协议，目前仍不支持。请在群里反馈，并附上官方 App 截图或产品说明书，说明设备可用的档位和模式；同时提供你在本 App 内的操作时间，方便查找日志。"
+private data class RelaySequenceRunState(
+    var running: Boolean = false,
+    var shouldStopRunning: Boolean = true,
+)
 private val ActiveManagedConnectionStates = setOf(
     BleConnectionState.Connecting,
     BleConnectionState.Discovering,
@@ -1009,179 +1015,210 @@ class BridgeViewModel : ViewModel() {
         defaultDurationSec: Int?,
     ) {
         val safeDefaultDuration = (defaultDurationSec ?: 30).coerceIn(1, MaxSequenceDurationSec)
-        var running = false
-        var shouldStopRunning = true
+        val runState = RelaySequenceRunState()
         try {
-            steps.forEach { step ->
-                when (step) {
-                    is RelaySequenceStep.Set -> {
-                        val durationSec = step.durationSec ?: safeDefaultDuration
-                        val unlimited = durationSec == UnlimitedSequenceDurationSec
-                        val actionDurationSec = if (unlimited) safeDefaultDuration else durationSec
-                        delayControlWarmup(address)
-                        val action = sendToySet(
-                            intensityPercent = step.intensity,
-                            requestedMode = step.mode,
-                            autoStopSec = actionDurationSec,
-                            address = address,
-                            scheduleAutoStop = false,
-                            keepAliveDurationSec = if (unlimited) null else actionDurationSec,
-                        )
-                        running = actionKeepsDeviceRunning(action)
-                        if (unlimited) {
-                            shouldStopRunning = false
-                            return
-                        }
-                        delay(actionDurationSec * 1_000L)
-                    }
-                    is RelaySequenceStep.Dual -> {
-                        val durationSec = step.durationSec ?: safeDefaultDuration
-                        val unlimited = durationSec == UnlimitedSequenceDurationSec
-                        val actionDurationSec = if (unlimited) safeDefaultDuration else durationSec
-                        val status = protocolStatusFor(address)
-                        val mappedMode = step.mode.coerceIn(1, status.modeMax.coerceAtLeast(1))
-                        val mappedInternalIntensity = mapIntensityPercent(step.internalIntensity, address)
-                        val mappedExternalIntensity = mapIntensityPercent(step.externalIntensity, address)
-                        val action = dualIntensityAction(
-                            currentMode = mappedMode,
-                            primaryIntensity = mappedInternalIntensity,
-                            secondaryIntensity = mappedExternalIntensity,
-                            status = status,
-                        )
-                        delayControlWarmup(address)
-                        sendToyAction(
-                            action,
-                            actionDurationSec,
-                            address,
-                            scheduleAutoStop = false,
-                            keepAliveDurationSec = if (unlimited) null else actionDurationSec,
-                        )
-                        deviceRuntimeStore.setControlValues(
-                            address,
-                            mode = mappedMode,
-                            intensity = mappedInternalIntensity,
-                            secondaryIntensity = mappedExternalIntensity,
-                        )
-                        if (address == selectedAddress) {
-                            mode = mappedMode
-                            intensity = mappedInternalIntensity
-                            secondaryIntensity = mappedExternalIntensity
-                        }
-                        syncRelayDevice()
-                        running = actionKeepsDeviceRunning(action)
-                        if (unlimited) {
-                            shouldStopRunning = false
-                            return
-                        }
-                        delay(actionDurationSec * 1_000L)
-                    }
-                    is RelaySequenceStep.Pattern -> {
-                        val durationSec = step.durationSec ?: safeDefaultDuration
-                        val unlimited = durationSec == UnlimitedSequenceDurationSec
-                        val actionDurationSec = if (unlimited) safeDefaultDuration else durationSec
-                        val status = protocolStatusFor(address)
-                        val mappedMode = step.mode.coerceIn(1, status.modeMax.coerceAtLeast(1))
-                        val action = patternAction(
-                            nextMode = mappedMode,
-                            currentIntensity = intensityForAddress(address),
-                            currentSecondaryIntensity = secondaryIntensityForAddress(address),
-                            status = status,
-                        )
-                        delayControlWarmup(address)
-                        sendToyAction(
-                            action,
-                            actionDurationSec,
-                            address,
-                            scheduleAutoStop = false,
-                            keepAliveDurationSec = if (unlimited) null else actionDurationSec,
-                        )
-                        deviceRuntimeStore.setMode(address, mappedMode)
-                        if (address == selectedAddress) mode = mappedMode
-                        syncRelayDevice()
-                        running = actionKeepsDeviceRunning(action)
-                        if (unlimited) {
-                            shouldStopRunning = false
-                            return
-                        }
-                        delay(actionDurationSec * 1_000L)
-                    }
-                    is RelaySequenceStep.Intensity -> {
-                        val durationSec = step.durationSec ?: safeDefaultDuration
-                        val unlimited = durationSec == UnlimitedSequenceDurationSec
-                        val actionDurationSec = if (unlimited) safeDefaultDuration else durationSec
-                        val mappedIntensity = mapIntensityPercent(step.value, address)
-                        val status = protocolStatusFor(address)
-                        val action = intensityAction(
-                            currentMode = modeForAddress(address),
-                            nextIntensity = mappedIntensity,
-                            nextSecondaryIntensity = mappedIntensity,
-                            status = status,
-                        )
-                        delayControlWarmup(address)
-                        sendToyAction(
-                            action,
-                            actionDurationSec,
-                            address,
-                            scheduleAutoStop = false,
-                            keepAliveDurationSec = if (unlimited) null else actionDurationSec,
-                        )
-                        deviceRuntimeStore.setIntensity(address, mappedIntensity)
-                        if (status.controlStyle == ToyControlStyle.ExclusivePatternOrIntensity) {
-                            deviceRuntimeStore.setMode(address, EXCLUSIVE_INTENSITY_MODE)
-                        }
-                        if (status.supportsDualIntensity()) {
-                            deviceRuntimeStore.setSecondaryIntensity(address, mappedIntensity)
-                        }
-                        if (address == selectedAddress) {
-                            intensity = mappedIntensity
-                            if (status.controlStyle == ToyControlStyle.ExclusivePatternOrIntensity) {
-                                mode = EXCLUSIVE_INTENSITY_MODE
-                            }
-                        }
-                        if (address == selectedAddress && status.supportsDualIntensity()) {
-                            secondaryIntensity = mappedIntensity
-                        }
-                        syncRelayDevice()
-                        running = actionKeepsDeviceRunning(action)
-                        if (unlimited) {
-                            shouldStopRunning = false
-                            return
-                        }
-                        delay(actionDurationSec * 1_000L)
-                    }
-                    is RelaySequenceStep.Scalar -> {
-                        val durationSec = step.durationSec ?: safeDefaultDuration
-                        val unlimited = durationSec == UnlimitedSequenceDurationSec
-                        val actionDurationSec = if (unlimited) safeDefaultDuration else durationSec
-                        val status = protocolStatusFor(address)
-                        val action = scalarFeatureAction(step, address, status)
-                        delayControlWarmup(address)
-                        sendToyAction(
-                            action,
-                            actionDurationSec,
-                            address,
-                            scheduleAutoStop = false,
-                            keepAliveDurationSec = if (unlimited) null else actionDurationSec,
-                        )
-                        syncRelayDevice()
-                        running = actionKeepsDeviceRunning(action)
-                        if (unlimited) {
-                            shouldStopRunning = false
-                            return
-                        }
-                        delay(actionDurationSec * 1_000L)
-                    }
-                    is RelaySequenceStep.Sleep -> delay(step.durationSec.coerceIn(0, 300) * 1_000L)
-                    RelaySequenceStep.Stop -> {
-                        sendToyStop(address)
-                        running = false
-                    }
-                }
-            }
+            executeRelaySequenceSteps(address, steps, safeDefaultDuration, runState)
         } finally {
-            if (running && shouldStopRunning) sendToyStop(address)
+            if (runState.running && runState.shouldStopRunning) sendToyStop(address)
         }
     }
+
+    private suspend fun executeRelaySequenceSteps(
+        address: String,
+        steps: List<RelaySequenceStep>,
+        safeDefaultDuration: Int,
+        runState: RelaySequenceRunState,
+    ) {
+        steps.forEach { step ->
+            when (step) {
+                is RelaySequenceStep.Set -> {
+                    val durationSec = step.durationSec ?: safeDefaultDuration
+                    val unlimited = durationSec == UnlimitedSequenceDurationSec
+                    val actionDurationSec = if (unlimited) safeDefaultDuration else durationSec
+                    delayControlWarmup(address)
+                    val action = sendToySet(
+                        intensityPercent = step.intensity,
+                        requestedMode = step.mode,
+                        autoStopSec = actionDurationSec,
+                        address = address,
+                        scheduleAutoStop = false,
+                        keepAliveDurationSec = if (unlimited) null else actionDurationSec,
+                    )
+                    runState.running = actionKeepsDeviceRunning(action)
+                    if (unlimited) {
+                        runState.shouldStopRunning = false
+                        return
+                    }
+                    delay(actionDurationSec * 1_000L)
+                }
+                is RelaySequenceStep.Dual -> {
+                    val durationSec = step.durationSec ?: safeDefaultDuration
+                    val unlimited = durationSec == UnlimitedSequenceDurationSec
+                    val actionDurationSec = if (unlimited) safeDefaultDuration else durationSec
+                    val status = protocolStatusFor(address)
+                    val mappedMode = step.mode.coerceIn(1, status.modeMax.coerceAtLeast(1))
+                    val mappedInternalIntensity = mapIntensityPercent(step.internalIntensity, address)
+                    val mappedExternalIntensity = mapIntensityPercent(step.externalIntensity, address)
+                    val action = dualIntensityAction(
+                        currentMode = mappedMode,
+                        primaryIntensity = mappedInternalIntensity,
+                        secondaryIntensity = mappedExternalIntensity,
+                        status = status,
+                    )
+                    delayControlWarmup(address)
+                    sendToyAction(
+                        action,
+                        actionDurationSec,
+                        address,
+                        scheduleAutoStop = false,
+                        keepAliveDurationSec = if (unlimited) null else actionDurationSec,
+                    )
+                    deviceRuntimeStore.setControlValues(
+                        address,
+                        mode = mappedMode,
+                        intensity = mappedInternalIntensity,
+                        secondaryIntensity = mappedExternalIntensity,
+                    )
+                    if (address == selectedAddress) {
+                        mode = mappedMode
+                        intensity = mappedInternalIntensity
+                        secondaryIntensity = mappedExternalIntensity
+                    }
+                    syncRelayDevice()
+                    runState.running = actionKeepsDeviceRunning(action)
+                    if (unlimited) {
+                        runState.shouldStopRunning = false
+                        return
+                    }
+                    delay(actionDurationSec * 1_000L)
+                }
+                is RelaySequenceStep.Pattern -> {
+                    val durationSec = step.durationSec ?: safeDefaultDuration
+                    val unlimited = durationSec == UnlimitedSequenceDurationSec
+                    val actionDurationSec = if (unlimited) safeDefaultDuration else durationSec
+                    val status = protocolStatusFor(address)
+                    val mappedMode = step.mode.coerceIn(1, status.modeMax.coerceAtLeast(1))
+                    val action = patternAction(
+                        nextMode = mappedMode,
+                        currentIntensity = intensityForAddress(address),
+                        currentSecondaryIntensity = secondaryIntensityForAddress(address),
+                        status = status,
+                    )
+                    delayControlWarmup(address)
+                    sendToyAction(
+                        action,
+                        actionDurationSec,
+                        address,
+                        scheduleAutoStop = false,
+                        keepAliveDurationSec = if (unlimited) null else actionDurationSec,
+                    )
+                    deviceRuntimeStore.setMode(address, mappedMode)
+                    if (address == selectedAddress) mode = mappedMode
+                    syncRelayDevice()
+                    runState.running = actionKeepsDeviceRunning(action)
+                    if (unlimited) {
+                        runState.shouldStopRunning = false
+                        return
+                    }
+                    delay(actionDurationSec * 1_000L)
+                }
+                is RelaySequenceStep.Intensity -> {
+                    val durationSec = step.durationSec ?: safeDefaultDuration
+                    val unlimited = durationSec == UnlimitedSequenceDurationSec
+                    val actionDurationSec = if (unlimited) safeDefaultDuration else durationSec
+                    val mappedIntensity = mapIntensityPercent(step.value, address)
+                    val status = protocolStatusFor(address)
+                    val action = intensityAction(
+                        currentMode = modeForAddress(address),
+                        nextIntensity = mappedIntensity,
+                        nextSecondaryIntensity = mappedIntensity,
+                        status = status,
+                    )
+                    delayControlWarmup(address)
+                    sendToyAction(
+                        action,
+                        actionDurationSec,
+                        address,
+                        scheduleAutoStop = false,
+                        keepAliveDurationSec = if (unlimited) null else actionDurationSec,
+                    )
+                    deviceRuntimeStore.setIntensity(address, mappedIntensity)
+                    if (status.controlStyle == ToyControlStyle.ExclusivePatternOrIntensity) {
+                        deviceRuntimeStore.setMode(address, EXCLUSIVE_INTENSITY_MODE)
+                    }
+                    if (status.supportsDualIntensity()) {
+                        deviceRuntimeStore.setSecondaryIntensity(address, mappedIntensity)
+                    }
+                    if (address == selectedAddress) {
+                        intensity = mappedIntensity
+                        if (status.controlStyle == ToyControlStyle.ExclusivePatternOrIntensity) {
+                            mode = EXCLUSIVE_INTENSITY_MODE
+                        }
+                    }
+                    if (address == selectedAddress && status.supportsDualIntensity()) {
+                        secondaryIntensity = mappedIntensity
+                    }
+                    syncRelayDevice()
+                    runState.running = actionKeepsDeviceRunning(action)
+                    if (unlimited) {
+                        runState.shouldStopRunning = false
+                        return
+                    }
+                    delay(actionDurationSec * 1_000L)
+                }
+                is RelaySequenceStep.Scalar -> {
+                    val durationSec = step.durationSec ?: safeDefaultDuration
+                    val unlimited = durationSec == UnlimitedSequenceDurationSec
+                    val actionDurationSec = if (unlimited) safeDefaultDuration else durationSec
+                    val status = protocolStatusFor(address)
+                    val action = scalarFeatureAction(step, address, status)
+                    delayControlWarmup(address)
+                    sendToyAction(
+                        action,
+                        actionDurationSec,
+                        address,
+                        scheduleAutoStop = false,
+                        keepAliveDurationSec = if (unlimited) null else actionDurationSec,
+                    )
+                    syncRelayDevice()
+                    runState.running = actionKeepsDeviceRunning(action)
+                    if (unlimited) {
+                        runState.shouldStopRunning = false
+                        return
+                    }
+                    delay(actionDurationSec * 1_000L)
+                }
+                is RelaySequenceStep.Sleep -> delay(step.durationSec.coerceIn(0, 300) * 1_000L)
+                is RelaySequenceStep.Repeat -> {
+                    if (step.count == UnlimitedSequenceRepeatCount) {
+                        while (currentCoroutineContext().isActive) {
+                            executeRelaySequenceSteps(address, step.steps, safeDefaultDuration, runState)
+                            if (!runState.shouldStopRunning) return
+                            if (!sequenceContainsTimedStep(step.steps)) delay(1_000L)
+                        }
+                    } else {
+                        repeat(step.count) {
+                            executeRelaySequenceSteps(address, step.steps, safeDefaultDuration, runState)
+                            if (!runState.shouldStopRunning) return
+                        }
+                    }
+                }
+                RelaySequenceStep.Stop -> {
+                    sendToyStop(address)
+                    runState.running = false
+                }
+            }
+        }
+    }
+
+    private fun sequenceContainsTimedStep(steps: List<RelaySequenceStep>): Boolean =
+        steps.any { step ->
+            when (step) {
+                RelaySequenceStep.Stop -> false
+                is RelaySequenceStep.Repeat -> sequenceContainsTimedStep(step.steps)
+                else -> true
+            }
+        }
 
     private fun sendToySet(
         intensityPercent: Int,
