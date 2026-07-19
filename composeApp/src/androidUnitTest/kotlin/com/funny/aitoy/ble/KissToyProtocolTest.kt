@@ -383,6 +383,29 @@ class KissToyProtocolTest {
     }
 
     @Test
+    fun qckhMixedLiveRoutePrefersHistoricalFourModeProtocol() {
+        val protocols = BleProtocolRegistry.resolveNativeAll(qckhMixedLiveFingerprint())
+
+        assertEquals(
+            listOf("kisstoy_gatt"),
+            protocols.map { it.status.id },
+        )
+
+        val protocol = protocols.single()
+        assertEquals("KissToy", protocol.status.displayName)
+        assertEquals(ToyControlStyle.CombinedPatternAndIntensity, protocol.status.controlStyle)
+        assertEquals(listOf("主电机", "第二电机", "抽插", "双通道"), protocol.status.modeNames)
+
+        val suction = protocol.commandsFor(ToyControlAction.Combined(mode = 2, intensity = 31))
+        assertEquals(3, suction.size)
+        suction.forEach { operation ->
+            val write = assertIs<BleProtocolOperation.Write>(operation)
+            assertEquals(KISSTOY_WRITE_UUID, write.characteristicUuid)
+            assertTrue(write.withResponse)
+        }
+    }
+
+    @Test
     fun jiuaiJellyfishUsesWxMiniProgramAe3aPlainCommands() {
         val fingerprint = jiuaiJellyfishFingerprint()
         val protocol = BleProtocolRegistry.resolveNative(fingerprint) ?: error("Jiuai jellyfish protocol not resolved")
@@ -516,38 +539,10 @@ class KissToyProtocolTest {
     }
 
     @Test
-    fun cachitoTouhuanMiniTraceUsesFed5GattRoute() {
+    fun cachitoTouhuanMiniTraceDoesNotUseFed5GattRoute() {
         val fingerprint = cachitoTouhuanMiniFingerprint()
-        val protocol = BleProtocolRegistry.resolveNative(fingerprint) ?: error("Cachito 偷欢 Mini protocol not resolved")
 
-        assertEquals("cachito_touhuan_mini_gatt", protocol.status.id)
-        assertEquals("Cachito 偷欢 Mini", protocol.status.displayName)
-        assertEquals(ToyControlStyle.IntensityOnly, protocol.status.controlStyle)
-        assertEquals("吮吸强度", protocol.status.intensityLabel)
-
-        val init = protocol.initialize(fingerprint)
-        assertEquals(1, init.size)
-        assertEquals(FED6_NOTIFY_UUID, assertIs<BleProtocolOperation.SubscribeNotify>(init.single()).characteristicUuid)
-
-        val run = protocol.commandsFor(ToyControlAction.Intensity(70))
-        val write = assertIs<BleProtocolOperation.Write>(run.single())
-        assertEquals(FED5_WRITE_UUID, write.characteristicUuid)
-        assertTrue(write.withResponse)
-        assertEquals(16, write.bytes.size)
-        assertEquals("71000A", write.bytes.copyOfRange(0, 3).hexUpper())
-        assertEquals("8200000001006400005502", write.bytes.copyOfRange(4, 15).hexUpper())
-        assertEquals(
-            write.bytes.take(15).sumOf { it.toInt() and 0xff } and 0xff,
-            write.bytes.last().toInt() and 0xff,
-        )
-
-        val stopWrite = assertIs<BleProtocolOperation.Write>(protocol.commandsFor(ToyControlAction.Stop).single())
-        assertEquals(FED5_WRITE_UUID, stopWrite.characteristicUuid)
-        assertTrue(stopWrite.withResponse)
-        assertEquals("0F00000001000000000000", stopWrite.bytes.copyOfRange(4, 15).hexUpper())
-
-        val zeroWrite = assertIs<BleProtocolOperation.Write>(protocol.commandsFor(ToyControlAction.Intensity(0)).single())
-        assertEquals("0F00000001000000000000", zeroWrite.bytes.copyOfRange(4, 15).hexUpper())
+        assertEquals(null, BleProtocolRegistry.resolveNative(fingerprint))
     }
 
     @Test
@@ -693,6 +688,22 @@ class KissToyProtocolTest {
     private fun qcpwLiveAe3aFingerprint() = BleGattFingerprint(
         name = "QCPW",
         manufacturerData = "0x5d6:08 00 4A 4C 41 49 53 44 4B, 0x5756:E9 AD FE FC F7 35",
+        scanRecordHex = "",
+        serviceUuids = setOf(KISSTOY_SERVICE_UUID, AE3A_SERVICE_UUID, AE00_SERVICE_UUID),
+        characteristicUuids = setOf(
+            KISSTOY_WRITE_UUID,
+            KISSTOY_NOTIFY_UUID,
+            AE3A_WRITE_UUID,
+            AE3A_NOTIFY_UUID,
+            AE00_WRITE_UUID,
+            AE00_NOTIFY_UUID,
+        ),
+    )
+
+    private fun qckhMixedLiveFingerprint() = BleGattFingerprint(
+        name = "QCKH",
+        address = "61:46:9B:1B:16:8A",
+        manufacturerData = "0x5d6:08 00 4A 4C 41 49 53 44 4B, 0x5756:61 46 9B 1B 16 8A",
         scanRecordHex = "",
         serviceUuids = setOf(KISSTOY_SERVICE_UUID, AE3A_SERVICE_UUID, AE00_SERVICE_UUID),
         characteristicUuids = setOf(

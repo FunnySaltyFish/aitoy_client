@@ -92,11 +92,13 @@ internal object KissToyOfficialV2Protocol : BleDeviceProtocol {
 
     override fun matches(fingerprint: BleGattFingerprint): Boolean {
         val profile = fingerprint.kissToyOfficialV2Profile() ?: return false
+        if (fingerprint.prefersKissToyHistoricalRoute(profile)) return false
         return !profile.usesDedicatedTutuRoute && fingerprint.kissToyOfficialV2Route() != null
     }
 
     override fun createInstance(fingerprint: BleGattFingerprint): BleDeviceProtocol {
         val profile = fingerprint.kissToyOfficialV2Profile() ?: return this
+        if (fingerprint.prefersKissToyHistoricalRoute(profile)) return this
         if (profile.usesDedicatedTutuRoute) return this
         val route = fingerprint.kissToyOfficialV2Route() ?: return this
         return Session(route, profile)
@@ -325,6 +327,11 @@ internal fun BleGattFingerprint.kissToyOfficialV2Profile(): KissToyOfficialV2Pro
     val normalizedName = name.normalizedDeviceName()
     return KISS_TOY_OFFICIAL_V2_PROFILES[normalizedName]
 }
+
+internal fun BleGattFingerprint.prefersKissToyHistoricalRoute(profile: KissToyOfficialV2Profile): Boolean =
+    profile.code == KISS_TOY_BOBO_CODE &&
+        hasKissToyHistoricalGattRoute() &&
+        hasKissToyOfficialV2Route(KISS_TOY_OFFICIAL_V2_AE3A_ROUTE)
 
 internal fun KissToyOfficialV2Profile.commandsForOfficialV2(
     action: ToyControlAction,
@@ -626,13 +633,15 @@ internal val KISS_TOY_HISTORICAL_GATT_NOTIFY_UUID = LoyoEncryptedFrameCodec.noti
 internal val KISS_TOY_OFFICIAL_V2_AE3A_SERVICE_UUID = Uuid.parse("0000ae3a-0000-1000-8000-00805f9b34fb")
 internal val KISS_TOY_OFFICIAL_V2_AE3A_WRITE_UUID = Uuid.parse("0000ae3b-0000-1000-8000-00805f9b34fb")
 internal val KISS_TOY_OFFICIAL_V2_AE3A_NOTIFY_UUID = Uuid.parse("0000ae3c-0000-1000-8000-00805f9b34fb")
+private const val KISS_TOY_BOBO_CODE = "QCKH"
+internal val KISS_TOY_OFFICIAL_V2_AE3A_ROUTE = KissToyOfficialV2Route(
+    serviceUuid = KISS_TOY_OFFICIAL_V2_AE3A_SERVICE_UUID,
+    writeUuid = KISS_TOY_OFFICIAL_V2_AE3A_WRITE_UUID,
+    notifyUuid = KISS_TOY_OFFICIAL_V2_AE3A_NOTIFY_UUID,
+    subscribeNotifyOnInit = true,
+)
 internal val KISS_TOY_OFFICIAL_V2_DISCOVERY_ROUTES = listOf(
-    KissToyOfficialV2Route(
-        serviceUuid = KISS_TOY_OFFICIAL_V2_AE3A_SERVICE_UUID,
-        writeUuid = KISS_TOY_OFFICIAL_V2_AE3A_WRITE_UUID,
-        notifyUuid = KISS_TOY_OFFICIAL_V2_AE3A_NOTIFY_UUID,
-        subscribeNotifyOnInit = true,
-    ),
+    KISS_TOY_OFFICIAL_V2_AE3A_ROUTE,
     KissToyOfficialV2Route(
         serviceUuid = Uuid.parse("0000dddd-0000-1000-8000-00805f9b34fb"),
         writeUuid = Uuid.parse("0000ddd1-0000-1000-8000-00805f9b34fb"),
