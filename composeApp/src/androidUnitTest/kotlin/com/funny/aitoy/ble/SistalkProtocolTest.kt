@@ -136,28 +136,44 @@ class SistalkProtocolTest {
     }
 
     @Test
-    fun catTailWeightless808FingerprintMatchesDedicatedRoute() {
+    fun whaleTailProductIdUsesSingleEightLevelVibrationControl() {
         val protocol = BleProtocolRegistry.resolveNative(
             sistalkV2Fingerprint(name = "猫尾巴", manufacturerData = "0x2512:02 00 1C 00 00 00 00 00 00 00")
-        ) ?: error("猫尾巴 失重808 protocol not resolved")
+        ) ?: error("小鲸尾 protocol not resolved")
 
-        assertEquals("sistalk_weightless_808", protocol.status.id)
-        val run = protocol.commandsFor(ToyControlAction.Combined(mode = 1, intensity = 23))
+        assertEquals("sistalk_whale_tail", protocol.status.id)
+        assertEquals("小鲸尾", protocol.status.displayName)
+        assertEquals(ToyControlStyle.IntensityOnly, protocol.status.controlStyle)
+        assertEquals(8, protocol.status.intensityMax)
+        assertFalse(protocol.status.supportsMode)
+        assertEquals(listOf("震动"), protocol.status.channelNames)
+        assertEquals("vibrate", protocol.status.features.single().type)
+
+        val run = protocol.commandsFor(ToyControlAction.Intensity(2))
         assertEquals(3, run.size)
         val startupWrite = assertIs<BleProtocolOperation.Write>(run[0])
-        assertEquals("A098024600", startupWrite.bytes.hexUpper())
+        assertEquals(FUNCTION_UUID, startupWrite.characteristicUuid)
+        assertEquals("A0900146", startupWrite.bytes.hexUpper())
         assertEquals(BleProtocolOperation.Sleep(120L), run[1])
         val targetWrite = assertIs<BleProtocolOperation.Write>(run[2])
-        assertEquals("A098021700", targetWrite.bytes.hexUpper())
+        assertEquals("A0900119", targetWrite.bytes.hexUpper())
+
+        val full = protocol.commandsFor(ToyControlAction.Intensity(8))
+        val fullWrite = assertIs<BleProtocolOperation.Write>(full.single())
+        assertEquals("A0900164", fullWrite.bytes.hexUpper())
+
+        val stop = protocol.commandsFor(ToyControlAction.Stop)
+        val stopWrite = assertIs<BleProtocolOperation.Write>(stop.single())
+        assertEquals("A0900100", stopWrite.bytes.hexUpper())
     }
 
     @Test
-    fun weightless808ProductIdMatchesEvenWhenAdvertisedNameChanges() {
+    fun whaleTailProductIdMatchesEvenWhenAdvertisedNameChanges() {
         val protocol = BleProtocolRegistry.resolveNative(
             sistalkV2Fingerprint(name = "SISTALK", manufacturerData = "0x2512:02 00 1C 00 00 00 00 00 00 00")
-        ) ?: error("renamed 失重808 protocol not resolved")
+        ) ?: error("renamed 小鲸尾 protocol not resolved")
 
-        assertEquals("sistalk_weightless_808", protocol.status.id)
+        assertEquals("sistalk_whale_tail", protocol.status.id)
     }
 
     @Test

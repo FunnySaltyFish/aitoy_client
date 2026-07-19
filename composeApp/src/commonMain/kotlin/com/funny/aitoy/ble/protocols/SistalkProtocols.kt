@@ -321,6 +321,106 @@ internal object SistalkMonsterPartyMp2Protocol : SistalkMonsterPartyDualVibratio
     }
 }
 
+internal object SistalkWhaleTailProtocol : BleDeviceProtocol {
+    private val serviceUuid = Uuid.parse("00009000-0000-1000-8000-00805f9b34fb")
+    private val opUuid = Uuid.parse("00009001-0000-1000-8000-00805f9b34fb")
+    private val functionUuid = Uuid.parse("00009002-0000-1000-8000-00805f9b34fb")
+
+    private const val COMMAND_MOTOR = 0xA0
+    private const val INTENSITY_MAX = 8
+    private const val STARTUP_PWM = 70
+    private const val STARTUP_SETTLE_MS = 120L
+    private var currentLevel = 0
+
+    override val status = BleProtocolStatus(
+        id = "sistalk_whale_tail",
+        displayName = "小鲸尾",
+        controllable = true,
+        intensityMax = INTENSITY_MAX,
+        supportsMode = false,
+        controlStyle = ToyControlStyle.IntensityOnly,
+        intensityLabel = "强度",
+        channelNames = listOf("震动"),
+        features = listOf(
+            BleProtocolFeature(type = "vibrate", min = 0, max = INTENSITY_MAX, index = 0, label = "震动"),
+        ),
+        automatic = true,
+    )
+
+    override fun matches(fingerprint: BleGattFingerprint): Boolean =
+        fingerprint.hasWhaleTailIdentity() &&
+                fingerprint.sistalkProtocolVersion != 1 &&
+                fingerprint.serviceUuids.contains(serviceUuid) &&
+                fingerprint.characteristicUuids.contains(opUuid) &&
+                fingerprint.characteristicUuids.contains(functionUuid)
+
+    override fun initialize(fingerprint: BleGattFingerprint): List<BleProtocolOperation> =
+        listOf(
+            BleProtocolOperation.SubscribeNotify(opUuid),
+            BleProtocolOperation.SubscribeNotify(functionUuid),
+        ).also {
+            currentLevel = 0
+        }
+
+    override fun commandsFor(action: ToyControlAction): List<BleProtocolOperation> =
+        when (action) {
+            is ToyControlAction.Intensity -> updateLevel(action.value)
+            is ToyControlAction.Combined -> updateLevel(action.intensity)
+            is ToyControlAction.DualMotor -> updateLevel(action.strongestIntensity(status.intensityMax))
+            is ToyControlAction.Pattern -> updateLevel(status.intensityMax)
+            ToyControlAction.Stop -> stop()?.let(::listOf).orEmpty()
+        }
+
+    private fun updateLevel(level: Int): List<BleProtocolOperation> {
+        val targetLevel = level.coerceIn(0, status.intensityMax)
+        val targetPwm = levelToPwm(targetLevel)
+        val needsStartup = currentLevel == 0 && targetPwm in 1 until STARTUP_PWM
+        currentLevel = targetLevel
+        return buildList {
+            if (needsStartup) {
+                add(motorCommand(STARTUP_PWM))
+                add(BleProtocolOperation.Sleep(STARTUP_SETTLE_MS))
+            }
+            add(motorCommand(targetPwm))
+        }
+    }
+
+    private fun stop(): BleProtocolOperation.Write? {
+        if (currentLevel == 0) return null
+        currentLevel = 0
+        return motorCommand(0)
+    }
+
+    private fun levelToPwm(level: Int): Int {
+        if (level <= 0) return 0
+        return ((level.coerceIn(1, status.intensityMax) * 100) + (status.intensityMax / 2)) / status.intensityMax
+    }
+
+    private fun motorCommand(vibrationPwm: Int): BleProtocolOperation.Write =
+        BleProtocolOperation.Write(
+            characteristicUuid = functionUuid,
+            bytes = bytes(
+                COMMAND_MOTOR,
+                (2 shl 3) or 0x80,
+                0x01,
+                vibrationPwm.coerceIn(0, 100),
+            ),
+            withResponse = false,
+        )
+
+    private fun BleGattFingerprint.hasWhaleTailIdentity(): Boolean {
+        val manufacturerPayload = manufacturerData.toManufacturerDataMap()[0x2512] ?: return false
+        return manufacturerPayload.isWhaleTailManufacturerPayload()
+    }
+
+    private fun ByteArray.isWhaleTailManufacturerPayload(): Boolean {
+        if (size < 4 || unsignedByteAt(0) != 0x02) return false
+        val productId = unsignedByteAt(2)
+        val variantId = unsignedByteAt(3)
+        return productId == 0x1C && variantId == 0x00
+    }
+}
+
 internal object SistalkWeightless808Protocol : SistalkMonsterPartyDualVibrationProtocolBase(
     id = "sistalk_weightless_808",
     displayName = "失重808",
@@ -339,7 +439,6 @@ internal object SistalkWeightless808Protocol : SistalkMonsterPartyDualVibrationP
         val hardwareId = getOrNull(4)?.unsignedByte() ?: 0
         return when (productId) {
             0x07 -> variantId == 0x00 && hardwareId == 0x0D
-            0x1C -> variantId == 0x00
             else -> false
         }
     }
