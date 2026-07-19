@@ -245,6 +245,7 @@ class BridgeViewModel : ViewModel() {
                     syncRelayDevice()
                     toast("手机已上线", ToastType.Success)
                 }
+                "未连接" -> BridgePlatform.stopForegroundService()
             }
         },
         onLog = ::appendLog,

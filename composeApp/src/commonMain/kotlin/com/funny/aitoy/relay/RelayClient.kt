@@ -99,6 +99,8 @@ class RelayClient(
     private var connectionGeneration = 0
     private var heartbeatJob: Job? = null
     private var reconnectJob: Job? = null
+    private var commandIdleJob: Job? = null
+    private var lastCommandActivityMs = 0L
 
     fun connect(serverUrl: String, userToken: String) {
         connect(serverUrl, userToken, resetRetry = true)
@@ -110,6 +112,7 @@ class RelayClient(
         lastUserToken = userToken
         reconnectJob?.cancel()
         stopHeartbeat()
+        stopCommandIdleTimer()
         socket?.close(1000, "Reconnect")
         socket = null
         onlineConfirmed = false
@@ -135,6 +138,8 @@ class RelayClient(
                         uploadPolicy = AiToyTraceUploadPolicy.SessionOnce,
                     )
                     emitState("正在同步")
+                    lastCommandActivityMs = nowMs()
+                    startCommandIdleTimer(generation)
                     startHeartbeat()
                 }
 
@@ -144,6 +149,7 @@ class RelayClient(
                     val messageType = json.stringOrBlank("type")
                     when (messageType) {
                         "command" -> {
+                            markCommandActivity(generation)
                             trace(
                                 "AI 伙伴收到指令：$text",
                                 type = "relay_command_received",
@@ -152,6 +158,9 @@ class RelayClient(
                             if (json != null) emitCommand(json.toRelayCommand())
                         }
                         "heartbeat_ack" -> Unit
+                        "relay_idle_timeout" -> {
+                            enterIdleOffline(webSocket)
+                        }
                         "device_status_ack" -> {
                             if (onlineConfirmed) return
                             onlineConfirmed = true
@@ -176,19 +185,12 @@ class RelayClient(
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                     if (generation != connectionGeneration) return
                     stopHeartbeat()
+                    stopCommandIdleTimer()
                     socket = null
                     connecting = false
                     onlineConfirmed = false
                     if (code == SERVER_COMMAND_IDLE_CLOSE_CODE) {
-                        userRequestedOnline = false
-                        retryCount = 0
-                        reconnectJob?.cancel()
-                        trace(
-                            "AI 伙伴已空闲，下次使用时再上线",
-                            type = "relay_idle_offline",
-                            uploadPolicy = AiToyTraceUploadPolicy.Always,
-                        )
-                        emitState("未连接")
+                        enterIdleOffline(webSocket, closeSocket = false)
                         return
                     }
                     if (userRequestedOnline) {
@@ -212,6 +214,7 @@ class RelayClient(
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                     if (generation != connectionGeneration) return
                     stopHeartbeat()
+                    stopCommandIdleTimer()
                     socket = null
                     connecting = false
                     onlineConfirmed = false
@@ -220,7 +223,7 @@ class RelayClient(
                         emitState("等待重连")
                         scheduleReconnect()
                     } else {
-                        emitState("连接失败")
+                        emitState("未连接")
                     }
                 }
             },
@@ -261,6 +264,7 @@ class RelayClient(
         connectionGeneration += 1
         reconnectJob?.cancel()
         stopHeartbeat()
+        stopCommandIdleTimer()
         socket?.close(1000, "App disconnect")
         socket = null
         emitState("未连接")
@@ -324,6 +328,53 @@ class RelayClient(
     private fun stopHeartbeat() {
         heartbeatJob?.cancel()
         heartbeatJob = null
+    }
+
+    private fun markCommandActivity(generation: Int) {
+        if (generation != connectionGeneration) return
+        lastCommandActivityMs = nowMs()
+        startCommandIdleTimer(generation)
+    }
+
+    private fun startCommandIdleTimer(generation: Int) {
+        stopCommandIdleTimer()
+        commandIdleJob = scope.launch {
+            while (isActive) {
+                val remainingMs = COMMAND_IDLE_TIMEOUT_MS - (nowMs() - lastCommandActivityMs)
+                if (remainingMs <= 0) {
+                    if (generation == connectionGeneration && userRequestedOnline) {
+                        enterIdleOffline(socket)
+                    }
+                    return@launch
+                }
+                delay(min(remainingMs, COMMAND_IDLE_CHECK_INTERVAL_MS))
+            }
+        }
+    }
+
+    private fun stopCommandIdleTimer() {
+        commandIdleJob?.cancel()
+        commandIdleJob = null
+    }
+
+    private fun enterIdleOffline(webSocket: WebSocket?, closeSocket: Boolean = true) {
+        if (!userRequestedOnline && !connecting && !onlineConfirmed && socket == null) return
+        userRequestedOnline = false
+        connecting = false
+        onlineConfirmed = false
+        retryCount = 0
+        connectionGeneration += 1
+        reconnectJob?.cancel()
+        stopHeartbeat()
+        stopCommandIdleTimer()
+        if (socket === webSocket) socket = null
+        trace(
+            "AI 伙伴已空闲，下次使用时再上线",
+            type = "relay_idle_offline",
+            uploadPolicy = AiToyTraceUploadPolicy.Always,
+        )
+        if (closeSocket) webSocket?.close(1000, "command_idle_timeout")
+        emitState("未连接")
     }
 
     private fun scheduleReconnect() {
@@ -461,6 +512,8 @@ class RelayClient(
     companion object {
         private const val TAG = "AiToyRelay"
         private const val HEARTBEAT_INTERVAL_MS = 15_000L
+        private const val COMMAND_IDLE_TIMEOUT_MS = 30 * 60 * 1_000L
+        private const val COMMAND_IDLE_CHECK_INTERVAL_MS = 30 * 1_000L
         private const val SERVER_COMMAND_IDLE_CLOSE_CODE = 4001
     }
 }
